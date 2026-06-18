@@ -14,6 +14,7 @@ dependencies:
   - ipyfilechooser=0.6.*
   - ipython=8.36.*
   - ipywidgets=8.1.*
+  - ipyevents=2.0.*
   - ipykernel=6.29.*
   - tk=8.6.*
   - scipy=1.16.*
