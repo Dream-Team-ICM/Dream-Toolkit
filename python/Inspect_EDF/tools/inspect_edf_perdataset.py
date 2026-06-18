@@ -137,6 +137,47 @@ def extract_filter_value(s, tag):
     match = re.search(rf'{tag}[:\s]*([\d\.]+)\s*', s, re.IGNORECASE)
     return float(match.group(1)) if match else None
 
+def check_anonymization(patient_id, file_stem):
+    """
+    Inspect the EDF+ 'Local Patient ID' field for a real patient name.
+    EDF+ format: 'code sex birthdate name' (space-separated).
+    Compumedics encodes the name as 'LASTNAME_FIRSTNAME'; anonymized = 'X_X'.
+    The name subfield (4th token onward) is isolated, placeholder chars
+    (X/x/_ and whitespace) are stripped; anything remaining is a real name.
+    Filename cross-check: each name token with >=3 chars is searched in the
+    file stem (case-insensitive) to detect PII leaking into the file name.
+    """
+    parts = str(patient_id).split()
+    if len(parts) >= 4:
+        name_subfield = ' '.join(parts[3:])
+        id_format = 'edf+'
+    else:
+        name_subfield = str(patient_id).strip()
+        id_format = 'non-standard'
+    cleaned = re.sub(r'[Xx_\s]', '', name_subfield)
+    header_anonymized = (cleaned == '')
+    name_in_filename = False
+    if not header_anonymized:
+        stem_low = file_stem.lower()
+        for token in re.split(r'[_\s]+', name_subfield):
+            if len(token) >= 3 and token.lower() in stem_low:
+                name_in_filename = True
+                break
+    warning = ''
+    if not header_anonymized:
+        if name_in_filename:
+            warning = 'PII in header AND file name'
+        else:
+            warning = 'header NOT anonymized (file name looks clean)'
+    return {
+        'patient_id'        : str(patient_id).strip(),
+        'name_subfield'     : name_subfield,
+        'patient_id_format' : id_format,
+        'header_anonymized' : header_anonymized,
+        'name_in_filename'  : name_in_filename,
+        'anon_warning'      : warning,
+    }
+
 # function to plot df columns more properly
 def join_uniq(series):
     # Convertit tout en str (None -> "None", NaN -> "nan")
@@ -191,6 +232,7 @@ if not os.path.exists(summary_path):
         "| EEG_bad_resolution_edf.tsv | all | EEG channels with a resolution above threshold |\n"
         "| EOG_*.tsv | all | Same checks for EOG channels |\n"
         "| ECG_*.tsv | all | Same checks for ECG channels |\n"
+        "| anonymization_check_edf.tsv | all | One row per EDF file — patient_id field, name subfield, header_anonymized flag, warnings |\n"
         "| failed_edf_read.tsv | all | EDF files that could not be read |\n\n"
         "## Tools that generate this folder\n\n"
         "- **inspect_edf_voila.ipynb** — Interactive UI (run with `voila tools/inspect_edf_voila.ipynb`). Recommended for non-programmers.\n"
@@ -238,6 +280,7 @@ else:
 df_list = []
 # Initialize an empty list for files that could not be read
 failed_list = []
+anon_rows = []
 
 #%% loop over edf_file to extract information
 
@@ -250,8 +293,9 @@ for e, edf_path in enumerate(edf_files):
     
     # read file with the custom function
     try:
-        edf_header = read_edf_header_custom(edf_path) 
-        
+        edf_header = read_edf_header_custom(edf_path)
+        anon_info = check_anonymization(edf_header['patient_id'], edf_path.stem)
+
         # get subject name (corresponding to file_name)
         sub_name = edf_path.stem
         
@@ -297,12 +341,24 @@ for e, edf_path in enumerate(edf_files):
         df['sub_num'] = sub_num
         
         df['path'] = str(edf_path)
+        df['patient_name'] = anon_info['name_subfield']
         df['session'] = np.nan # session will be inferred later from file name component
-        
+
         # select only the columns of interest
-        df = df[['subject', 'group', 'session', 'path', 'sub_folder', 'sub_num', 'pre_fn_comp', 'post_fn_comp', 'channel', 'transducer_type', 
-                 'dimension', 'sampling_frequency', 'prefiltering', 'highpass', 'lowpass', 'notch', 'physical_min', 'physical_max', 'res_theoretical']]
-        
+        df = df[['subject', 'group', 'session', 'path', 'sub_folder', 'sub_num', 'pre_fn_comp', 'post_fn_comp', 'channel', 'transducer_type',
+                 'dimension', 'sampling_frequency', 'prefiltering', 'highpass', 'lowpass', 'notch', 'physical_min', 'physical_max', 'res_theoretical', 'patient_name']]
+
+        anon_rows.append({
+            'subject'           : sub_name,
+            'path'              : str(edf_path),
+            'patient_id'        : anon_info['patient_id'],
+            'name_subfield'     : anon_info['name_subfield'],
+            'patient_id_format' : anon_info['patient_id_format'],
+            'header_anonymized' : anon_info['header_anonymized'],
+            'name_in_filename'  : anon_info['name_in_filename'],
+            'anon_warning'      : anon_info['anon_warning'],
+        })
+
         # store subject data
         df_list.append(df)
 
@@ -376,6 +432,28 @@ if not failed_df.empty:
 df_full.to_csv(f'{summary_path}/FULL_summary.tsv', sep = '\t')
 print(f'\nSaving full informations from the dataset to:\n{summary_path}/FULL_summary.tsv')
 
+# save anonymization check TSV
+anon_df = pd.DataFrame(anon_rows, columns=['subject', 'path', 'patient_id', 'name_subfield',
+                                            'patient_id_format', 'header_anonymized',
+                                            'name_in_filename', 'anon_warning'])
+if not anon_df.empty:
+    anon_tsv_path = f'{summary_path}/anonymization_check_edf.tsv'
+    existing_anon = None
+    if os.path.exists(anon_tsv_path):
+        try:
+            existing_anon = pd.read_csv(anon_tsv_path, sep='\t', dtype=str)
+        except Exception:
+            existing_anon = None
+    if existing_anon is not None and not existing_anon.empty:
+        attempted = set(anon_df['subject'])
+        existing_anon = existing_anon[~existing_anon['subject'].isin(attempted)]
+        anon_df = pd.concat([existing_anon, anon_df], ignore_index=True)
+    anon_df.to_csv(anon_tsv_path, sep='\t', index=False)
+    print(f'Saving anonymization check to:\n{anon_tsv_path}')
+    n_warn = (~anon_df['header_anonymized'].astype(str).str.lower().isin(['true', '1'])).sum()
+    if n_warn > 0:
+        print(f'⚠️ {n_warn} file(s) with a non-anonymized header — see anonymization_check_edf.tsv')
+
 # print("\n\nDataset information:")
 # print(f"- Number of files: {len(df_full['subject'].unique())}")
 # print(f"- Number of participants: {len(df_full['sub_num'].unique())}")
@@ -409,7 +487,25 @@ with open(f"{summary_path}/EDF_inspection_report.html", "w", encoding="utf-8") a
     print('<h2>Global information:</h2>', file=f)
     print(f'<p class="indent1">- Number of files: {len(df_full["subject"].unique())}<p>', file=f)
     print(f'<p class="indent1">- Number of participants: {len(df_full["sub_num"].unique())}<p>', file=f)
-    
+
+    ###########################################################################
+    # anonymization check section
+    print('<h2>Anonymization check:</h2>', file=f)
+    if anon_df.empty:
+        print('<p class="indent1">No files processed.</p>', file=f)
+    else:
+        n_total_anon = len(anon_df)
+        anon_ok_mask = anon_df['header_anonymized'].astype(str).str.lower().isin(['true', '1'])
+        n_ok_anon = anon_ok_mask.sum()
+        n_warn_anon = n_total_anon - n_ok_anon
+        if n_warn_anon == 0:
+            print(f'<p class="indent1">✅ All {n_total_anon} files have an anonymized header.</p>', file=f)
+        else:
+            print(f'<p class="indent1">⚠️ {n_warn_anon}/{n_total_anon} files have a non-anonymized header:</p>', file=f)
+            for _, row in anon_df[~anon_ok_mask].iterrows():
+                print(f'<p class="indent2">- {html.escape(str(row["subject"]))}: '
+                      f'{html.escape(str(row["anon_warning"]))} — name: {html.escape(str(row["name_subfield"]))}</p>', file=f)
+
     ###########################################################################
     # extract EEG info
     # define common EEG label from the 10-10 convention
