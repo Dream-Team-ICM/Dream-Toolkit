@@ -21,6 +21,8 @@ Inspect_EDF/
 │   ├── inspect_edf_voila.ipynb                # EDF parameter inspector (Voila GUI)
 │   ├── inspect_edf_perdataset.py              # Batch EDF inspection per dataset
 │   ├── inspect_edf_perparticipant.py          # Batch EDF inspection per participant
+│   ├── anonymize_edf_voila.ipynb              # EDF header anonymizer (Voila GUI)
+│   ├── anonymize_edf.ipynb                    # EDF header anonymizer (Jupyter)
 │   ├── select&remap_channels_edf.ipynb        # Channel selection & harmonization (Jupyter)
 │   ├── select&remap_channels_edf_voila.ipynb  # Channel selection & harmonization (Voila)
 │   ├── check_hypno_config.py                  # Hypnogram validation (legacy script)
@@ -111,6 +113,35 @@ Files where the check cannot be performed (read failures) are already captured i
 **Skip + incremental workflow (`inspect_edf_voila.ipynb` and `inspect_edf.ipynb`)**: the Voila inspector decouples folder selection from running. Selecting the study folder only refreshes an info line ("N / M EDF file(s) already inspected" — counted against `FULL_summary_table_edf.tsv`); the scan runs on an explicit **Run inspection** button. A **"Skip files already inspected"** checkbox (checked by default) limits the run to EDF files not already in `FULL_summary_table_edf.tsv` (matched on the `path` column, normalized with `os.path.normcase`). All output tables use **merge/replace** semantics instead of being overwritten: rows for files processed this run replace their previous rows and rows for other files are kept, so the tables stay the full cumulative dataset across runs (`FULL_summary_table_edf.tsv` and `failed_edf_read.tsv` merge on file path; the per-channel summary, polarity, dynamic-range, resolution and missing/suspect tables merge on `subject`). The in-notebook **display** (file/EEG counts, channel/sampling-frequency/unit configs, polarity/range/resolution sections) reflects only the files read this run, so a full re-run (skip off) shows everything while an incremental run shows only the new files. TSV outputs are written with `index=False`. The batch `.py` scripts are unchanged.
 
 The Jupyter notebook `inspect_edf.ipynb` offers the same skip + cumulative-merge behaviour, adapted to its sequential cell-by-cell model: the **"Skip files already inspected"** checkbox and the "N / M already inspected" info line live in the folder-selection cell — running the scan cell is the "Run" action, there is no separate Run button. All output tables use the same merge/replace semantics through a shared `_merge_save()` helper (`subject` key for the per-channel tables; `path` key, normcase-matched, for `FULL_summary_table_edf.tsv` and `failed_edf_read.tsv`), written with `index=False`. The `EOG_suspect_edf.tsv` / `ECG_suspect_edf.tsv` tables were renamed from `.csv` for consistency (in both the Jupyter and Voila versions). When skip is ON, the in-notebook displays and the group/session inference reflect only the files read this run, while the saved tables stay cumulative.
+
+### 1bis. EDF Anonymizer (`anonymize_edf_voila.ipynb`, `anonymize_edf.ipynb`)
+
+Writes **header-anonymized copies** of EDF files in batch, so a non-anonymized dataset can be cleaned **without re-exporting** from the acquisition software (which is slow). It is the write-side companion to the EDF Inspector's anonymization check (section 1): the Inspector *detects* non-anonymized headers, this tool *fixes* them.
+
+**Safety — signal integrity guaranteed**: the tool never modifies an original file. For each file it does `shutil.copy2(src, dst)` then overwrites **only** the fixed-width identity fields of the 256-byte EDF general header. Every byte from offset 256 onward (per-channel headers + all signal data records) is left untouched. This is verified per file by comparing `sha256(file[256:])` of source vs. output **and** the total file size; both are recorded in the log (`signal_identical`, `size_identical`). A re-read of the output confirms the header now passes the anonymization check (`verified_anonymized`).
+
+**Fields rewritten** (matching the Compumedics anonymized-export format exactly, verified against real anonymized files in the dataset):
+- `patient_id` (bytes 8–88) → `X X 30-DEC-1899 X_X` — removes both the name (`X_X`) and the birthdate (replaced by the `30-DEC-1899` placeholder); code and sex become `X`.
+- `recording_id` (bytes 88–168) → the real `Startdate <dd-MMM-yyyy>` token is **kept**, only the trailing admin-code / technician / equipment fields are blanked to `X X X`. If no `Startdate` token is present, the date is derived from the `start_date` header field. Toggled by a checkbox (on by default).
+- `start_date` / `start_time` (bytes 168–184) → **left untouched**. Verified finding: Compumedics anonymization keeps the real recording night (it is not direct PII, and downstream sleep tools rely on it); only the birthdate inside `patient_id` is anonymized.
+
+**Filename anonymization**: when the patient name leaks into the file name (the `name_in_filename` case from the Inspector check), the tool proposes a new file name with the name token(s) (≥ 3 chars) stripped (e.g. `01016_DUPONT_N2` → `01016_N2`). The suggestion is editable per file in the review table; files whose name is already clean keep their name.
+
+**Companion files**: files sharing the EDF stem at a separator boundary (next char after the stem is `.`/`_`/`-`/space — so `73` does not match `731_...`) are copied and renamed to the new stem. Their **content is copied unchanged**: verified that Compumedics companions carry no patient name (`.edf.XML` is a `CMPStudyConfig` of scoring/montage settings; `*_event_xml.csv` and `_Hypnogram_*.txt` are event/stage data only). A warning reminds the user to re-check their own export profile.
+
+**Workflow (Voila)**:
+1. Select the data folder → every EDF is scanned (headers only) and classified; an info line reports `N total, M not anonymized, K already anonymized`.
+2. Review table — one row per file to process: an include checkbox (pre-ticked for non-anonymized files), an editable new-name field, and a colour-coded badge (`name in header AND file name` / `name in header only` / `already anonymized`). Options: anonymize `recording_id` trailing fields (on), skip files already in the output folder / recompute everything (on), also list already-anonymized files (off).
+3. Run → anonymized copies are written and the log is updated.
+
+**Outputs** (under `<study_folder>/anonymized/`, mirroring the EDF sub-folder tree):
+- `<subtree>/<new_stem>.edf` — header-anonymized copy (signal bytes identical to the original)
+- `<subtree>/<companions>` — hypnogram / `.edf.XML` / event companions, copied + renamed, content unchanged
+- `anonymization_log.tsv` — one row per processed file; columns: `original_path`, `anonymized_path`, `renamed`, `patient_id_before`, `patient_id_after`, `recording_id_before`, `recording_id_after`, `name_subfield`, `companions_copied`, `signal_identical`, `size_identical`, `verified_anonymized`, `status`. Merged across runs on the normalized `original_path`.
+- `anonymization_failed.tsv` — files that could not be anonymized (written only if any failed)
+- `FILES_DESCRIPTION.md` — describes the output files
+
+**Important**: originals are never modified. The tool explicitly instructs the user to **delete the original non-anonymized files themselves** after verifying the `anonymized/` folder.
 
 ### 2. Channel Selection & Remapping (`select&remap_channels_edf_voila.ipynb`)
 
