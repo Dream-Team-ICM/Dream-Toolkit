@@ -94,8 +94,14 @@ Inspects EDF file parameters across an entire dataset **without loading signal d
 - Signal clipping (dynamic range ≤ 500 µV)
 - Poor resolution (dynamic range ≥ 0.1 µV per digital unit)
 
+**Anonymization check** (section 1.3 in Voila / section 1.4 in Jupyter): inspects the EDF+ *Local Patient ID* field (80-byte header) to detect non-anonymized patient names. The EDF+ format encodes this field as `code sex birthdate name` (space-separated); Compumedics writes the name as `LASTNAME_FIRSTNAME` and replaces it with `X_X` on anonymized export. The check isolates the name sub-field (4th token onward), strips placeholder characters (`X`, `x`, `_`, whitespace), and flags the file if anything remains. Additionally, each non-placeholder name token (≥ 3 characters, to avoid false positives from short codes or initials) is searched case-insensitively in the file stem to detect PII leaking into the file name. Two warning levels:
+- `PII in header AND file name` — real name found in both header and file name.
+- `header NOT anonymized (file name looks clean)` — real name in header but file name appears clean; the important case where the file was renamed but the header was forgotten.
+Files where the check cannot be performed (read failures) are already captured in `failed_edf_read.tsv`. The `patient_name` field (raw name sub-field, before cleaning) is also stored as a column in `FULL_summary_table_edf.tsv` for quick cross-reference.
+
 **Outputs** (all written to `<study_folder>/summary_inspection/`, created on first run with a `README.md`):
-- `FULL_summary_table_edf.tsv` — all parameters for all channels/files
+- `FULL_summary_table_edf.tsv` — all parameters for all channels/files, including `patient_name` column (raw name sub-field from the EDF+ `patient_id` field)
+- `anonymization_check_edf.tsv` — per-file anonymization status; columns: `subject`, `path`, `patient_id`, `name_subfield`, `patient_id_format`, `header_anonymized`, `name_in_filename`, `anon_warning`
 - `EEG_summary_table.tsv`, `EOG_summary_table.tsv`, `ECG_summary_table.tsv`
 - `EEG_inverted_polarity_edf.tsv`, `EEG_bad_dynamic_range_edf.tsv`, `EEG_bad_resolution_edf.tsv`
 - `EDF_inspection_report.html`, `EDF_perParticipant_report.html`
