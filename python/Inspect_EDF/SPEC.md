@@ -17,22 +17,24 @@ Inspect_EDF/
 ├── CLAUDE.md                    # Development rules and design decisions
 ├── SPEC.md                      # This file — project specification
 ├── tools/
-│   ├── inspect_edf.ipynb                      # EDF parameter inspector (Jupyter)
-│   ├── inspect_edf_voila.ipynb                # EDF parameter inspector (Voila GUI)
-│   ├── inspect_edf_perdataset.py              # Batch EDF inspection per dataset
-│   ├── inspect_edf_perparticipant.py          # Batch EDF inspection per participant
-│   ├── anonymize_edf_voila.ipynb              # EDF header anonymizer (Voila GUI)
-│   ├── anonymize_edf.ipynb                    # EDF header anonymizer (Jupyter)
-│   ├── select&remap_channels_edf.ipynb        # Channel selection & harmonization (Jupyter)
-│   ├── select&remap_channels_edf_voila.ipynb  # Channel selection & harmonization (Voila)
+│   ├── 1_inspect_edf.ipynb                      # EDF parameter inspector (Jupyter)
+│   ├── 1_inspect_edf_voila.ipynb                # EDF parameter inspector (Voila GUI)
+│   ├── 1_inspect_edf_perdataset.py              # Batch EDF inspection per dataset
+│   ├── 1_inspect_edf_perparticipant.py          # Batch EDF inspection per participant
+│   ├── 1bis_anonymize_edf_voila.ipynb              # EDF header anonymizer (Voila GUI)
+│   ├── 1bis_anonymize_edf.ipynb                    # EDF header anonymizer (Jupyter)
+│   ├── 2_select&remap_channels_edf.ipynb        # Channel selection & harmonization (Jupyter)
+│   ├── 2_select&remap_channels_edf_voila.ipynb  # Channel selection & harmonization (Voila)
 │   ├── check_hypno_config.py                  # Hypnogram validation (legacy script)
-│   ├── remap_hypno.ipynb                      # Hypnogram label remapping (Jupyter)
-│   ├── remap_hypno_voila.ipynb                # Hypnogram label remapping (Voila GUI)
-│   ├── quality_overview_voila.ipynb           # Phase 1 quality overview (Voila GUI)
-│   ├── preprocessing_voila.ipynb             # Phase 2 preprocessing + epoch rejection (Voila GUI)
-│   ├── live_explore_1file.ipynb               # Interactive single-file explorer (Jupyter)
-│   ├── live_explore_1file_voila.ipynb         # Interactive single-file explorer (Voila GUI)
-│   ├── SpectralPower_&_AperiodicFit_PSG.py    # Spectral analysis pipeline
+│   ├── 3_remap_hypno.ipynb                      # Hypnogram label remapping (Jupyter)
+│   ├── 3_remap_hypno_voila.ipynb                # Hypnogram label remapping (Voila GUI)
+│   ├── 4_remap_events_edf.ipynb                 # Event label harmonization (Jupyter)
+│   ├── 4_remap_events_edf_voila.ipynb           # Event label harmonization (Voila GUI)
+│   ├── 5_quality_overview_voila.ipynb           # Quality overview (Voila GUI)
+│   ├── 6_preprocessing_voila.ipynb             # Preprocessing + epoch rejection (Voila GUI)
+│   ├── 7_live_explore_1file.ipynb               # Interactive single-file explorer (Jupyter)
+│   ├── 7_live_explore_1file_voila.ipynb         # Interactive single-file explorer (Voila GUI)
+│   ├── 8_SpectralPower_&_AperiodicFit_PSG.py    # Spectral analysis pipeline
 │   ├── generate_test_data.py                  # Inject controlled defects into a clean EDF (test fixtures)
 │   ├── test_data/                             # Real EDF fixtures + generated defective files + manifest
 │   ├── images/                                # Reference images for quality checks
@@ -59,33 +61,36 @@ Defined in `environment.yml`. Key packages:
 ### Interactive Voila apps (no-code mode)
 ```bash
 conda activate inspect_edf
-voila tools/inspect_edf_voila.ipynb
-voila "tools/select&remap_channels_edf_voila.ipynb"
-voila tools/remap_hypno_voila.ipynb
-voila tools/quality_overview_voila.ipynb
-voila tools/preprocessing_voila.ipynb
+voila tools/1_inspect_edf_voila.ipynb
+voila tools/1bis_anonymize_edf_voila.ipynb
+voila "tools/2_select&remap_channels_edf_voila.ipynb"
+voila tools/3_remap_hypno_voila.ipynb
+voila tools/4_remap_events_edf_voila.ipynb
+voila tools/5_quality_overview_voila.ipynb
+voila tools/6_preprocessing_voila.ipynb
+voila tools/7_live_explore_1file_voila.ipynb
 ```
 
 ### Standard Jupyter notebooks
 ```bash
 conda activate inspect_edf
-jupyter notebook tools/inspect_edf.ipynb
+jupyter notebook tools/1_inspect_edf.ipynb
 ```
 
 ### Batch Python scripts
 ```bash
 conda activate inspect_edf
-python tools/inspect_edf_perdataset.py
-python tools/inspect_edf_perparticipant.py
+python tools/1_inspect_edf_perdataset.py
+python tools/1_inspect_edf_perparticipant.py
 ```
 
 ## Tool descriptions
 
-### 1. EDF Inspector (`inspect_edf_voila.ipynb`, `inspect_edf_perdataset.py`, `inspect_edf_perparticipant.py`)
+### 1. EDF Inspector (`1_inspect_edf_voila.ipynb`, `1_inspect_edf_perdataset.py`, `1_inspect_edf_perparticipant.py`)
 
 Inspects EDF file parameters across an entire dataset **without loading signal data**. Reads EDF headers using a custom binary parser to handle encoding edge cases robustly (see design decisions in CLAUDE.md).
 
-**Sampling frequency derivation**: the per-channel 8-byte header field is the *number of samples per data record*, **not** the sampling frequency. The parser stores it as `samples_per_record` and computes `sampling_frequency = samples_per_record / duration_data_record`. In classic EDF the data-record duration is 1 s, so the two values coincide; but EDF+ files frequently use a different record duration (e.g. `0.1 s` → `40 / 0.1 = 400 Hz`, or `2 s` → `512 / 2 = 256 Hz`), so dividing by `duration_data_record` is required to match the rate reported by MNE. The computed value is kept as a string (e.g. `'256'`, `'400'`) to preserve the existing `sorted(set(...))` grouping and avoid TSV round-trip type changes. This applies to every tool sharing the custom header parser: `inspect_edf_voila.ipynb`, `inspect_edf.ipynb`, `inspect_edf_perdataset.py`, `inspect_edf_perparticipant.py`, and `select&remap_channels_edf(_voila).ipynb`.
+**Sampling frequency derivation**: the per-channel 8-byte header field is the *number of samples per data record*, **not** the sampling frequency. The parser stores it as `samples_per_record` and computes `sampling_frequency = samples_per_record / duration_data_record`. In classic EDF the data-record duration is 1 s, so the two values coincide; but EDF+ files frequently use a different record duration (e.g. `0.1 s` → `40 / 0.1 = 400 Hz`, or `2 s` → `512 / 2 = 256 Hz`), so dividing by `duration_data_record` is required to match the rate reported by MNE. The computed value is kept as a string (e.g. `'256'`, `'400'`) to preserve the existing `sorted(set(...))` grouping and avoid TSV round-trip type changes. This applies to every tool sharing the custom header parser: `1_inspect_edf_voila.ipynb`, `1_inspect_edf.ipynb`, `1_inspect_edf_perdataset.py`, `1_inspect_edf_perparticipant.py`, and `2_select&remap_channels_edf(_voila).ipynb`.
 
 **Checks performed for EEG, EOG, and ECG channels:**
 - Channel configuration and montage consistency across participants
@@ -110,11 +115,11 @@ Files where the check cannot be performed (read failures) are already captured i
 - `failed_edf_read.tsv` — files that could not be read
 - `README.md` — describes each output file and which tool generates it
 
-**Skip + incremental workflow (`inspect_edf_voila.ipynb` and `inspect_edf.ipynb`)**: the Voila inspector decouples folder selection from running. Selecting the study folder only refreshes an info line ("N / M EDF file(s) already inspected" — counted against `FULL_summary_table_edf.tsv`); the scan runs on an explicit **Run inspection** button. A **"Skip files already inspected"** checkbox (checked by default) limits the run to EDF files not already in `FULL_summary_table_edf.tsv` (matched on the `path` column, normalized with `os.path.normcase`). All output tables use **merge/replace** semantics instead of being overwritten: rows for files processed this run replace their previous rows and rows for other files are kept, so the tables stay the full cumulative dataset across runs (`FULL_summary_table_edf.tsv` and `failed_edf_read.tsv` merge on file path; the per-channel summary, polarity, dynamic-range, resolution and missing/suspect tables merge on `subject`). The in-notebook **display** (file/EEG counts, channel/sampling-frequency/unit configs, polarity/range/resolution sections) reflects only the files read this run, so a full re-run (skip off) shows everything while an incremental run shows only the new files. TSV outputs are written with `index=False`. The batch `.py` scripts are unchanged.
+**Skip + incremental workflow (`1_inspect_edf_voila.ipynb` and `1_inspect_edf.ipynb`)**: the Voila inspector decouples folder selection from running. Selecting the study folder only refreshes an info line ("N / M EDF file(s) already inspected" — counted against `FULL_summary_table_edf.tsv`); the scan runs on an explicit **Run inspection** button. A **"Skip files already inspected"** checkbox (checked by default) limits the run to EDF files not already in `FULL_summary_table_edf.tsv` (matched on the `path` column, normalized with `os.path.normcase`). All output tables use **merge/replace** semantics instead of being overwritten: rows for files processed this run replace their previous rows and rows for other files are kept, so the tables stay the full cumulative dataset across runs (`FULL_summary_table_edf.tsv` and `failed_edf_read.tsv` merge on file path; the per-channel summary, polarity, dynamic-range, resolution and missing/suspect tables merge on `subject`). The in-notebook **display** (file/EEG counts, channel/sampling-frequency/unit configs, polarity/range/resolution sections) reflects only the files read this run, so a full re-run (skip off) shows everything while an incremental run shows only the new files. TSV outputs are written with `index=False`. The batch `.py` scripts are unchanged.
 
-The Jupyter notebook `inspect_edf.ipynb` offers the same skip + cumulative-merge behaviour, adapted to its sequential cell-by-cell model: the **"Skip files already inspected"** checkbox and the "N / M already inspected" info line live in the folder-selection cell — running the scan cell is the "Run" action, there is no separate Run button. All output tables use the same merge/replace semantics through a shared `_merge_save()` helper (`subject` key for the per-channel tables; `path` key, normcase-matched, for `FULL_summary_table_edf.tsv` and `failed_edf_read.tsv`), written with `index=False`. The `EOG_suspect_edf.tsv` / `ECG_suspect_edf.tsv` tables were renamed from `.csv` for consistency (in both the Jupyter and Voila versions). When skip is ON, the in-notebook displays and the group/session inference reflect only the files read this run, while the saved tables stay cumulative.
+The Jupyter notebook `1_inspect_edf.ipynb` offers the same skip + cumulative-merge behaviour, adapted to its sequential cell-by-cell model: the **"Skip files already inspected"** checkbox and the "N / M already inspected" info line live in the folder-selection cell — running the scan cell is the "Run" action, there is no separate Run button. All output tables use the same merge/replace semantics through a shared `_merge_save()` helper (`subject` key for the per-channel tables; `path` key, normcase-matched, for `FULL_summary_table_edf.tsv` and `failed_edf_read.tsv`), written with `index=False`. The `EOG_suspect_edf.tsv` / `ECG_suspect_edf.tsv` tables were renamed from `.csv` for consistency (in both the Jupyter and Voila versions). When skip is ON, the in-notebook displays and the group/session inference reflect only the files read this run, while the saved tables stay cumulative.
 
-### 1bis. EDF Anonymizer (`anonymize_edf_voila.ipynb`, `anonymize_edf.ipynb`)
+### 1bis. EDF Anonymizer (`1bis_anonymize_edf_voila.ipynb`, `1bis_anonymize_edf.ipynb`)
 
 Writes **header-anonymized copies** of EDF files in batch, so a non-anonymized dataset can be cleaned **without re-exporting** from the acquisition software (which is slow). It is the write-side companion to the EDF Inspector's anonymization check (section 1): the Inspector *detects* non-anonymized headers, this tool *fixes* them.
 
@@ -143,7 +148,7 @@ Writes **header-anonymized copies** of EDF files in batch, so a non-anonymized d
 
 **Important**: originals are never modified. The tool explicitly instructs the user to **delete the original non-anonymized files themselves** after verifying the `anonymized/` folder.
 
-### 2. Channel Selection & Remapping (`select&remap_channels_edf_voila.ipynb`)
+### 2. Channel Selection & Remapping (`2_select&remap_channels_edf_voila.ipynb`)
 
 Interactive tool to select channels of interest and harmonize their labels across a heterogeneous dataset. Produces a JSON remapping configuration consumed by downstream analysis tools.
 
@@ -164,9 +169,9 @@ Condition 3 is required for EDFs exported by `mne.export.export_raw()`, which wr
 
 **Section 6 — Test the JSON**: applies each participant's remap + re-reference and reports the resulting channel configurations (harmonization succeeds when a single configuration remains). A **scope** toggle selects what to test — **Whole database** (default; every participant in the JSON that has an EDF in the folder, normcase-matched) or **New files (this session)**. The toggle and run button persist in their own area with results rendered below, so the test can be re-run with a changed scope (e.g. verify the just-modified participants, then the whole database) without redoing the workflow.
 
-**Jupyter twin parity (`select&remap_channels_edf.ipynb`)**: the Jupyter version implements the same skip + cumulative-merge workflow as the Voila, adapted to its sequential model. The **"Skip participants already configured"** checkbox and the "N / M already configured" info line live in the folder-selection cell (running the scan cell is the "Run" action). Save (Section 5) now **merges** this session's entries into the existing `remap_reref_persubject.json` instead of overwriting it, and the preview shows the merged result. Section 6 gains a **scope toggle** (`New files (this session)` / `Whole database`) placed in its own cell just above the test cell — change the toggle then re-run the test cell. All JSON reads use the same lenient loader as the Voila.
+**Jupyter twin parity (`2_select&remap_channels_edf.ipynb`)**: the Jupyter version implements the same skip + cumulative-merge workflow as the Voila, adapted to its sequential model. The **"Skip participants already configured"** checkbox and the "N / M already configured" info line live in the folder-selection cell (running the scan cell is the "Run" action). Save (Section 5) now **merges** this session's entries into the existing `remap_reref_persubject.json` instead of overwriting it, and the preview shows the merged result. Section 6 gains a **scope toggle** (`New files (this session)` / `Whole database`) placed in its own cell just above the test cell — change the toggle then re-run the test cell. All JSON reads use the same lenient loader as the Voila.
 
-### 3. Hypnogram Label Remapping (`remap_hypno_voila.ipynb`, `remap_hypno.ipynb`)
+### 3. Hypnogram Label Remapping (`3_remap_hypno_voila.ipynb`, `3_remap_hypno.ipynb`)
 
 Interactive tool to harmonize sleep stage labels across a heterogeneous database, converting different scoring conventions (e.g. `0,1,2,3,4` or `W,S1,S2,S3,S4`) to the standard AASM format (`W`, `N1`, `N2`, `N3`, `R`).
 
@@ -179,7 +184,7 @@ Interactive tool to harmonize sleep stage labels across a heterogeneous database
 4. **Save** — Writes remapped hypnograms next to originals using the output suffix defined in Section 1; end message confirms completion and recalls the suffix used
 5. **Verify** — Before/after configuration summary; verdict fails only if non-AASM labels remain (multiple configurations with valid AASM labels are acceptable — e.g. insomnia patients legitimately missing N3)
 
-**Hypnogram suffix auto-detection**: when the data folder is selected, the tool scans `.txt` files next to each EDF, counts candidate suffixes (all files per EDF are matched — no early break), and auto-fills the `Hypnogram suffix:` widget with the most common suffix. In case of equal counts, the **shortest** suffix is preferred — the goal is to select the raw (unremapped) hypnogram, not an already-processed version. This is the reverse of the strategy used in `quality_overview_voila` and `preprocessing_voila`, which prefer the longest suffix among candidates appearing for ≥50% of the maximum count. All detected suffixes and their counts are shown in a colour-coded info label below the widget (green = all EDFs matched, orange = partial match or no files found).
+**Hypnogram suffix auto-detection**: when the data folder is selected, the tool scans `.txt` files next to each EDF, counts candidate suffixes (all files per EDF are matched — no early break), and auto-fills the `Hypnogram suffix:` widget with the most common suffix. In case of equal counts, the **shortest** suffix is preferred — the goal is to select the raw (unremapped) hypnogram, not an already-processed version. This is the reverse of the strategy used in `5_quality_overview_voila` and `6_preprocessing_voila`, which prefer the longest suffix among candidates appearing for ≥50% of the maximum count. All detected suffixes and their counts are shown in a colour-coded info label below the widget (green = all EDFs matched, orange = partial match or no files found).
 
 **Key constants:**
 - `DEFAULT_MAPPING`: `0→W`, `1→N1`, `2→N2`, `3→N3`, `4→N3`, `5→R`, `?→W`, `S1→N1`…
@@ -192,44 +197,43 @@ Interactive tool to harmonize sleep stage labels across a heterogeneous database
 
 `check_hypno_config.py` is the legacy script that preceded this notebook; kept for reference.
 
-### 4. Spectral Analysis (`SpectralPower_&_AperiodicFit_PSG.py`)
+### 4. Event Label Harmonization (`4_remap_events_edf_voila.ipynb`, `4_remap_events_edf.ipynb`)
 
-Full PSG spectral pipeline: epoch rejection → PSD (Welch, 4 s windows) → aperiodic fit (SpecParam) → frequency band power extraction (Delta, Theta, Alpha, Sigma, Beta) → group-level statistics. Reads the channel remapping JSON produced by tool #2.
+Interactive tool to **visualize** the scored-event configurations present across a heterogeneous database and **harmonize** their raw labels to a single canonical vocabulary — the event analogue of tool #2 (channel selection & remapping). Scored events are annotated during sleep scoring and exported by Profusion/Compumedics (apnea, hypopnea, arousals, limb movements, PLM, SpO2 desaturation…).
 
-### 5. Live single-file explorer (`live_explore_1file.ipynb`, `live_explore_1file_voila.ipynb`)
+**Event sourcing (CSV-first / XML-fallback)**: a shared `load_events(edf_path)` helper reads the Compumedics `*_event_xml.csv` (`Name, Start, Duration` in seconds) first and, when it is absent, parses the `<ScoredEvents>` of the `*.edf.XML` (Profusion `CMPStudyConfig`; `<Input>` is ignored). Both sources were verified equivalent on ICEBERG. The `<ScoredEventSettings>` catalogue (the profile's possible event types) is **not** used for grouping.
 
-Interactive inspection of **one EDF file at a time** — load it once, then explore it live (inspired by ScoringHero). Unlike the batch tools it preloads the signal and stays interactive. It is a **QC + scoring-review companion**: it never modifies the EDF and writes outputs only on explicit button presses. Reuses the quality plots of `quality_overview` and the rejection logic of `preprocessing_voila`, applied to a single recording. Both delivery forms are kept in sync; the Voila version hides code (Voila strips sources by default).
+**Configuration grouping**: files are grouped by their `frozenset` of **unique event labels actually present** — two files with the same unique labels share one configuration even if their event counts/timing differ.
 
-**Section 1 — Load**: free file pickers for the EDF (required), the hypnogram `.txt` (optional), and a `remap_reref_persubject.json` (optional, matched to the participant by EDF filename stem, normcase-insensitive). The EDF header is parsed with the **custom binary parser** (no signal loaded) to list channels and auto-detect EEG/EOG/EMG; each channel set is offered as **checkboxes** with the detected channels pre-checked (correct as needed). EEG analysis channels come from the matched JSON remap keys when available, otherwise from the EEG checkboxes. Loading uses the established `include=`-at-read-time + `drop_suffix_duplicates` + `adapt_remap_dict_to_suffixes` pattern; EOG/EMG keep their original names. **Sampling rate**: the EEG native rate is the reference — the assembled montage is resampled to it so the whole scoring montage shares one time base. A global **Signal** toggle (Raw ↔ Preprocessed) governs every section; the preprocessed copy applies the per-participant re-reference (JSON `ref_channels`, or a manual average/none when no JSON) plus an optional bandpass (default 0.1–40 Hz). Reference channels are not dropped in the preprocessed copy so the channel set stays identical to the raw copy.
+**Workflow (sections):**
+1. **Scan** — select the data folder (recursive `rglob('*.edf')`); selecting the folder only refreshes an info line, the scan runs on an explicit **Run scan** button. A **"Skip labels already mapped"** checkbox (on by default) hides labels already present in an existing `event_remap.json` (incremental harmonization when a new cohort is added).
+1bis. **(Optional) CSV vs XML consistency check** — opt-in button; for every file having both companions, compares the CSV and the XML `<ScoredEvents>` (name + start + duration, tolerance 1e-3 s) and writes `event_source_mismatch.tsv`. Opt-in because it forces reading both files for every EDF.
+2. **Visualize configurations** — one panel per unique config (sorted labels + expandable file-id list) plus a global table of every raw label with its file count and total occurrences.
+3. **Harmonize labels** — one editable row per unique raw label (combobox pre-filled from `DEFAULT_EVENT_MAPPING`, free text allowed), with an **ignore** toggle (stored as `null`). Filtered by the skip checkbox.
+4. **Preview & save** — builds a flat `{raw_label: canonical_label}` mapping and **merges** it into `config_param/event_remap.json` via the lenient JSON loader (labels mapped this session replace their old value, all others kept; keys sorted). Unmapped non-ignored labels are reported and not saved.
+5. **Verify** — applies the saved mapping to every configuration, reports the resulting harmonized labels, and passes when no raw label is left unmapped (ignored labels count as handled). A scope dropdown can restrict the view to configs with unmapped labels.
 
-**Section 2 — Whole-recording overview (EEG)**: per-electrode quality view (amplitude histogram with Savitzky-Golay smoothing + peak detection, full time series, metrics table with the same flags/thresholds as `quality_overview`, YASA hypnospectrogram, whole-night PSD, and **mean PSD per sleep stage**). A **Run** button precomputes the figures for **all** electrodes for **both** the raw and preprocessed signal and caches them; switching the electrode dropdown or the Raw/Preprocessed toggle then displays the cached plots instantly, so the impact of preprocessing is immediately visible without recomputation.
+**`DEFAULT_EVENT_MAPPING`** (editable suggestions, snake_case canonical vocabulary): apnea subtypes kept (`apnea_obstructive` / `apnea_central` / `apnea_mixed`), `hypopnea`, `spo2_desaturation`, arousal subtypes kept (`arousal_respiratory` / `arousal_spontaneous` / `arousal_limb` / `arousal`), limb laterality collapsed (`limb_movement`, `plm`). `suggest_canonical()` also tolerates a trailing `(Left)`/`(Right)` marker.
 
-**Section 3 — Epoch explorer (EEG + EOG + EMG)**: gated behind a **Run** button. The **navigator** shows a spectrogram of a reference channel (viridis, colour-scaled to the p5–p99 dB range so it isn't flattened by the silent floor / artefact spikes) with the hypnogram line overlaid (twin axes: frequency left, stage right; white line with a dark halo for contrast), a bold cursor at the current epoch and enlarged event / modified-epoch markers. Run precomputes the navigator spectrogram for **both** signal sources so the Raw/Preprocessed toggle switches instantly (the epoch view is recomputed live); changing the reference channel needs a new Run. The **epoch view** stacks the scoring montage (EEG, then EOG, then EMG) for the current 30 s epoch (± context), with `*_event_xml.csv` annotations drawn as shaded spans, plus the per-epoch PSD and a p-p/gradient readout. **Navigation**: prev/next, jump-to-epoch slider, next-stage-change, and (when `ipyevents` is installed) **keyboard shortcuts** — ←/→ to step epochs, and `w/1/2/3/r/m/0` to score the current epoch. **Rescoring**: stage buttons reassign the current epoch (held in memory, modified epochs ticked on the navigator); **Save** writes `<hypno_stem>_rescored.txt` + `<hypno_stem>_rescore_log.tsv` next to the input hypnogram (AASM labels, one per line, original never overwritten).
+**Outputs** (under `<data_folder>/config_param/`):
+- `event_remap.json` — global flat `{raw_label: canonical_label}` (`null` = ignore), merged across runs
+- `event_source_mismatch.tsv` — only if the CSV-vs-XML check is run; columns `file_id, n_csv, n_xml, n_only_in_csv, n_only_in_xml, labels_only_in_csv, labels_only_in_xml, status`
+- `failed_event_read.tsv` — files with no readable event companion (only if any failed)
 
-**Section 4 — Quick epoch rejection (EEG, standalone)**: a **Compute** button runs the five rejection methods (per-stage amplitude, flat, gradient, 1/f error, 1/f R² — same logic and defaults as `preprocessing_voila`; 1/f off by default for speed and only if `specparam` is available) on the EEG channels of the active signal source. Shows the channels × epochs rejection heatmap with a hypnogram strip, a per-stage rejection summary, the **mean PSD per stage over clean vs rejected epochs** (gold-standard sanity check), and a **rejected-epoch inspector** (a dropdown of flagged epochs renders that epoch's montage + PSD inline and jumps the Section 3 explorer to it). **Save** exports `<edf_stem>_live_rejection_mask.tsv` (same per-(epoch, channel) schema as `preprocessing_voila`'s mask) next to the EDF — standalone QC, no `.fif` is written.
+**TODO**: back-port the XML fallback into `live_explore`'s `load_events_csv()` (see `tools/TODO_live_explore_event_xml_fallback.md`).
 
-**Rendering**: static matplotlib PNG for v1 (fast, no extra dependency, embeds into reports). A future migration of Section 3 to an interactive canvas (`ipympl`/Plotly) for click-to-seek and direct mouse annotation is tracked in `tools/TODO_live_explore_interactive_migration.md`.
+### 5. Quality overview (`5_quality_overview_voila.ipynb`)
 
-**Event annotations**: when a Compumedics `*_event_xml.csv` (columns `Name, Start, Duration` in seconds) is found next to the EDF, its events (arousals, apnea/hypopnea, limb movement, SpO2 desaturation…) are overlaid colour-coded on the Section 3 epoch view and ticked on the navigator.
-
-**Outputs** (written only on explicit Save): `<hypno_stem>_rescored.txt` + `<hypno_stem>_rescore_log.tsv` (next to the input hypnogram), `<edf_stem>_live_rejection_mask.tsv` (next to the EDF).
-
-## Planned modules (in development)
-
-### Preprocessing pipeline
-
-A preprocessing module is being developed to follow the inspection and channel-harmonization steps. It is structured in three phases.
-
-**Phase 1 — Quality overview (per participant, per channel)**
-Implemented as `tools/quality_overview_voila.ipynb`. Produces one `mne.Report` HTML per participant. For each EEG channel: signal amplitude histogram with Savitzky-Golay smooth + peak detection, time series, metrics table, and a YASA hypnospectrogram (0.1–40 Hz bandpass applied per-channel just before plotting). Flags suspect channels for priority inspection. At the end of each run, generates `dataset_overview.html` — a single-page dataset-level summary with statistics and distribution plots per electrode, consumed by Phase 2 to identify channels to exclude.
+*(Stable tool — formerly “Phase 1” of the preprocessing pipeline.)*
+Implemented as `tools/5_quality_overview_voila.ipynb`. Produces one `mne.Report` HTML per participant. For each EEG channel: signal amplitude histogram with Savitzky-Golay smooth + peak detection, time series, metrics table, and a YASA hypnospectrogram (0.1–40 Hz bandpass applied per-channel just before plotting). Flags suspect channels for priority inspection. At the end of each run, generates `dataset_overview.html` — a single-page dataset-level summary with statistics and distribution plots per electrode, consumed by Phase 2 to identify channels to exclude.
 
 **EDF scan**: recursive (`rglob('*.edf')`), so datasets organized in subfolders (e.g. `group1/`, `group2/`) are fully covered without needing to run the tool per subfolder.
 
-**Hypnogram suffix auto-detection**: when the data folder is selected, the tool scans `.txt` files next to each EDF, counts candidate suffixes (all files per EDF are matched — no early break), and auto-fills the `Hypno suffix:` widget. Selection rule: among suffixes whose count is ≥ 50% of the maximum count, the **longest** is preferred (more specific = remapped/processed version); count is the tiebreaker when lengths are equal. The 50% threshold prevents rare or accidental long suffixes from winning when remapping is far from complete. All detected suffixes and their counts are shown in a colour-coded info label below the widget (green = all EDFs matched, orange = partial match or no files found). The same rule applies in `preprocessing_voila`.
+**Hypnogram suffix auto-detection**: when the data folder is selected, the tool scans `.txt` files next to each EDF, counts candidate suffixes (all files per EDF are matched — no early break), and auto-fills the `Hypno suffix:` widget. Selection rule: among suffixes whose count is ≥ 50% of the maximum count, the **longest** is preferred (more specific = remapped/processed version); count is the tiebreaker when lengths are equal. The 50% threshold prevents rare or accidental long suffixes from winning when remapping is far from complete. All detected suffixes and their counts are shown in a colour-coded info label below the widget (green = all EDFs matched, orange = partial match or no files found). The same rule applies in `6_preprocessing_voila`.
 
 **Live output warnings**: if a hypnogram is not found, fails to load, has a length mismatch with the EDF, or contains unrecognised stage labels, a plain-text `⚠` warning is printed in the notebook output area immediately after the per-participant result line (in addition to the yellow banner already shown in the HTML report's Overview section).
 
-**Hypnogram label validation**: after mapping labels to YASA integers (`W→0`, `N1→1`, `N2→2`, `N3→3`, `R→4`), the tool checks for unrecognised labels. `MT` (movement time) is silently tolerated — YASA treats it as an artifact epoch (NaN). Any other unrecognised label triggers a warning. Two severity levels: if > 10% of epochs are unrecognised, `hypno_vec` is set to `None` (spectrogram skipped, error-level warning pointing to `remap_hypno_voila`); if ≤ 10%, `hypno_vec` is kept but a warning lists the unrecognised labels and their count. This catches hypnograms that were not yet remapped to AASM convention (e.g. `S1/S2/S3/S4` or raw numeric labels).
+**Hypnogram label validation**: after mapping labels to YASA integers (`W→0`, `N1→1`, `N2→2`, `N3→3`, `R→4`), the tool checks for unrecognised labels. `MT` (movement time) is silently tolerated — YASA treats it as an artifact epoch (NaN). Any other unrecognised label triggers a warning. Two severity levels: if > 10% of epochs are unrecognised, `hypno_vec` is set to `None` (spectrogram skipped, error-level warning pointing to `3_remap_hypno_voila`); if ≤ 10%, `hypno_vec` is kept but a warning lists the unrecognised labels and their count. This catches hypnograms that were not yet remapped to AASM convention (e.g. `S1/S2/S3/S4` or raw numeric labels).
 
 **Spectrogram fault tolerance**: the `yasa.hypno_upsample_to_data()` + `yasa.plot_spectrogram()` calls are wrapped in a `try/except`. If YASA raises an exception, the channel's spectrogram section in the HTML report shows the error message and processing continues to the next channel and participant without interruption.
 
@@ -252,7 +256,7 @@ Implemented as `tools/quality_overview_voila.ipynb`. Produces one `mne.Report` H
 `flat_pct` = fraction of consecutive sample pairs with \|diff\| < `max(2×ADC_step, 0.06 µV)`. `bounds_pct` = fraction of samples within 0.5 µV of the EDF physical_min/max header limits. `hist_extreme_pct` = fraction of samples in the outermost histogram bins. **Kurtosis is intentionally NOT used as a flagging criterion** — normal PSG EEG has physiologically high kurtosis (spindles, K-complexes produce values of 100–500), making it unreliable without per-subject normalization. `p99_abs_uV` and `p999_abs_uV` (99th and 99.9th percentile of |amplitude|) are recorded as informational metrics in `quality_summary.tsv` but are not currently used for flagging; they are useful for cross-channel and cross-dataset amplitude comparison.
 
 **`dataset_overview.html` — dataset-level summary**: generated at the end of every run from the full cumulative `quality_summary.tsv` (reflects all participants processed to date, not just the current run). Contains two levels:
-- **Global section (all electrodes pooled)**: stats table (mean / median / p5 / p25 / p75 / p95 per metric), n_peaks frequency table by electrode (flags DC drift and quantization cases), grouped boxplots (one subplot per key metric, x-axis = electrode — compares electrodes side by side).
+- **Global section (all electrodes pooled)**: stats table (mean / median / p5 / p25 / p75 / p95 per metric), **mean (median) by sleep stage table** (metrics as rows — `mean_uV`, `std_uV`, `flat_pct`, `bounds_pct`, `hist_extreme_pct`, `p99_abs_uV`, `p999_abs_uV` — stages W/N1/N2/N3/R as columns; shown only when `quality_summary_by_stage.tsv` is present), n_peaks frequency table by electrode (flags DC drift and quantization cases), pooled boxplots (one subplot per key metric; each subplot contains a **stage inset** in its upper-right corner showing per-stage boxplots with stage colours W/N1/N2/N3/R — inset shown only when stage data is available; stage colours: W `#969696`, N1 `#9e9ac8`, N2 `#807dba`, N3 `#6a51a3`, R `#c994c7`), grouped boxplots (one subplot per key metric, x-axis = electrode — compares electrodes side by side).
 - **Per-electrode sections**: stats table for that electrode only, boxplots of each metric's distribution across participants with individual data points overlaid (reveals outlier participants for that channel).
 
 Key metrics shown in plots: `std_uV`, `flat_pct`, `bounds_pct`, `hist_extreme_pct`, `p99_abs_uV`, `p999_abs_uV`. All numeric metrics (`mean_uV`, `kurtosis`, `skewness` included) appear in the stats tables. HTML is standalone (figures embedded as base64 PNG, no external dependencies).
@@ -261,24 +265,27 @@ Key metrics shown in plots: `std_uV`, `flat_pct`, `bounds_pct`, `hist_extreme_pc
 - `<data_folder>/reports_quality_overview/<relative_subfolder>/<file_id>_quality_overview.html` — HTML reports mirror the EDF subfolder structure under `reports_quality_overview/`
 - `<data_folder>/reports_quality_overview/quality_summary.tsv` — all numeric metrics for all channels, cumulative across runs (always at root); columns: `file_id`, `channel`, `mean_uV`, `std_uV`, `kurtosis`, `skewness`, `p99_abs_uV`, `p999_abs_uV`, `flat_pct`, `bounds_pct`, `hist_extreme_pct`, `n_peaks`, `suspect_reason`, `exclude` (last two columns)
 - `<data_folder>/reports_quality_overview/dataset_overview.html` — dataset-level statistics and plots (always at root, regenerated each run)
+- `<data_folder>/reports_quality_overview/quality_summary_by_stage.tsv` — key metrics split by sleep stage, one row per `file_id × channel × stage`; columns: `file_id`, `channel`, `stage`, `mean_uV`, `std_uV`, `flat_pct`, `bounds_pct`, `hist_extreme_pct`, `p99_abs_uV`, `p999_abs_uV`. Populated only for participants with a valid hypnogram. Cumulative merge: rows for `file_id ∈ attempted_ids` are replaced, all others kept (same as `quality_summary.tsv`).
 - `<data_folder>/reports_quality_overview/failed_files.tsv` — files that could not be read (at root)
 
 **End-of-run summary** (printed in the notebook output): participants processed, participants with ≥1 flagged channel, total flagged channels, files failed to load, path to `dataset_overview.html`.
 
-**Phase 2 — Preprocessing + epoch rejection** (`tools/preprocessing_voila.ipynb`)
+### 6. Preprocessing + epoch rejection (`6_preprocessing_voila.ipynb`)
+
+*(Stable tool — formerly “Phase 2” of the preprocessing pipeline.)*
 
 Implemented as a Voila notebook with four sections: (1) path configuration, (2) preprocessing and rejection parameters, (3) participant selection, (4) processing loop.
 
 **Inputs**:
 - `quality_summary.tsv` from Phase 1 — `exclude` column identifies channels to drop before preprocessing
-- `remap_reref_persubject.json` from `select&remap_channels_edf` — drives channel remapping and re-referencing per participant
+- `remap_reref_persubject.json` from `2_select&remap_channels_edf` — drives channel remapping and re-referencing per participant
 - Raw EDF files and remapped hypnograms (default suffix `_Hypnogram_remapped.txt`)
 
 **Channel-name handling when loading EDF data from notebook outputs** (critical):
 
 The EDF files on disk carry their **original** acquisition channel names (e.g. `Fp1, C3, O1, A2`), usually alongside non-montage channels (ECG, respiration, SpO2, position) that may be sampled at a **higher rate** than the EEG (e.g. ECG at 512 Hz while EEG is at 256 Hz). The config/report files refer to channels by their **harmonized (remapped)** names:
 - `remap_reref_persubject.json` stores the mapping original → remapped, e.g. `{"Fp1":"F","C3":"C","O1":"O","A2":"M"}`. Its **keys are the original EDF names**, its values the harmonized names.
-- `quality_summary.tsv` lists each channel under its **remapped** name, because `quality_overview_voila` renames the channels (`raw.rename_channels`) *before* computing per-channel metrics. So the `exclude` flags and the channel checkboxes derived from it are expressed in remapped names.
+- `quality_summary.tsv` lists each channel under its **remapped** name, because `5_quality_overview_voila` renames the channels (`raw.rename_channels`) *before* computing per-channel metrics. So the `exclude` flags and the channel checkboxes derived from it are expressed in remapped names.
 
 Both tools load the EDF with the same robust pattern — `include=` evaluated **at read time** using the **original** names taken straight from the remap keys, with `preload=False` so no signal is read yet:
 ```python
@@ -290,11 +297,11 @@ raw.rename_channels(adapt_remap_dict_to_suffixes(raw, sub_config['remap']))
 Why `include=` at read time (and **not** a lazy `raw.pick(...)` after loading):
 - **Avoids an MNE EDF-reader bug**: reading a channel *subset* lazily (`read_raw_edf(preload=False)` with no `include`, then `pick`, then `load_data`) raises a bare `AssertionError` (`max(n_smp_read) == smp_exp` in `mne/io/edf/edf.py`) whenever the subset **excludes the file's highest-sampling-rate channel** — exactly the case for a PSG where the ECG (512 Hz) is dropped and only EEG (256 Hz) is kept. Passing `include=` at read time rebuilds the record structure for the included set, so the assertion never fires. (This is why a bare, message-less error surfaced during development.)
 - **Preserves the native sampling rate**: with only EEG channels included, MNE's common sampling rate stays at the EEG rate (256 Hz). Loading *all* channels first (`preload=True` on the full montage) would upsample the EEG to the file max (512 Hz) — a silent change of semantics.
-- **No inverse-remap dictionary**: the include list is `list(remap.keys())` directly, identical to `quality_overview_voila` — the two tools stay consistent.
+- **No inverse-remap dictionary**: the include list is `list(remap.keys())` directly, identical to `5_quality_overview_voila` — the two tools stay consistent.
 
 The two tools then differ only in what follows:
-- `quality_overview_voila` analyses **every** remap channel, so it keeps them all (uses `preload=True`, no further selection).
-- `preprocessing_voila` lets the user deselect channels in the UI (selection in **remapped** names). After the rename it drops the de-selected channels, then calls `raw.load_data()` — so the signal is read from disk **only for the channels actually kept**:
+- `5_quality_overview_voila` analyses **every** remap channel, so it keeps them all (uses `preload=True`, no further selection).
+- `6_preprocessing_voila` lets the user deselect channels in the UI (selection in **remapped** names). After the rename it drops the de-selected channels, then calls `raw.load_data()` — so the signal is read from disk **only for the channels actually kept**:
   ```python
   present = [ch for ch in selected_channels if ch in raw.ch_names]   # remapped namespace, post-rename
   raw.drop_channels([ch for ch in raw.ch_names if ch not in present])
@@ -302,7 +309,7 @@ The two tools then differ only in what follows:
   ```
   A `present`-empty guard (e.g. if the rename failed) marks the participant as failed and skips it, so a single bad file never crashes the run.
 
-**Shared utility functions** (defined identically in `quality_overview_voila` and `preprocessing_voila`, used right after `read_raw_edf`):
+**Shared utility functions** (defined identically in `5_quality_overview_voila` and `6_preprocessing_voila`, used right after `read_raw_edf`):
 - `drop_suffix_duplicates(raw)` — MNE ≥ 1.8 appends `-0`/`-1` to duplicate channel names; this keeps only the `-0` variant and drops the rest. Returns `(raw, dropped_list)`.
 - `adapt_remap_dict_to_suffixes(raw, remap_dict)` — rewrites the remap dict so a base name (`Fp1`) matches MNE's suffixed name (`Fp1-0`) when duplicates were present, so `rename_channels` still applies.
 
@@ -322,7 +329,7 @@ All methods operate on the raw epoch data in µV (`epochs.get_data() * 1e6`, sha
 | **Amplitude** | Peak-to-peak = `max(epoch) − min(epoch)` | W: 300, N1: 250, N2/N3: 200, REM: 250 µV | Per-stage threshold; W/REM more lenient because muscle and eye-movement artefacts are physiologically common in those stages. Equivalent to MNE's `drop_bad(reject=...)` criterion. |
 | **Flat signal** | Peak-to-peak < threshold | 1 µV | Detects disconnected electrodes or amplifier saturation within a single epoch. Logically identical to MNE's `drop_bad(flat=...)` criterion: both compare `ptp` against a low-amplitude threshold. |
 | **Gradient** | `max(|diff(epoch)|)` across time | 100 µV/sample | Maximum sample-to-sample absolute difference; sensitive to sudden jumps, electrode pops, and movement artefacts not captured by peak-to-peak. `diff` and `max` both operate on `axis=-1` (time axis) to handle the 3D `(n_epochs, n_channels, n_times)` array correctly. |
-| **Manual events** *(placeholder)* | Manually scored events (limb movement, apnea, micro-arousal) | — | Section reserved in code with `# TODO` comment. Format TBD: EDF annotations vs. XML vs. CSV. Not yet implemented. |
+| **Manual events** *(planned — Phase A)* | Scored events (arousal, apnea, hypopnea, limb movement…) overlapping the epoch | — | Format resolved: events harmonized via `event_remap.json` (tool 4), loaded with the shared CSV-first / XML-fallback `load_events()`. Design in *Planned modules → Event-based epoch rejection (Phase A)*. |
 | **1/f fit quality** | Specparam aperiodic fit on Welch PSD (4 s windows, 2–30 Hz, `aperiodic_mode='fixed'`, `max_n_peaks=0`) | MAE > 0.15 OR R² < 0.95 | Fit restricted to ≥2 Hz to limit influence of slow-wave non-stationarity. `max_n_peaks=0` skips peak detection for speed (we only need the aperiodic metrics). A failed fit is treated as a double flag (both error and R²). |
 
 **Heatmap — `_rejection_heatmap.png`**: channels (Y-axis) × epochs (X-axis); each cell coloured by the flagging method with priority encoding when multiple methods fire. A hypnogram strip is drawn above the main heatmap. Colour scheme: dark purple = none, red = amplitude, blue = flat, orange = gradient, yellow = 1/f error, green = 1/f R², dark red = multiple. Title includes overall rejection percentage.
@@ -340,14 +347,57 @@ All methods operate on the raw epoch data in µV (`epochs.get_data() * 1e6`, sha
 - `preprocessing_phase2_global_rejection.tsv` — concatenation of all `_rejection_log.tsv` files across participants
 - `preprocessing_phase2_failed.tsv` — participants that could not be processed (EDF not found, config missing, hypno mismatch, etc.)
 
-**Phase 2b — Interactive QC** *(future)*
+### 7. Live single-file explorer (`7_live_explore_1file.ipynb`, `7_live_explore_1file_voila.ipynb`)
+
+Interactive inspection of **one EDF file at a time** — load it once, then explore it live (inspired by ScoringHero). Unlike the batch tools it preloads the signal and stays interactive. It is a **QC + scoring-review companion**: it never modifies the EDF and writes outputs only on explicit button presses. Reuses the quality plots of `quality_overview` and the rejection logic of `6_preprocessing_voila`, applied to a single recording. Both delivery forms are kept in sync; the Voila version hides code (Voila strips sources by default).
+
+**Section 1 — Load**: free file pickers for the EDF (required), the hypnogram `.txt` (optional), and a `remap_reref_persubject.json` (optional, matched to the participant by EDF filename stem, normcase-insensitive). The EDF header is parsed with the **custom binary parser** (no signal loaded) to list channels and auto-detect EEG/EOG/EMG; each channel set is offered as **checkboxes** with the detected channels pre-checked (correct as needed). EEG analysis channels come from the matched JSON remap keys when available, otherwise from the EEG checkboxes. Loading uses the established `include=`-at-read-time + `drop_suffix_duplicates` + `adapt_remap_dict_to_suffixes` pattern; EOG/EMG keep their original names. **Sampling rate**: the EEG native rate is the reference — the assembled montage is resampled to it so the whole scoring montage shares one time base. A global **Signal** toggle (Raw ↔ Preprocessed) governs every section; the preprocessed copy applies the per-participant re-reference (JSON `ref_channels`, or a manual average/none when no JSON) plus an optional bandpass (default 0.1–40 Hz). Reference channels are not dropped in the preprocessed copy so the channel set stays identical to the raw copy.
+
+**Section 2 — Whole-recording overview (EEG)**: per-electrode quality view (amplitude histogram with Savitzky-Golay smoothing + peak detection, full time series, metrics table with the same flags/thresholds as `quality_overview`, YASA hypnospectrogram, whole-night PSD, and **mean PSD per sleep stage**). A **Run** button precomputes the figures for **all** electrodes for **both** the raw and preprocessed signal and caches them; switching the electrode dropdown or the Raw/Preprocessed toggle then displays the cached plots instantly, so the impact of preprocessing is immediately visible without recomputation.
+
+**Section 3 — Epoch explorer (EEG + EOG + EMG)**: gated behind a **Run** button. The **navigator** shows a spectrogram of a reference channel (viridis, colour-scaled to the p5–p99 dB range so it isn't flattened by the silent floor / artefact spikes) with the hypnogram line overlaid (twin axes: frequency left, stage right; white line with a dark halo for contrast), a bold cursor at the current epoch and enlarged event / modified-epoch markers. Run precomputes the navigator spectrogram for **both** signal sources so the Raw/Preprocessed toggle switches instantly (the epoch view is recomputed live); changing the reference channel needs a new Run. The **epoch view** stacks the scoring montage (EEG, then EOG, then EMG) for the current 30 s epoch (± context), with `*_event_xml.csv` annotations drawn as shaded spans, plus the per-epoch PSD and a p-p/gradient readout. **Navigation**: prev/next, jump-to-epoch slider, next-stage-change, and (when `ipyevents` is installed) **keyboard shortcuts** — ←/→ to step epochs, and `w/1/2/3/r/m/0` to score the current epoch. **Rescoring**: stage buttons reassign the current epoch (held in memory, modified epochs ticked on the navigator); **Save** writes `<hypno_stem>_rescored.txt` + `<hypno_stem>_rescore_log.tsv` next to the input hypnogram (AASM labels, one per line, original never overwritten).
+
+**Section 4 — Quick epoch rejection (EEG, standalone)**: a **Compute** button runs the five rejection methods (per-stage amplitude, flat, gradient, 1/f error, 1/f R² — same logic and defaults as `6_preprocessing_voila`; 1/f off by default for speed and only if `specparam` is available) on the EEG channels of the active signal source. Shows the channels × epochs rejection heatmap with a hypnogram strip, a per-stage rejection summary, the **mean PSD per stage over clean vs rejected epochs** (gold-standard sanity check), and a **rejected-epoch inspector** (a dropdown of flagged epochs renders that epoch's montage + PSD inline and jumps the Section 3 explorer to it). **Save** exports `<edf_stem>_live_rejection_mask.tsv` (same per-(epoch, channel) schema as `6_preprocessing_voila`'s mask) next to the EDF — standalone QC, no `.fif` is written.
+
+**Rendering**: static matplotlib PNG for v1 (fast, no extra dependency, embeds into reports). A future migration of Section 3 to an interactive canvas (`ipympl`/Plotly) for click-to-seek and direct mouse annotation is tracked in `tools/TODO_live_explore_interactive_migration.md`.
+
+**Event annotations**: when a Compumedics `*_event_xml.csv` (columns `Name, Start, Duration` in seconds) is found next to the EDF, its events (arousals, apnea/hypopnea, limb movement, SpO2 desaturation…) are overlaid colour-coded on the Section 3 epoch view and ticked on the navigator.
+
+**Outputs** (written only on explicit Save): `<hypno_stem>_rescored.txt` + `<hypno_stem>_rescore_log.tsv` (next to the input hypnogram), `<edf_stem>_live_rejection_mask.tsv` (next to the EDF).
+
+### 8. Spectral Analysis (`8_SpectralPower_&_AperiodicFit_PSG.py`)
+
+Full PSG spectral pipeline: epoch rejection → PSD (Welch, 4 s windows) → aperiodic fit (SpecParam) → frequency band power extraction (Delta, Theta, Alpha, Sigma, Beta) → group-level statistics. Reads the channel remapping JSON produced by tool #2.
+
+**Planned**: adapt this batch script into a Voila/Jupyter notebook (keeping a `.py` batch twin) so it integrates with the rest of the toolbox like the other tools.
+
+## Planned modules (in development)
+
+Modules still in development. The quality-overview (5) and preprocessing (6) tools above are stable and were promoted out of this section.
+
+### Event-based epoch rejection (Phase A)
+
+Implements the **"Manual events"** rejection method reserved in `6_preprocessing_voila.ipynb` (and mirrored in `7_live_explore_1file`'s quick rejection), now that event harmonization exists (tool 4). Design:
+- Load `config_param/event_remap.json`; read each file's events with the shared `load_events()` (CSV-first / XML-fallback); map raw → canonical labels.
+- New UI block "Reject epochs overlapping events": a multiselect of canonical event types (or inferred categories — `apnea_*`, `arousal_*`, `plm`, `limb_movement`, `spo2_*`) that should flag an epoch, an optional **minimum overlap (s)** (default 0 = any overlap) and an optional **pad (s)** around each event.
+- For each 30 s epoch, flag it when it overlaps any selected event by ≥ the minimum overlap. The flag is epoch-level (replicated across channels in the mask).
+- Add a `flag_event` column to the per-(epoch, channel) mask and `epochs.metadata`, a new heatmap colour, and a row per (stage, `method=event`) in `_rejection_log.tsv`.
+
+### Event-epoch visualizer (Phase B)
+
+Helps decide whether a given event *type* is worth feeding into Phase A. Extends `7_live_explore_1file`'s Section 3 (which already overlays `*_event_xml.csv` spans):
+- an **event-type filter** on the navigator: "jump to next/previous epoch overlapping event type X", with a per-type count;
+- a per-type **accept/reject decision** widget that writes a small `event_type_decisions.tsv` feeding Phase A's default selection.
+Requires the XML fallback in `load_events_csv()` (see `tools/TODO_live_explore_event_xml_fallback.md`).
+
+### Interactive QC of rejected epochs (Phase 2b)
 Load `_all-epo.fif` + `_rejection_mask.tsv`, display the heatmap for navigation, show the raw signal of flagged epochs for visual inspection, allow manual override of individual entries in the mask, then save a final `{file_id}_clean-epo.fif` with only the validated-clean epochs.
 
 ### Test data infrastructure
 
 `tools/generate_test_data.py` produces controlled-defect EDF files from a clean baseline (`tools/test_data/73.edf`). It uses the channel list from `tools/test_data/config_param/remap_reref_persubject.json` to keep only the relevant EEG channels (currently `A2, C3, Fp1, O1`), making each output ~110 MB. Each generated file injects **one** defect on a specified channel; a `combined` file mixes three defects on different channels for integration testing.
 
-Each defect file is given a unique participant-like ID (731–738) so that `select&remap_channels_edf` does not group them all under participant `73`. The ID mapping is defined in `DEFECT_IDS` in `generate_test_data.py`. The script also writes entries for each generated file into `config_param/remap_reref_persubject.json` (copied from the `73` entry).
+Each defect file is given a unique participant-like ID (731–738) so that `2_select&remap_channels_edf` does not group them all under participant `73`. The ID mapping is defined in `DEFECT_IDS` in `generate_test_data.py`. The script also writes entries for each generated file into `config_param/remap_reref_persubject.json` (copied from the `73` entry).
 
 | Output file (`tools/test_data/`) | Channel | Injected defect | Expected detection |
 |---|---|---|---|
