@@ -235,10 +235,10 @@ if not os.path.exists(summary_path):
         "| anonymization_check_edf.tsv | all | One row per EDF file — patient_id field, name subfield, header_anonymized flag, warnings |\n"
         "| failed_edf_read.tsv | all | EDF files that could not be read |\n\n"
         "## Tools that generate this folder\n\n"
-        "- **inspect_edf_voila.ipynb** — Interactive UI (run with `voila tools/inspect_edf_voila.ipynb`). Recommended for non-programmers.\n"
-        "- **inspect_edf.ipynb** — Jupyter notebook version with visible code cells. Use for debugging.\n"
-        "- **inspect_edf_perdataset.py** — Script version; processes a full dataset folder in one shot.\n"
-        "- **inspect_edf_perparticipant.py** — Script version; generates one report per participant.\n"
+        "- **1_inspect_edf_voila.ipynb** — Interactive UI (run with `voila tools/1_inspect_edf_voila.ipynb`). Recommended for non-programmers.\n"
+        "- **1_inspect_edf.ipynb** — Jupyter notebook version with visible code cells. Use for debugging.\n"
+        "- **1_inspect_edf_perdataset.py** — Script version; processes a full dataset folder in one shot.\n"
+        "- **1_inspect_edf_perparticipant.py** — Script version; generates one report per participant.\n"
     )
     with open(f'{summary_path}/FILES_DESCRIPTION.md', 'w', encoding='utf-8') as rf:
         rf.write(readme_text)
@@ -561,7 +561,7 @@ with open(f"{summary_path}/EDF_inspection_report.html", "w", encoding="utf-8") a
         if len(ch_config_dict) > 1:
             print(f'<p>⚠️ {len(ch_config_dict)} different EEG configurations found</p>', file=f)
             print('<p class="indent2">You will have to harmonize the number and the name of channels for your analysis</p>', file=f)
-            print('<p class="indent2"><i>You can use the notebook "select&remap_channels_edf" to do it</i></p>', file=f)
+            print('<p class="indent2"><i>You can use the notebook "2_select&remap_channels_edf" to do it</i></p>', file=f)
         else:
             print('<p>✅ All your participants have the same EEG channels</p>', file=f)
         #______________________________________________________________________
@@ -578,7 +578,7 @@ with open(f"{summary_path}/EDF_inspection_report.html", "w", encoding="utf-8") a
         if len(sf_config_dict) > 1:
             print(f'<p>⚠️ {len(sf_config_dict)} different EEG sampling frequencies found: {join_uniq(df_full_ch["sampling_frequency"])} Hz</p>', file=f)
             print('<p class="indent2">You can either re-export your data or downsample to a common sampling frequency for your analysis</p>', file=f)
-            print('<p class="indent2"><i>You can use the notebook "inspect_edf_voila.ipynb" to identify which participants need to be re-exported</i></p>', file=f)
+            print('<p class="indent2"><i>You can use the notebook "1_inspect_edf_voila.ipynb" to identify which participants need to be re-exported</i></p>', file=f)
         else:
             print(f'<p>✅ All your participants have the same EEG sampling frequency: {join_uniq(df_full_ch["sampling_frequency"])} Hz</p>', file=f)
         #______________________________________________________________________
@@ -600,7 +600,7 @@ with open(f"{summary_path}/EDF_inspection_report.html", "w", encoding="utf-8") a
             for idx, row in config_filters.iterrows():
                 print(f'<p class="indent3">filter config. {idx+1}: hp = {row["highpass"]} Hz; lp = {row["lowpass"]} Hz; notch = {row["notch"]} Hz<br></p>', file=f)
             print('<p class="indent2">You can either re-export your data or filter your data to a common fequency</p>', file=f)
-            print('<p class="indent2"><i>You can use the notebook "inspect_edf_voila.ipynb" to identify which participants need to be re-exported or filtered</i></p>', file=f)
+            print('<p class="indent2"><i>You can use the notebook "1_inspect_edf_voila.ipynb" to identify which participants need to be re-exported or filtered</i></p>', file=f)
         else:
             print(f'<p>✅ All your participants have the same EEG filters: hp = {join_uniq(config_filters["highpass"])} Hz; lp = {join_uniq(config_filters["lowpass"])} Hz; notch = {join_uniq(config_filters["notch"])} Hz</p>', file=f)
         #______________________________________________________________________
@@ -707,7 +707,7 @@ with open(f"{summary_path}/EDF_inspection_report.html", "w", encoding="utf-8") a
         if len(eog_config_dict) > 1:
             print(f'<p>⚠️ {len(eog_config_dict)} different EOG configurations found</p>', file=f)
             print('<p class="indent2">You will have to harmonize the number and the name of channels for your analysis</p>', file=f)
-            print('<p class="indent2"><i>You can use the notebook "select&remap_channels_edf" to do it</i></p>', file=f)
+            print('<p class="indent2"><i>You can use the notebook "2_select&remap_channels_edf" to do it</i></p>', file=f)
         else:
             print('<p>✅ All your participants have the same EOG channels</p>', file=f)
         #______________________________________________________________________
@@ -724,7 +724,7 @@ with open(f"{summary_path}/EDF_inspection_report.html", "w", encoding="utf-8") a
         if len(sfeog_config_dict) > 1:
             print(f'<p>⚠️ {len(sfeog_config_dict)} different EOG sampling frequencies found: {join_uniq(df_full_eog["sampling_frequency"])} Hz</p>', file=f)
             print('<p class="indent2">You can either re-export your data or downsample to a common sampling frequency for your analysis</p>', file=f)
-            print('<p class="indent2"><i>You can use the notebook "inspect_edf_voila.ipynb" to identify which participants need to be re-exported</i></p>', file=f)
+            print('<p class="indent2"><i>You can use the notebook "1_inspect_edf_voila.ipynb" to identify which participants need to be re-exported</i></p>', file=f)
         else:
             print(f'<p>✅ All your participants have the same EOG sampling frequency: {join_uniq(df_full_eog["sampling_frequency"])} Hz</p>', file=f)
         #______________________________________________________________________
@@ -746,7 +746,7 @@ with open(f"{summary_path}/EDF_inspection_report.html", "w", encoding="utf-8") a
             for idx, row in config_eogfilters.iterrows():
                 print(f'<p class="indent3">filter config. {idx+1}: hp = {row["highpass"]} Hz; lp = {row["lowpass"]} Hz; notch = {row["notch"]} Hz<br></p>', file=f)
             print('<p class="indent2">You can either re-export your data or filter your data to a common fequency</p>', file=f)
-            print('<p class="indent2"><i>You can use the notebook "inspect_edf_voila.ipynb" to identify which participants need to be re-exported or filtered</i></p>', file=f)
+            print('<p class="indent2"><i>You can use the notebook "1_inspect_edf_voila.ipynb" to identify which participants need to be re-exported or filtered</i></p>', file=f)
         else:
             print(f'<p>✅ All your participants have the same EOG filters: hp = {join_uniq(config_eogfilters["highpass"])} Hz; lp = {join_uniq(config_eogfilters["lowpass"])} Hz; notch = {join_uniq(config_eogfilters["notch"])} Hz</p>', file=f)
         #______________________________________________________________________
@@ -852,7 +852,7 @@ with open(f"{summary_path}/EDF_inspection_report.html", "w", encoding="utf-8") a
     #     if len(ecg_config_dict) > 1:
     #         print(f'<p>⚠️ {len(ecg_config_dict)} different ECG configurations found</p>', file=f)
     #         print('<p class="indent2">You will have to harmonize the number and the name of channels for your analysis</p>', file=f)
-    #         print('<p class="indent2"><i>You can use the notebook "select&remap_channels_edf" to do it</i></p>', file=f)
+    #         print('<p class="indent2"><i>You can use the notebook "2_select&remap_channels_edf" to do it</i></p>', file=f)
     #     else:
     #         print('<p>✅ All your participants have the same ECG channels</p>', file=f)
     #     #______________________________________________________________________
@@ -869,7 +869,7 @@ with open(f"{summary_path}/EDF_inspection_report.html", "w", encoding="utf-8") a
     #     if len(sfecg_config_dict) > 1:
     #         print(f'<p>⚠️ {len(sfecg_config_dict)} different ECG sampling frequencies found: {join_uniq(df_full_ecg["sampling_frequency"])} Hz</p>', file=f)
     #         print('<p class="indent2">You can either re-export your data or downsample to a common sampling frequency for your analysis</p>', file=f)
-    #         print('<p class="indent2"><i>You can use the notebook "inspect_edf_voila.ipynb" to identify which participants need to be re-exported</i></p>', file=f)
+    #         print('<p class="indent2"><i>You can use the notebook "1_inspect_edf_voila.ipynb" to identify which participants need to be re-exported</i></p>', file=f)
     #     else:
     #         print(f'<p>✅ All your participants have the same ECG sampling frequency: {join_uniq(df_full_ecg["sampling_frequency"])} Hz</p>', file=f)
     #     #______________________________________________________________________
@@ -891,7 +891,7 @@ with open(f"{summary_path}/EDF_inspection_report.html", "w", encoding="utf-8") a
     #         for idx, row in config_ecgfilters.iterrows():
     #             print(f'<p class="indent3">filter config. {idx+1}: hp = {row["highpass"]} Hz; lp = {row["lowpass"]} Hz; notch = {row["notch"]} Hz<br></p>', file=f)
     #         print('<p class="indent2">You can either re-export your data or filter your data to a common fequency</p>', file=f)
-    #         print('<p class="indent2"><i>You can use the notebook "inspect_edf_voila.ipynb" to identify which participants need to be re-exported or filtered</i></p>', file=f)
+    #         print('<p class="indent2"><i>You can use the notebook "1_inspect_edf_voila.ipynb" to identify which participants need to be re-exported or filtered</i></p>', file=f)
     #     else:
     #         print(f'<p>✅ All your participants have the same ECG filters: hp = {join_uniq(config_ecgfilters["highpass"])} Hz; lp = {join_uniq(config_ecgfilters["lowpass"])} Hz; notch = {join_uniq(config_ecgfilters["notch"])} Hz</p>', file=f)
     #     #______________________________________________________________________

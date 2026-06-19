@@ -2,7 +2,7 @@
 """
 This script is an example to compute spectral power, aperiodic components, and extract bandpower for classic PSG recordings (~3 EEG channels).
 It was developped on the apomorphee database.
-It requires raw .edf EEG files, hypnograms, and output of "select&remap_channels_edf_voila.ipynb" to harmonize channel names if needed.
+It requires raw .edf EEG files, hypnograms, and output of "2_select&remap_channels_edf_voila.ipynb" to harmonize channel names if needed.
 It works mainly at the epochs level. 
 
 Steps:
