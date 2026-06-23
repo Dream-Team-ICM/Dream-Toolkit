@@ -154,14 +154,14 @@ file = files[np.where(mask_file)[0][0]]
 report_files = glob.glob(os.path.join(path_data+os.sep+'reports', '*.html'))
 # get participants name from report already computed
 report_names = {
-    Path(rf).stem.replace("_report_report", "")
+    os.path.normcase(Path(rf).stem.replace("_report_report", ""))
     for rf in report_files
 }
 
 missing_files = [
     f
     for f in files
-    if Path(f).stem not in report_names
+    if os.path.normcase(Path(f).stem) not in report_names
 ]
 #______________________________________________________________________________
 

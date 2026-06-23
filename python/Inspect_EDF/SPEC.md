@@ -84,6 +84,58 @@ python tools/1_inspect_edf_perdataset.py
 python tools/1_inspect_edf_perparticipant.py
 ```
 
+## Cross-cutting procedures (shared across tools)
+
+Conventions and helpers reused by several tools. The tool sections below reference these by name
+instead of restating them; only tool-specific deltas are kept inline.
+
+- **Dual delivery (Jupyter + Voila + batch `.py`)**: every user-facing tool exists as a code-visible
+  Jupyter notebook and a code-hidden Voila app (kept in sync); several also ship a batch `.py` twin.
+  All forms must be maintained together when a tool changes.
+- **Custom EDF header parser + sampling-frequency derivation**: EDF headers are read with a hand-written
+  binary parser (robust to encoding/header edge cases; **never** used for signal data).
+  `sampling_frequency = samples_per_record / duration_data_record` (the per-channel 8-byte field is the
+  *number of samples per data record*, not the rate; the two coincide only when `duration_data_record == 1 s`).
+  Kept as a string to preserve `sorted(set(...))` grouping. Shared by `1_inspect_edf*`,
+  `2_select&remap_channels_edf*`, and `7_live_explore_1file*`. (Tool 1 carries the worked EDF+ examples.)
+- **MNE EDF signal loading pattern**: when actual signal is needed, load with
+  `mne.io.read_raw_edf(..., preload=False, include=list(remap.keys()))` — `include=` evaluated **at read
+  time** (not a lazy `pick` afterwards) to avoid MNE's partial-read `AssertionError` when the highest-rate
+  channel is excluded and to preserve the native EEG rate — then `drop_suffix_duplicates(raw)` and
+  `raw.rename_channels(adapt_remap_dict_to_suffixes(raw, remap))`. The two helpers handle MNE ≥ 1.8's
+  `-0`/`-1` suffixes on duplicate channel names. Shared by tools 5, 6, 7 (tool 6 documents the full
+  rationale and its channel-deselection delta).
+- **Path comparison normalization (`os.path.normcase`)**: whenever two filesystem paths, stems, or
+  filenames are compared as strings (equality, `in`, `.isin()`, set/dict membership) **and the two sides
+  can come from different sources** (one from disk, one from a stored TSV/JSON/widget), both sides are
+  wrapped in `os.path.normcase(...)` **at the comparison only** — the stored/displayed value keeps its
+  original case. On Windows this removes drive-letter case and `/`↔`\` mismatches (a no-op on POSIX).
+  Applied across the skip/merge filters, EDF and hypnogram lookups, participant-id matching, and
+  hypnogram-suffix matching of every tool that mixes disk paths with stored configuration.
+- **Skip + cumulative-merge workflow**: processing tools decouple folder selection from running, show an
+  "N / M already done" info line, offer a **"Skip already processed"** checkbox (on by default), and write
+  outputs with **merge/replace** semantics (rows for the items processed this run replace their previous
+  rows, all others kept) so the tables stay the full cumulative dataset across runs. Aggregated summary
+  files are regenerated from every per-item file present, not just the current run. Shared by tools 1, 2,
+  5, 6 (and the hypno/event variants), each keyed on its own identifier (`path`, participant id, `file_id`).
+- **Lenient JSON loader**: every read of a config JSON parses strictly first and, on failure, repairs a
+  single trailing comma before a closing `}`/`]` (a common hand-edit mistake) before retrying. Shared by
+  the config readers of tools 2 and 4.
+- **Hypnogram-suffix auto-detection**: on folder selection, the `.txt` files next to each EDF are scanned,
+  candidate suffixes counted (all files per EDF matched), and the suffix widget auto-filled, with a
+  colour-coded info label (green = all EDFs matched, orange = partial/none). **Selection rule differs by
+  intent**: tool 3 prefers the **shortest** suffix on ties (target = raw, unremapped hypnogram); tools 5
+  and 6 prefer the **longest** suffix among candidates appearing for ≥ 50% of the maximum count
+  (target = the more specific remapped/processed version).
+- **Event sourcing (CSV-first / XML-fallback)**: scored events are read via a shared `load_events()` —
+  the Compumedics `*_event_xml.csv` (`Name, Start, Duration`) first, then the `<ScoredEvents>` of the
+  `*.edf.XML` (`CMPStudyConfig`). Shared by tool 4 (harmonization) and tool 7 (overlay); back-port into
+  `live_explore`'s `load_events_csv()` is tracked in `tools/TODO_live_explore_event_xml_fallback.md`.
+- **Proactive error handling**: per-item `try/except` with a **fatal** (add to a `failed` list and
+  `continue`) vs **non-fatal** (`⚠` warning, continue) distinction; in Voila, every button callback and
+  per-item loop is wrapped so a single failure never crashes the run or freezes the UI, and errors are
+  always surfaced via a widget or `print()`.
+
 ## Tool descriptions
 
 ### 1. EDF Inspector (`1_inspect_edf_voila.ipynb`, `1_inspect_edf_perdataset.py`, `1_inspect_edf_perparticipant.py`)
@@ -165,7 +217,7 @@ Condition 3 is required for EDFs exported by `mne.export.export_raw()`, which wr
 
 **Skip + incremental workflow**: like the EDF inspector, folder selection is decoupled from running. Selecting the folder refreshes an info line ("N / M participant(s) already configured" — counted against the existing `remap_reref_persubject.json`); the scan runs on an explicit **Run scan** button. A **"Skip participants already configured"** checkbox (checked by default) excludes participants already in the JSON from the scan, so the configurations and every downstream section involve only the new participants, whose entries are merged into the JSON on save (see Section 5). Participant ids and file paths are compared with `os.path.normcase` (case/separator-insensitive). `failed_edf_read.tsv` is merged on file path the same way, so it reflects the current config state rather than only the last scan.
 
-**Robust JSON loading**: every read of `remap_reref_persubject.json` (info line, scan filter, save-merge, section 6 test) goes through a lenient loader that parses strictly first and, on failure, repairs a single trailing comma before a closing `}`/`]` (a common hand-edit mistake) before retrying.
+**Robust JSON loading** (see *Cross-cutting procedures*): every read of `remap_reref_persubject.json` (info line, scan filter, save-merge, section 6 test) goes through the shared lenient loader.
 
 **Section 6 — Test the JSON**: applies each participant's remap + re-reference and reports the resulting channel configurations (harmonization succeeds when a single configuration remains). A **scope** toggle selects what to test — **Whole database** (default; every participant in the JSON that has an EDF in the folder, normcase-matched) or **New files (this session)**. The toggle and run button persist in their own area with results rendered below, so the test can be re-run with a changed scope (e.g. verify the just-modified participants, then the whole database) without redoing the workflow.
 
@@ -184,7 +236,7 @@ Interactive tool to harmonize sleep stage labels across a heterogeneous database
 4. **Save** — Writes remapped hypnograms next to originals using the output suffix defined in Section 1; end message confirms completion and recalls the suffix used
 5. **Verify** — Before/after configuration summary; verdict fails only if non-AASM labels remain (multiple configurations with valid AASM labels are acceptable — e.g. insomnia patients legitimately missing N3)
 
-**Hypnogram suffix auto-detection**: when the data folder is selected, the tool scans `.txt` files next to each EDF, counts candidate suffixes (all files per EDF are matched — no early break), and auto-fills the `Hypnogram suffix:` widget with the most common suffix. In case of equal counts, the **shortest** suffix is preferred — the goal is to select the raw (unremapped) hypnogram, not an already-processed version. This is the reverse of the strategy used in `5_quality_overview_voila` and `6_preprocessing_voila`, which prefer the longest suffix among candidates appearing for ≥50% of the maximum count. All detected suffixes and their counts are shown in a colour-coded info label below the widget (green = all EDFs matched, orange = partial match or no files found).
+**Hypnogram suffix auto-detection** (see *Cross-cutting procedures*): tool 3 auto-fills the `Hypnogram suffix:` widget with the **shortest** candidate suffix on ties — the goal is the raw (unremapped) hypnogram, not an already-processed one (the reverse of tools 5/6, which prefer the longest).
 
 **Key constants:**
 - `DEFAULT_MAPPING`: `0→W`, `1→N1`, `2→N2`, `3→N3`, `4→N3`, `5→R`, `?→W`, `S1→N1`…
@@ -229,7 +281,7 @@ Implemented as `tools/5_quality_overview_voila.ipynb`. Produces one `mne.Report`
 
 **EDF scan**: recursive (`rglob('*.edf')`), so datasets organized in subfolders (e.g. `group1/`, `group2/`) are fully covered without needing to run the tool per subfolder.
 
-**Hypnogram suffix auto-detection**: when the data folder is selected, the tool scans `.txt` files next to each EDF, counts candidate suffixes (all files per EDF are matched — no early break), and auto-fills the `Hypno suffix:` widget. Selection rule: among suffixes whose count is ≥ 50% of the maximum count, the **longest** is preferred (more specific = remapped/processed version); count is the tiebreaker when lengths are equal. The 50% threshold prevents rare or accidental long suffixes from winning when remapping is far from complete. All detected suffixes and their counts are shown in a colour-coded info label below the widget (green = all EDFs matched, orange = partial match or no files found). The same rule applies in `6_preprocessing_voila`.
+**Hypnogram suffix auto-detection** (see *Cross-cutting procedures*): tools 5 and 6 prefer the **longest** suffix among candidates appearing for ≥ 50% of the maximum count (more specific = remapped/processed version; count breaks ties on equal length). The 50% threshold prevents a rare accidental long suffix from winning when remapping is far from complete.
 
 **Live output warnings**: if a hypnogram is not found, fails to load, has a length mismatch with the EDF, or contains unrecognised stage labels, a plain-text `⚠` warning is printed in the notebook output area immediately after the per-participant result line (in addition to the yellow banner already shown in the HTML report's Overview section).
 
@@ -309,9 +361,7 @@ The two tools then differ only in what follows:
   ```
   A `present`-empty guard (e.g. if the rename failed) marks the participant as failed and skips it, so a single bad file never crashes the run.
 
-**Shared utility functions** (defined identically in `5_quality_overview_voila` and `6_preprocessing_voila`, used right after `read_raw_edf`):
-- `drop_suffix_duplicates(raw)` — MNE ≥ 1.8 appends `-0`/`-1` to duplicate channel names; this keeps only the `-0` variant and drops the rest. Returns `(raw, dropped_list)`.
-- `adapt_remap_dict_to_suffixes(raw, remap_dict)` — rewrites the remap dict so a base name (`Fp1`) matches MNE's suffixed name (`Fp1-0`) when duplicates were present, so `rename_channels` still applies.
+**Shared utility functions** (`drop_suffix_duplicates(raw)` → `(raw, dropped_list)`, and `adapt_remap_dict_to_suffixes(raw, remap_dict)`): defined identically in `5_quality_overview_voila` and `6_preprocessing_voila`, used right after `read_raw_edf` — see *Cross-cutting procedures → MNE EDF signal loading pattern*.
 
 **Preprocessing steps** (applied in this order, each optional via widget):
 1. **Resampling** — `raw.resample(target_freq, npad='auto')`. Target frequency chosen by user; applied before filtering to avoid aliasing. Step is skipped if checkbox is unchecked.

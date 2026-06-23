@@ -325,7 +325,8 @@ with open(f"{summary_path}/EDF_perParticipant_report.html", "w", encoding="utf-8
             df['group'] = np.nan # initialyze column 'group' with NaN
             # get group from participants table if any (else group will be inferred from subfolder or filename extension later)
             if found_group:
-                df['group'] = subj_table.loc[subj_table['participant_id'] == sub_name, 'group'].iloc[0]
+                # normcase both sides: participant_id comes from the table (config), sub_name from the file stem (disk)
+                df['group'] = subj_table.loc[subj_table['participant_id'].astype(str).map(os.path.normcase) == os.path.normcase(sub_name), 'group'].iloc[0]
     
             # extract filename component before and after subject number (so we assume subject name contains at least incrementing numbers that are at the beginning of the file name)  
             #   ^       → start of string  
@@ -536,8 +537,8 @@ if not anon_df.empty:
         except Exception:
             existing_anon = None
     if existing_anon is not None and not existing_anon.empty:
-        attempted = set(anon_df['subject'])
-        existing_anon = existing_anon[~existing_anon['subject'].isin(attempted)]
+        attempted = {os.path.normcase(s) for s in anon_df['subject'].astype(str)}
+        existing_anon = existing_anon[~existing_anon['subject'].astype(str).map(os.path.normcase).isin(attempted)]
         anon_df = pd.concat([existing_anon, anon_df], ignore_index=True)
     anon_df.to_csv(anon_tsv_path, sep='\t', index=False)
     print(f'Saving anonymization check to:\n{anon_tsv_path}')
