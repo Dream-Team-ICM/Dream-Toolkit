@@ -131,8 +131,10 @@ instead of restating them; only tool-specific deltas are kept inline.
   (target = the more specific remapped/processed version).
 - **Event sourcing (CSV-first / XML-fallback)**: scored events are read via a shared `load_events()` —
   the Compumedics `*_event_xml.csv` (`Name, Start, Duration`) first, then the `<ScoredEvents>` of the
-  `*.edf.XML` (`CMPStudyConfig`). Shared by tool 4 (harmonization) and tool 7 (overlay); back-port into
-  `live_explore`'s `load_events_csv()` is tracked in `tools/TODO_live_explore_event_xml_fallback.md`.
+  `*.edf.XML` (`CMPStudyConfig`). Shared by tool 4 (harmonization) and tool 7 (overlay). Tool 4 returns
+  `(list-of-(name, start, duration), source)`; tool 7's `load_events()` returns the same events as a
+  `Name/Start/Duration` **DataFrame** plus the `source` tag, because its overlay/navigator code consumes
+  a DataFrame.
 - **Proactive error handling**: per-item `try/except` with a **fatal** (add to a `failed` list and
   `continue`) vs **non-fatal** (`⚠` warning, continue) distinction; in Voila, every button callback and
   per-item loop is wrapped so a single failure never crashes the run or freezes the UI, and errors are
@@ -274,8 +276,6 @@ Interactive tool to **visualize** the scored-event configurations present across
 - `event_source_mismatch.tsv` — only if the CSV-vs-XML check is run; columns `file_id, n_csv, n_xml, n_only_in_csv, n_only_in_xml, labels_only_in_csv, labels_only_in_xml, status`
 - `failed_event_read.tsv` — files with no readable event companion (only if any failed)
 
-**TODO**: back-port the XML fallback into `live_explore`'s `load_events_csv()` (see `tools/TODO_live_explore_event_xml_fallback.md`).
-
 ### 5. Quality overview (`5_quality_overview_voila.ipynb`)
 
 *(Stable tool — formerly “Phase 1” of the preprocessing pipeline.)*
@@ -413,7 +413,7 @@ Interactive inspection of **one EDF file at a time** — load it once, then expl
 
 **Rendering**: static matplotlib PNG for v1 (fast, no extra dependency, embeds into reports). A future migration of Section 3 to an interactive canvas (`ipympl`/Plotly) for click-to-seek and direct mouse annotation is tracked in `tools/TODO_live_explore_interactive_migration.md`.
 
-**Event annotations**: when a Compumedics `*_event_xml.csv` (columns `Name, Start, Duration` in seconds) is found next to the EDF, its events (arousals, apnea/hypopnea, limb movement, SpO2 desaturation…) are overlaid colour-coded on the Section 3 epoch view and ticked on the navigator.
+**Event annotations**: scored events are loaded with the shared **CSV-first / XML-fallback** `load_events(edf_path)` — the Compumedics `*_event_xml.csv` (`Name, Start, Duration` in seconds) is read first and, when absent, the `<ScoredEvents>` of the `*.edf.XML` (Profusion `CMPStudyConfig`) is parsed as a fallback (returns a `Name/Start/Duration` DataFrame plus a `source` tag, surfaced in the load summary as `events (from csv|xml)`). Its events (arousals, apnea/hypopnea, limb movement, SpO2 desaturation…) are overlaid colour-coded on the Section 3 epoch view and ticked on the navigator.
 
 **Outputs** (written only on explicit Save): `<hypno_stem>_rescored.txt` + `<hypno_stem>_rescore_log.tsv` (next to the input hypnogram), `<edf_stem>_live_rejection_mask.tsv` (next to the EDF).
 
@@ -437,10 +437,9 @@ Implements the **"Manual events"** rejection method reserved in `6_preprocessing
 
 ### Event-epoch visualizer (Phase B)
 
-Helps decide whether a given event *type* is worth feeding into Phase A. Extends `7_live_explore_1file`'s Section 3 (which already overlays `*_event_xml.csv` spans):
+Helps decide whether a given event *type* is worth feeding into Phase A. Extends `7_live_explore_1file`'s Section 3 (which already overlays scored-event spans via the shared CSV-first / XML-fallback `load_events()`):
 - an **event-type filter** on the navigator: "jump to next/previous epoch overlapping event type X", with a per-type count;
 - a per-type **accept/reject decision** widget that writes a small `event_type_decisions.tsv` feeding Phase A's default selection.
-Requires the XML fallback in `load_events_csv()` (see `tools/TODO_live_explore_event_xml_fallback.md`).
 
 ### Interactive QC of rejected epochs (Phase 2b)
 Load `_all-epo.fif` + `_rejection_mask.tsv`, display the heatmap for navigation, show the raw signal of flagged epochs for visual inspection, allow manual override of individual entries in the mask, then save a final `{file_id}_clean-epo.fif` with only the validated-clean epochs.
