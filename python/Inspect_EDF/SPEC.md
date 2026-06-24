@@ -44,6 +44,8 @@ Inspect_EDF/
 
 **Sibling directory** `../Check_EDF/` contains exploratory notebooks used during development (not production tools).
 
+> **Editing the larger notebooks**: see the *rename-to-`.txt`* rule in CLAUDE.md — `Read`/`Edit`/`NotebookEdit` are blocked or size-capped on big `.ipynb` files.
+
 ## Conda environment
 
 Defined in `environment.yml`. Key packages:
