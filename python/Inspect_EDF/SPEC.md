@@ -141,6 +141,23 @@ instead of restating them; only tool-specific deltas are kept inline.
   `continue`) vs **non-fatal** (`⚠` warning, continue) distinction; in Voila, every button callback and
   per-item loop is wrapped so a single failure never crashes the run or freezes the UI, and errors are
   always surfaced via a widget or `print()`.
+- **Custom (non-AASM) sleep stages**: a project may intentionally keep stage labels outside the AASM set
+  (`W/N1/N2/N3/R`), e.g. `N4` or a movement stage. They are declared **once** in a shared flat JSON
+  `<data_folder>/config_param/custom_stages.json` (`{"custom_stages": ["N4", …]}`, order = display order),
+  **written only by `3_remap_hypno`** and **read** by tools 5/6/7. Tools 5/6/7 each expose an editable
+  `Custom stages` field **auto-filled from the JSON on folder/file selection** — a **volatile per-run
+  override** that never rewrites the JSON (management stays in tool 3). Three helpers are **duplicated**
+  across the tools (like `get_phys_bounds_uV`): `load_custom_stages(folder)`, `parse_custom_field(text)`,
+  and `custom_stage_style(custom_stages) -> (stage_y, stage_colors, ytick_pos, ytick_labels)`. Custom
+  stages stack **below N3** on every hypnogram axis (`N3=0 → -1, -2, …` in declaration order); the
+  step-line stays gray with **REM in red** (YASA convention) and each custom stage in a fixed non-red
+  palette (`#8dd3c7, #ffffb3, #bebada, #80b1d3, #fdb462, #b3de69, #fccde5, #d9d9d9`). Because
+  `yasa.plot_spectrogram` / `yasa.Hypnogram` **hard-reject** any non-AASM label, tools 5 & 7 plot the
+  hypnospectrogram with a custom **`plot_hypnospectrogram()`** that keeps YASA's stage-agnostic
+  spectrogram core (`from yasa.plotting import spectrogram_lspopt`) and draws the hypnogram band itself —
+  no new dependency (`spectrogram_lspopt` ships with the already-required `yasa`). Reading the JSON is
+  non-fatal (`[]` on absent/corrupt); an unregistered non-AASM label keeps the old behaviour (warning +
+  per-stage exclusion), never a crash.
 
 ## Tool descriptions
 
@@ -246,6 +263,8 @@ Interactive tool to harmonize sleep stage labels across a heterogeneous database
 4. **Save** — Writes remapped hypnograms next to originals using the output suffix defined in Section 1; end message confirms completion and recalls the suffix used
 5. **Verify** — Before/after configuration summary; verdict fails only if non-AASM labels remain (multiple configurations with valid AASM labels are acceptable — e.g. insomnia patients legitimately missing N3)
 
+**Custom (non-AASM) stages** (see *Cross-cutting procedures*): tool 3 is the **only** writer of `config_param/custom_stages.json`. A `Custom stages` field (Section 1, comma-separated, auto-filled from any existing JSON) lists labels deliberately kept outside the AASM set; `current_acceptable()` = `STANDARD_LABELS | {MT} | <field>`, so those labels no longer trip the Section 5 verdict. Section 3's **Save remapping** detects non-AASM *target* labels and offers a **➕ Register** button that appends them to the field; Section 4's **Save files** then **merges** the declared stages that actually survive in the remapped output into `custom_stages.json`. Downstream, tools 5/6/7 auto-load this file so the kept labels are recognised (hypnospectrogram, per-stage tables, rejection) instead of being flagged as unrecognised.
+
 **Hypnogram suffix auto-detection** (see *Cross-cutting procedures*): tool 3 auto-fills the `Hypnogram suffix:` widget with the **shortest** candidate suffix on ties — the goal is the raw (unremapped) hypnogram, not an already-processed one (the reverse of tools 5/6, which prefer the longest).
 
 **Key constants:**
@@ -256,6 +275,8 @@ Interactive tool to harmonize sleep stage labels across a heterogeneous database
 **Outputs**:
 - One `.txt` file per participant with the output suffix (e.g. `_Hypnogram_remapped.txt`), one label per line
 - `mid_uncertain_epochs_to_verify.tsv` — written to `<data_folder>/` at scan time when mid-recording `?` epochs or unexpected labels are found; columns: `participant_id`, `epoch_index`, `epoch_time_sec`, `total_epochs`, `original_label` (`?` for mid-recording unscored epochs, or the raw unexpected label e.g. `U`, `M`), `context` (±5 epochs), `corrected_label`; updated with all corrections after "Corrections done" is clicked. If the file already exists at scan time it is loaded and applied in memory instead of being overwritten; the pre-loaded corrections are shown in a summary panel (as `ep.N: old→new`) and also appear **pre-filled** in the Section 2 review widget (flags are computed on the original labels, so they are not hidden). Corrections whose `original_label` no longer matches the current hypnogram value (re-scored since the TSV was written) are flagged as conflicts and shown in a warning panel in Section 2.
+
+- `config_param/custom_stages.json` — written/merged when the user keeps non-AASM labels as custom stages (see *Custom (non-AASM) stages* above); a flat `{"custom_stages": [...]}` list consumed by tools 5/6/7.
 
 `check_hypno_config.py` is the legacy script that preceded this notebook; kept for reference.
 
@@ -296,6 +317,8 @@ Implemented as `tools/5_quality_overview_voila.ipynb`. Produces one `mne.Report`
 **Live output warnings**: if a hypnogram is not found, fails to load, has a length mismatch with the EDF, or contains unrecognised stage labels, a plain-text `⚠` warning is printed in the notebook output area immediately after the per-participant result line (in addition to the yellow banner already shown in the HTML report's Overview section).
 
 **Hypnogram label validation**: after mapping labels to YASA integers (`W→0`, `N1→1`, `N2→2`, `N3→3`, `R→4`), the tool checks for unrecognised labels. `MT` (movement time) is silently tolerated — YASA treats it as an artifact epoch (NaN). Any other unrecognised label triggers a warning. Two severity levels: if > 10% of epochs are unrecognised, `hypno_vec` is set to `None` (spectrogram skipped, error-level warning pointing to `3_remap_hypno_voila`); if ≤ 10%, `hypno_vec` is kept but a warning lists the unrecognised labels and their count. This catches hypnograms that were not yet remapped to AASM convention (e.g. `S1/S2/S3/S4` or raw numeric labels).
+
+**Custom (non-AASM) stages** (see *Cross-cutting procedures*): an editable `Custom stages` field (auto-filled from `config_param/custom_stages.json`) registers project-specific labels. Registered labels are treated as **recognised** — they no longer count toward the >10% skip and are not set to `None` — the YASA hypnospectrogram is replaced by the shared `plot_hypnospectrogram()` (custom labels stacked below N3, their own colours), and `quality_summary_by_stage.tsv` + the `dataset_overview.html` by-stage tables/boxplot insets iterate `['W','N1','N2','N3','R'] + custom_stages` (`stage_map` extends the YASA codes with `5+i`).
 
 **Spectrogram fault tolerance**: the `yasa.hypno_upsample_to_data()` + `yasa.plot_spectrogram()` calls are wrapped in a `try/except`. If YASA raises an exception, the channel's spectrogram section in the HTML report shows the error message and processing continues to the next channel and participant without interruption.
 
@@ -393,6 +416,8 @@ All methods operate on the raw epoch data in µV (`epochs.get_data() * 1e6`, sha
 | **1/f fit quality** | Specparam aperiodic fit on Welch PSD (4 s windows, 2–30 Hz, `aperiodic_mode='fixed'`, `max_n_peaks=0`) | MAE > 0.15 OR R² < 0.95 | Fit restricted to ≥2 Hz to limit influence of slow-wave non-stationarity. `max_n_peaks=0` skips peak detection for speed (we only need the aperiodic metrics). A failed fit is treated as a double flag (both error and R²). |
 | **Event overlap** *(optional, off by default)* | 30 s epoch overlapping any **selected** canonical scored-event type (arousal, apnea, hypopnea, limb movement, SpO2 desaturation…) | any overlap (min overlap 0 s, pad 0 s) | **Epoch-level** flag, replicated across all channels → single `flag_event` column. Events read with the shared CSV-first / XML-fallback `load_events(edf, csv_suffix)`; raw labels mapped to canonical via `event_remap.json` (tool 4). UI: a checkbox to activate, a multiselect of canonical types (populated from the chosen `event_remap.json`), a **minimum overlap (s)** and a **pad (s)** field. A **"Count affected epochs"** button reports, over the participants currently checked in Section 3, how many epochs each selected type would flag (overall + per stage) using only the hypnogram length/stages and events — no signal is read. Missing/unreadable event companions are non-fatal (the file keeps the other 5 methods, never added to `failed`). |
 
+**Custom (non-AASM) stages** (see *Cross-cutting procedures*): an editable `Custom stages` field (Section 1, auto-filled from `config_param/custom_stages.json`) extends the per-stage logic. Each custom stage gets its **own amplitude-threshold widget** (default 250 µV, generated dynamically when the field changes) feeding `ptp_thresholds`; the per-participant summary, `global_rejection_by_stage.tsv`, the heatmap hypnogram strip and the **"Count affected epochs"** estimate all iterate `['W','N1','N2','N3','R'] + custom_stages`. Custom-stage epochs are still rejected by the other (stage-independent) methods regardless.
+
 **Heatmap — `_rejection_heatmap.png`**: channels (Y-axis) × epochs (X-axis); each cell coloured by the flagging method with priority encoding when multiple methods fire. A hypnogram strip is drawn above the main heatmap. Colour scheme: dark purple = none, red = amplitude, blue = flat, orange = gradient, yellow = 1/f error, green = 1/f R², **magenta = event**, dark red = multiple. Title includes overall rejection percentage.
 
 **Two-step QC approach** — Phase 2 does **not** drop epochs. It saves ALL epochs (including flagged ones) with an MNE `metadata` DataFrame attached, so downstream Phase 2b can inspect rejected epochs before finalising the rejection.
@@ -423,6 +448,8 @@ Interactive inspection of **one EDF file at a time** — load it once, then expl
 **Rendering**: static matplotlib PNG for v1 (fast, no extra dependency, embeds into reports). A future migration of Section 3 to an interactive canvas (`ipympl`/Plotly) for click-to-seek and direct mouse annotation is tracked in `tools/TODO_live_explore_interactive_migration.md`.
 
 **Event annotations**: scored events are loaded with the shared **CSV-first / XML-fallback** `load_events(edf_path)` — the Compumedics `*_event_xml.csv` (`Name, Start, Duration` in seconds) is read first and, when absent, the `<ScoredEvents>` of the `*.edf.XML` (Profusion `CMPStudyConfig`) is parsed as a fallback (returns a `Name/Start/Duration` DataFrame plus a `source` tag, surfaced in the load summary as `events (from csv|xml)`). Its events (arousals, apnea/hypopnea, limb movement, SpO2 desaturation…) are overlaid colour-coded on the Section 3 epoch view and ticked on the navigator.
+
+**Custom (non-AASM) stages** (see *Cross-cutting procedures*): an editable `Custom stages` field (Section 1, auto-filled from the EDF folder's `config_param/custom_stages.json`) sets a global `CUSTOM_STAGES` at load. The Section 2 hypnospectrogram uses the shared `plot_hypnospectrogram()` (custom labels stacked below N3); `validate_hypno` treats registered labels as known (no warning); and the per-stage mean PSD, the Section 4 clean-vs-rejected PSD, the rejection heatmap strip, the per-stage summary and the navigator hypnogram axis all iterate `STAGES + CUSTOM_STAGES`. Section 4's per-stage amplitude rejection uses the existing `ptp_thresholds.get(stage, 250.0)` fallback for custom stages (quick single-file preview — the authoritative per-stage thresholds live in tool 6).
 
 **Outputs** (written only on explicit Save): `<hypno_stem>_rescored.txt` + `<hypno_stem>_rescore_log.tsv` (next to the input hypnogram), `<edf_stem>_live_rejection_mask.tsv` (next to the EDF).
 
