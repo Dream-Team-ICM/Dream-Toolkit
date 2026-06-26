@@ -158,6 +158,17 @@ instead of restating them; only tool-specific deltas are kept inline.
   no new dependency (`spectrogram_lspopt` ships with the already-required `yasa`). Reading the JSON is
   non-fatal (`[]` on absent/corrupt); an unregistered non-AASM label keeps the old behaviour (warning +
   per-stage exclusion), never a crash.
+  - **Flat/dead-epoch colour scaling**: YASA's percentile-based colormap range (`np.percentile(Sxx_dB,
+    [trimperc, 100-trimperc])` over all pixels) washes the spectrogram out (uniform red, dead-epoch
+    stripes) once the fraction of **fully-flat 30 s epochs** — spectrogram columns, **not** the
+    channel's sample-level `flat_pct` — exceeds `trimperc` (2.5 %): a flat/disconnected epoch has
+    ~zero power → ≈ −400 dB after the display filter, dragging `vmin` to that floor. The shared
+    `plot_hypnospectrogram()` therefore excludes near-zero columns from the `vmin/vmax` percentiles
+    (a column is valid when its peak dB is within 60 dB of the median epoch peak) and renders the
+    excluded columns grey (`#d9d9d9`, "no signal"); clean channels (no dead epoch) are unaffected
+    (byte-identical scale and image). The tool-7 *navigator* spectrogram is a separate plot (floored
+    at −120 dB, p5–p99) and is left as-is. Diagnostic scripts:
+    `tools/simple_hypnospectro_yasa_vs_fix.py` and `tools/compare_flat_spectrogram_fix.{py,ipynb}`.
 
 ## Tool descriptions
 
