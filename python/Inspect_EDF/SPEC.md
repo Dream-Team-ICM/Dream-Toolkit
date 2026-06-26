@@ -315,7 +315,7 @@ Implemented as `tools/5_quality_overview_voila.ipynb`. Produces one `mne.Report`
 | `std_uV` | < 5.0 µV | Dead / near-dead channels |
 | `hist_extreme_pct` | > 1.0% | In-range clipping (saturation within declared EDF range) |
 
-`flat_pct` = fraction of consecutive sample pairs with \|diff\| < `max(2×ADC_step, 0.06 µV)`. `bounds_pct` = fraction of samples within 0.5 µV of the EDF physical_min/max header limits. `hist_extreme_pct` = fraction of samples in the outermost histogram bins. **Kurtosis is intentionally NOT used as a flagging criterion** — normal PSG EEG has physiologically high kurtosis (spindles, K-complexes produce values of 100–500), making it unreliable without per-subject normalization. `p99_abs_uV` and `p999_abs_uV` (99th and 99.9th percentile of |amplitude|) are recorded as informational metrics in `quality_summary.tsv` but are not currently used for flagging; they are useful for cross-channel and cross-dataset amplitude comparison.
+`flat_pct` = fraction of consecutive sample pairs with \|diff\| < `max(2×ADC_step, 0.06 µV)`. `bounds_pct` = fraction of samples within 0.5 µV of the EDF physical_min/max header limits, reconstructed in µV by `get_phys_bounds_uV()`. **Unit handling**: MNE keeps `_raw_extras['physical_max']`/`['offsets']` in each channel's *native* EDF physical unit (µV, mV, V…), not in µV, whereas the signal is read as `raw.get_data() * 1e6` (always µV). `get_phys_bounds_uV()` therefore multiplies both bounds by `extras['units'][ch_idx] * 1e6` (MNE's native-unit→volts factor: `1e-6` µV, `1e-3` mV, `1.0` V) so the comparison is unit-consistent. This is essential for non-EEG channels: Compumedics EOG/EMG/ECG are declared in **mV** (e.g. `physical_max = 1.0 mV`), so without the conversion they are compared against a 1.0 µV bound — 1000× too small — and `bounds_pct` flags ~98–100 % of a perfectly healthy signal. EEG channels (declared in µV) are unaffected. `hist_extreme_pct` = fraction of samples in the outermost histogram bins. **Kurtosis is intentionally NOT used as a flagging criterion** — normal PSG EEG has physiologically high kurtosis (spindles, K-complexes produce values of 100–500), making it unreliable without per-subject normalization. `p99_abs_uV` and `p999_abs_uV` (99th and 99.9th percentile of |amplitude|) are recorded as informational metrics in `quality_summary.tsv` but are not currently used for flagging; they are useful for cross-channel and cross-dataset amplitude comparison.
 
 **`dataset_overview.html` — dataset-level summary**: generated at the end of every run from the full cumulative `quality_summary.tsv` (reflects all participants processed to date, not just the current run). Contains two levels:
 - **Global section (all electrodes pooled)**: stats table (mean / median / p5 / p25 / p75 / p95 per metric), **mean (median) by sleep stage table** (metrics as rows — `mean_uV`, `std_uV`, `flat_pct`, `bounds_pct`, `hist_extreme_pct`, `p99_abs_uV`, `p999_abs_uV` — stages W/N1/N2/N3/R as columns; shown only when `quality_summary_by_stage.tsv` is present), n_peaks frequency table by electrode (flags DC drift and quantization cases), pooled boxplots (one subplot per key metric; each subplot contains a **stage inset** in its upper-right corner showing per-stage boxplots with stage colours W/N1/N2/N3/R — inset shown only when stage data is available; stage colours: W `#969696`, N1 `#9e9ac8`, N2 `#807dba`, N3 `#6a51a3`, R `#c994c7`), grouped boxplots (one subplot per key metric, x-axis = electrode — compares electrodes side by side).
@@ -336,12 +336,13 @@ Key metrics shown in plots: `std_uV`, `flat_pct`, `bounds_pct`, `hist_extreme_pc
 
 *(Stable tool — formerly “Phase 2” of the preprocessing pipeline.)*
 
-Implemented as a Voila notebook with four sections: (1) path configuration, (2) preprocessing and rejection parameters, (3) participant selection, (4) processing loop.
+Implemented as a Voila notebook with four sections: (1) path configuration, (2) preprocessing and rejection parameters, (3) participant selection, (4) processing loop. **Section 2 is organised into two headed sub-sections**: **Preprocessing** (resampling + bandpass filter) and **Epoch rejection** (peak-to-peak amplitude per stage, flat signal & gradient, 1/f fit quality, and the optional event-based rejection — see below).
 
 **Inputs**:
 - `quality_summary.tsv` from Phase 1 — `exclude` column identifies channels to drop before preprocessing
 - `remap_reref_persubject.json` from `2_select&remap_channels_edf` — drives channel remapping and re-referencing per participant
 - Raw EDF files and remapped hypnograms (default suffix `_Hypnogram_remapped.txt`)
+- *(optional, for event-based rejection)* `config_param/event_remap.json` from `4_remap_events_edf` and the per-EDF scored-event companions (`*_event_xml.csv` / `*.edf.XML`). Section 1 has an explicit `event_remap.json` `FileChooser` (auto-pointed at `<edf_folder>/config_param/` when present) and an editable **`Event CSV suffix:`** field auto-detected from the `.csv` companions next to the EDFs (most frequent suffix, shortest on ties; colour-coded info line), mirroring the suffix auto-detection of tools 4 / 5.
 
 **Channel-name handling when loading EDF data from notebook outputs** (critical):
 
@@ -380,24 +381,24 @@ The two tools then differ only in what follows:
 
 **Epoching**: 30-second fixed-length epochs created with `mne.make_fixed_length_epochs(raw, duration=30)`. Sleep stage assigned to each epoch from the hypnogram; epochs at the tail beyond the hypnogram length are discarded.
 
-**Epoch rejection — five methods**:
+**Epoch rejection — six methods** (the sixth, *Event overlap*, is optional and off by default):
 
-All methods operate on the raw epoch data in µV (`epochs.get_data() * 1e6`, shape `n_epochs × n_channels × n_times`). Rejection masks are boolean arrays of shape `(n_epochs, n_channels)` — a `True` entry means that (epoch, channel) pair was flagged. An epoch is considered **rejected** if *any* channel is flagged by *any* method.
+All methods operate on the raw epoch data in µV (`epochs.get_data() * 1e6`, shape `n_epochs × n_channels × n_times`). Rejection masks are boolean arrays of shape `(n_epochs, n_channels)` — a `True` entry means that (epoch, channel) pair was flagged. An epoch is considered **rejected** if *any* channel is flagged by *any* method. A single ordered registry — `METHOD_ORDER = ['amplitude', 'flat', 'gradient', '1f_error', '1f_r2', 'event']` with `METHOD_CODE`/`MULTIPLE_CODE` — is the one source of truth shared by the mask builder, heatmap, per-epoch log, per-stage summary and global table, so `event` appears in every output **only when event rejection actually ran** and older event-free outputs keep their original column set.
 
 | Method | Signal feature | Default threshold | Notes |
 |--------|---------------|-------------------|-------|
 | **Amplitude** | Peak-to-peak = `max(epoch) − min(epoch)` | W: 300, N1: 250, N2/N3: 200, REM: 250 µV | Per-stage threshold; W/REM more lenient because muscle and eye-movement artefacts are physiologically common in those stages. Equivalent to MNE's `drop_bad(reject=...)` criterion. |
 | **Flat signal** | Peak-to-peak < threshold | 1 µV | Detects disconnected electrodes or amplifier saturation within a single epoch. Logically identical to MNE's `drop_bad(flat=...)` criterion: both compare `ptp` against a low-amplitude threshold. |
 | **Gradient** | `max(|diff(epoch)|)` across time | 100 µV/sample | Maximum sample-to-sample absolute difference; sensitive to sudden jumps, electrode pops, and movement artefacts not captured by peak-to-peak. `diff` and `max` both operate on `axis=-1` (time axis) to handle the 3D `(n_epochs, n_channels, n_times)` array correctly. |
-| **Manual events** *(planned — Phase A)* | Scored events (arousal, apnea, hypopnea, limb movement…) overlapping the epoch | — | Format resolved: events harmonized via `event_remap.json` (tool 4), loaded with the shared CSV-first / XML-fallback `load_events()`. Design in *Planned modules → Event-based epoch rejection (Phase A)*. |
 | **1/f fit quality** | Specparam aperiodic fit on Welch PSD (4 s windows, 2–30 Hz, `aperiodic_mode='fixed'`, `max_n_peaks=0`) | MAE > 0.15 OR R² < 0.95 | Fit restricted to ≥2 Hz to limit influence of slow-wave non-stationarity. `max_n_peaks=0` skips peak detection for speed (we only need the aperiodic metrics). A failed fit is treated as a double flag (both error and R²). |
+| **Event overlap** *(optional, off by default)* | 30 s epoch overlapping any **selected** canonical scored-event type (arousal, apnea, hypopnea, limb movement, SpO2 desaturation…) | any overlap (min overlap 0 s, pad 0 s) | **Epoch-level** flag, replicated across all channels → single `flag_event` column. Events read with the shared CSV-first / XML-fallback `load_events(edf, csv_suffix)`; raw labels mapped to canonical via `event_remap.json` (tool 4). UI: a checkbox to activate, a multiselect of canonical types (populated from the chosen `event_remap.json`), a **minimum overlap (s)** and a **pad (s)** field. A **"Count affected epochs"** button reports, over the participants currently checked in Section 3, how many epochs each selected type would flag (overall + per stage) using only the hypnogram length/stages and events — no signal is read. Missing/unreadable event companions are non-fatal (the file keeps the other 5 methods, never added to `failed`). |
 
-**Heatmap — `_rejection_heatmap.png`**: channels (Y-axis) × epochs (X-axis); each cell coloured by the flagging method with priority encoding when multiple methods fire. A hypnogram strip is drawn above the main heatmap. Colour scheme: dark purple = none, red = amplitude, blue = flat, orange = gradient, yellow = 1/f error, green = 1/f R², dark red = multiple. Title includes overall rejection percentage.
+**Heatmap — `_rejection_heatmap.png`**: channels (Y-axis) × epochs (X-axis); each cell coloured by the flagging method with priority encoding when multiple methods fire. A hypnogram strip is drawn above the main heatmap. Colour scheme: dark purple = none, red = amplitude, blue = flat, orange = gradient, yellow = 1/f error, green = 1/f R², **magenta = event**, dark red = multiple. Title includes overall rejection percentage.
 
 **Two-step QC approach** — Phase 2 does **not** drop epochs. It saves ALL epochs (including flagged ones) with an MNE `metadata` DataFrame attached, so downstream Phase 2b can inspect rejected epochs before finalising the rejection.
 
 **Outputs per participant** (in `<derivatives_root>/sub-{file_id}/`):
-- `{file_id}_all-epo.fif` — all epochs with `epochs.metadata` DataFrame (columns: `epoch_idx`, `stage`, `reject_flag`, `reject_method`, `flag_amplitude`, `flag_flat`, `flag_gradient`, `flag_1f_error`, `flag_1f_r2`)
+- `{file_id}_all-epo.fif` — all epochs with `epochs.metadata` DataFrame (columns: `epoch_idx`, `stage`, `reject_flag`, `reject_method`, `flag_amplitude`, `flag_flat`, `flag_gradient`, `flag_1f_error`, `flag_1f_r2`, plus `flag_event` **when event rejection ran**). The per-epoch and per-stage TSVs (`_epoch_rejection.tsv`, `_rejection_summary.tsv`) and `global_rejection_by_stage.tsv` gain the matching `flag_event` column / `event` rows / `*_event` columns the same way — additively, so event-free runs are byte-compatible with earlier outputs.
 - `{file_id}_rejection_mask.tsv` — per-(epoch, channel) rejection table; human-readable and manually editable before Phase 2b (columns: `epoch_idx`, `stage`, `channel`, `reject_flag`, plus one bool column per method)
 - `{file_id}_rejection_log.tsv` — rejection counts per stage per method (columns: `file_id`, `stage`, `method`, `n_total`, `n_rejected`, `pct_rejected`)
 - `{file_id}_rejection_heatmap.png` — channels × epochs colour-coded heatmap
@@ -435,13 +436,9 @@ Full PSG spectral pipeline: epoch rejection → PSD (Welch, 4 s windows) → ape
 
 Modules still in development. The quality-overview (5) and preprocessing (6) tools above are stable and were promoted out of this section.
 
-### Event-based epoch rejection (Phase A)
+### Event-based epoch rejection (Phase A) — **implemented in tool 6**
 
-Implements the **"Manual events"** rejection method reserved in `6_preprocessing_voila.ipynb` (and mirrored in `7_live_explore_1file`'s quick rejection), now that event harmonization exists (tool 4). Design:
-- Load `config_param/event_remap.json`; read each file's events with the shared `load_events()` (CSV-first / XML-fallback); map raw → canonical labels.
-- New UI block "Reject epochs overlapping events": a multiselect of canonical event types (or inferred categories — `apnea_*`, `arousal_*`, `plm`, `limb_movement`, `spo2_*`) that should flag an epoch, an optional **minimum overlap (s)** (default 0 = any overlap) and an optional **pad (s)** around each event.
-- For each 30 s epoch, flag it when it overlaps any selected event by ≥ the minimum overlap. The flag is epoch-level (replicated across channels in the mask).
-- Add a `flag_event` column to the per-(epoch, channel) mask and `epochs.metadata`, a new heatmap colour, and a row per (stage, `method=event`) in `_rejection_log.tsv`.
+Promoted out of this section: the **"Event overlap"** rejection method is now part of `6_preprocessing_voila.ipynb` (Section 2 → *Epoch rejection*). See the tool-6 description above for the UI, the `event_remap.json` chooser + auto-detected `Event CSV suffix`, the "Count affected epochs" button, and the additive `flag_event` outputs. (The mirror in `7_live_explore_1file`'s quick rejection remains a possible follow-up.)
 
 ### Event-epoch visualizer (Phase B)
 
