@@ -169,6 +169,29 @@ instead of restating them; only tool-specific deltas are kept inline.
     (byte-identical scale and image). The tool-7 *navigator* spectrogram is a separate plot (floored
     at −120 dB, p5–p99) and is left as-is. Diagnostic scripts:
     `tools/simple_hypnospectro_yasa_vs_fix.py` and `tools/compare_flat_spectrogram_fix.{py,ipynb}`.
+- **Physical bounds in µV (`get_phys_bounds_uV`)**: MNE 1.9 stores an EDF channel's physical range as
+  `physical_max + offset` in `raw._raw_extras` (not explicit `physical_min`/`physical_max`).
+  `get_phys_bounds_uV()` reconstructs the µV bounds and **must scale both `physical_max` and `offsets`
+  by `extras['units'][ch_idx] * 1e6`** — MNE keeps them in the channel's *native* EDF unit (`1e-6` µV,
+  `1e-3` mV, `1.0` V), while `raw.get_data() * 1e6` is always µV. Without the scaling, any channel
+  declared in mV (typical for Compumedics EOG/EMG/ECG, `physical_max = 1.0 mV`) is compared against a
+  1.0 µV bound — 1000× too small — so `bounds_pct` flags ~98–100 % of a perfectly healthy signal; EEG
+  (declared in µV) stays unaffected, which kept the bug latent until non-EEG channels were added.
+  Defined in `5_quality_overview_voila`, **duplicated** in `7_live_explore_1file*` — keep in sync.
+  (Verified on ICEBERG 117: EOG/EMG/ECG `bounds_pct` 97–98 % → <0.4 %, EEG unchanged.)
+- **EOG/EMG/ECG channel-type detection (`detect_channel_types`)**: non-EEG channels are classified by
+  **transducer type OR channel name** — EOG = transducer `EOG` / name `eog`; ECG = transducer
+  `ECG`/`EKG` / name `ecg`/`ekg`; EMG = transducer `EMG` / name `emg`/`chin`/`menton` (the `chin|menton`
+  aliases cover Compumedics chin-EMG labels). EEG uses `KNOWN_EEG_CHANNEL_RE` (full 10-10 + mastoids +
+  literal `EEG`) or transducer `EEG`/`AGAGCL ELECTRODE`, excluding anything already matched as
+  EOG/ECG/EMG. Defined in `7_live_explore_1file`; reuse it when a tool needs the scoring montage,
+  pre-filled as an editable selection so the user can correct misses.
+- **ipywidgets `Box` stray per-row scrollbars**: jupyter-widgets ships
+  `.widget-box { box-sizing: border-box; overflow: auto; }`, so any bordered + padded `HBox`/`VBox` row
+  whose children overflow the content box by even 1–2 px renders a per-row ▲▼ vertical scrollbar the user
+  can scroll by accident (shifting the row content). Fix: set `overflow='hidden'` explicitly on such row
+  layouts (applied to the Section 3 "Harmonize labels" rows of `4_remap_events_edf*`); keep the intended
+  scroll only on the outer list container.
 
 ## Tool descriptions
 
