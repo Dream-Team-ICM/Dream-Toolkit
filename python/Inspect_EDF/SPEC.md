@@ -44,6 +44,8 @@ Inspect_EDF/
 
 **Sibling directory** `../Check_EDF/` contains exploratory notebooks used during development (not production tools).
 
+> **Editing the larger notebooks**: see the *rename-to-`.txt`* rule in CLAUDE.md — `Read`/`Edit`/`NotebookEdit` are blocked or size-capped on big `.ipynb` files.
+
 ## Conda environment
 
 Defined in `environment.yml`. Key packages:
@@ -84,6 +86,113 @@ python tools/1_inspect_edf_perdataset.py
 python tools/1_inspect_edf_perparticipant.py
 ```
 
+## Cross-cutting procedures (shared across tools)
+
+Conventions and helpers reused by several tools. The tool sections below reference these by name
+instead of restating them; only tool-specific deltas are kept inline.
+
+- **Dual delivery (Jupyter + Voila + batch `.py`)**: every user-facing tool exists as a code-visible
+  Jupyter notebook and a code-hidden Voila app (kept in sync); several also ship a batch `.py` twin.
+  All forms must be maintained together when a tool changes.
+- **Custom EDF header parser + sampling-frequency derivation**: EDF headers are read with a hand-written
+  binary parser (robust to encoding/header edge cases; **never** used for signal data).
+  `sampling_frequency = samples_per_record / duration_data_record` (the per-channel 8-byte field is the
+  *number of samples per data record*, not the rate; the two coincide only when `duration_data_record == 1 s`).
+  Kept as a string to preserve `sorted(set(...))` grouping. Shared by `1_inspect_edf*`,
+  `2_select&remap_channels_edf*`, and `7_live_explore_1file*`. (Tool 1 carries the worked EDF+ examples.)
+- **MNE EDF signal loading pattern**: when actual signal is needed, load with
+  `mne.io.read_raw_edf(..., preload=False, include=list(remap.keys()))` — `include=` evaluated **at read
+  time** (not a lazy `pick` afterwards) to avoid MNE's partial-read `AssertionError` when the highest-rate
+  channel is excluded and to preserve the native EEG rate — then `drop_suffix_duplicates(raw)` and
+  `raw.rename_channels(adapt_remap_dict_to_suffixes(raw, remap))`. The two helpers handle MNE ≥ 1.8's
+  `-0`/`-1` suffixes on duplicate channel names. Shared by tools 5, 6, 7 (tool 6 documents the full
+  rationale and its channel-deselection delta).
+- **Path comparison normalization (`os.path.normcase`)**: whenever two filesystem paths, stems, or
+  filenames are compared as strings (equality, `in`, `.isin()`, set/dict membership) **and the two sides
+  can come from different sources** (one from disk, one from a stored TSV/JSON/widget), both sides are
+  wrapped in `os.path.normcase(...)` **at the comparison only** — the stored/displayed value keeps its
+  original case. On Windows this removes drive-letter case and `/`↔`\` mismatches (a no-op on POSIX).
+  Applied across the skip/merge filters, EDF and hypnogram lookups, participant-id matching, and
+  hypnogram-suffix matching of every tool that mixes disk paths with stored configuration.
+- **Skip + cumulative-merge workflow**: processing tools decouple folder selection from running, show an
+  "N / M already done" info line, offer a **"Skip already processed"** checkbox (on by default), and write
+  outputs with **merge/replace** semantics (rows for the items processed this run replace their previous
+  rows, all others kept) so the tables stay the full cumulative dataset across runs. Aggregated summary
+  files are regenerated from every per-item file present, not just the current run. Shared by tools 1, 2,
+  5, 6 (and the hypno/event variants), each keyed on its own identifier (`path`, participant id, `file_id`).
+- **Lenient JSON loader**: every read of a config JSON parses strictly first and, on failure, repairs a
+  single trailing comma before a closing `}`/`]` (a common hand-edit mistake) before retrying. Shared by
+  the config readers of tools 2 and 4.
+- **Hypnogram-suffix auto-detection**: on folder selection, the `.txt` files next to each EDF are scanned,
+  candidate suffixes counted (all files per EDF matched), and the suffix widget auto-filled, with a
+  colour-coded info label (green = all EDFs matched, orange = partial/none). **Selection rule differs by
+  intent**: tool 3 prefers the **shortest** suffix on ties (target = raw, unremapped hypnogram); tools 5
+  and 6 prefer the **longest** suffix among candidates appearing for ≥ 50% of the maximum count
+  (target = the more specific remapped/processed version).
+- **Event sourcing (CSV-first / XML-fallback)**: scored events are read via a shared `load_events()` —
+  the Compumedics event CSV (`Name, Start, Duration`, default suffix `_event_xml.csv`) first, then the
+  `<ScoredEvents>` of the `*.edf.XML` (`CMPStudyConfig`). Shared by tool 4 (harmonization) and tool 7
+  (overlay). Tool 4 exposes the CSV suffix as an editable, auto-detected field (its `load_events()`
+  takes a `csv_suffix=` argument). Tool 4 returns
+  `(list-of-(name, start, duration), source)`; tool 7's `load_events()` returns the same events as a
+  `Name/Start/Duration` **DataFrame** plus the `source` tag, because its overlay/navigator code consumes
+  a DataFrame.
+- **Proactive error handling**: per-item `try/except` with a **fatal** (add to a `failed` list and
+  `continue`) vs **non-fatal** (`⚠` warning, continue) distinction; in Voila, every button callback and
+  per-item loop is wrapped so a single failure never crashes the run or freezes the UI, and errors are
+  always surfaced via a widget or `print()`.
+- **Custom (non-AASM) sleep stages**: a project may intentionally keep stage labels outside the AASM set
+  (`W/N1/N2/N3/R`), e.g. `N4` or a movement stage. They are declared **once** in a shared flat JSON
+  `<data_folder>/config_param/custom_stages.json` (`{"custom_stages": ["N4", …]}`, order = display order),
+  **written only by `3_remap_hypno`** and **read** by tools 5/6/7. Tools 5/6/7 each expose an editable
+  `Custom stages` field **auto-filled from the JSON on folder/file selection** — a **volatile per-run
+  override** that never rewrites the JSON (management stays in tool 3). Three helpers are **duplicated**
+  across the tools (like `get_phys_bounds_uV`): `load_custom_stages(folder)`, `parse_custom_field(text)`,
+  and `custom_stage_style(custom_stages) -> (stage_y, stage_colors, ytick_pos, ytick_labels)`. Custom
+  stages stack **below N3** on every hypnogram axis (`N3=0 → -1, -2, …` in declaration order); the
+  step-line stays gray with **REM in red** (YASA convention) and each custom stage in a fixed non-red
+  palette (`#8dd3c7, #ffffb3, #bebada, #80b1d3, #fdb462, #b3de69, #fccde5, #d9d9d9`). Because
+  `yasa.plot_spectrogram` / `yasa.Hypnogram` **hard-reject** any non-AASM label, tools 5 & 7 plot the
+  hypnospectrogram with a custom **`plot_hypnospectrogram()`** that keeps YASA's stage-agnostic
+  spectrogram core (`from yasa.plotting import spectrogram_lspopt`) and draws the hypnogram band itself —
+  no new dependency (`spectrogram_lspopt` ships with the already-required `yasa`). Reading the JSON is
+  non-fatal (`[]` on absent/corrupt); an unregistered non-AASM label keeps the old behaviour (warning +
+  per-stage exclusion), never a crash.
+  - **Flat/dead-epoch colour scaling**: YASA's percentile-based colormap range (`np.percentile(Sxx_dB,
+    [trimperc, 100-trimperc])` over all pixels) washes the spectrogram out (uniform red, dead-epoch
+    stripes) once the fraction of **fully-flat 30 s epochs** — spectrogram columns, **not** the
+    channel's sample-level `flat_pct` — exceeds `trimperc` (2.5 %): a flat/disconnected epoch has
+    ~zero power → ≈ −400 dB after the display filter, dragging `vmin` to that floor. The shared
+    `plot_hypnospectrogram()` therefore excludes near-zero columns from the `vmin/vmax` percentiles
+    (a column is valid when its peak dB is within 60 dB of the median epoch peak) and renders the
+    excluded columns grey (`#d9d9d9`, "no signal"); clean channels (no dead epoch) are unaffected
+    (byte-identical scale and image). The tool-7 *navigator* spectrogram is a separate plot (floored
+    at −120 dB, p5–p99) and is left as-is. Diagnostic scripts:
+    `tools/simple_hypnospectro_yasa_vs_fix.py` and `tools/compare_flat_spectrogram_fix.{py,ipynb}`.
+- **Physical bounds in µV (`get_phys_bounds_uV`)**: MNE 1.9 stores an EDF channel's physical range as
+  `physical_max + offset` in `raw._raw_extras` (not explicit `physical_min`/`physical_max`).
+  `get_phys_bounds_uV()` reconstructs the µV bounds and **must scale both `physical_max` and `offsets`
+  by `extras['units'][ch_idx] * 1e6`** — MNE keeps them in the channel's *native* EDF unit (`1e-6` µV,
+  `1e-3` mV, `1.0` V), while `raw.get_data() * 1e6` is always µV. Without the scaling, any channel
+  declared in mV (typical for Compumedics EOG/EMG/ECG, `physical_max = 1.0 mV`) is compared against a
+  1.0 µV bound — 1000× too small — so `bounds_pct` flags ~98–100 % of a perfectly healthy signal; EEG
+  (declared in µV) stays unaffected, which kept the bug latent until non-EEG channels were added.
+  Defined in `5_quality_overview_voila`, **duplicated** in `7_live_explore_1file*` — keep in sync.
+  (Verified on ICEBERG 117: EOG/EMG/ECG `bounds_pct` 97–98 % → <0.4 %, EEG unchanged.)
+- **EOG/EMG/ECG channel-type detection (`detect_channel_types`)**: non-EEG channels are classified by
+  **transducer type OR channel name** — EOG = transducer `EOG` / name `eog`; ECG = transducer
+  `ECG`/`EKG` / name `ecg`/`ekg`; EMG = transducer `EMG` / name `emg`/`chin`/`menton` (the `chin|menton`
+  aliases cover Compumedics chin-EMG labels). EEG uses `KNOWN_EEG_CHANNEL_RE` (full 10-10 + mastoids +
+  literal `EEG`) or transducer `EEG`/`AGAGCL ELECTRODE`, excluding anything already matched as
+  EOG/ECG/EMG. Defined in `7_live_explore_1file`; reuse it when a tool needs the scoring montage,
+  pre-filled as an editable selection so the user can correct misses.
+- **ipywidgets `Box` stray per-row scrollbars**: jupyter-widgets ships
+  `.widget-box { box-sizing: border-box; overflow: auto; }`, so any bordered + padded `HBox`/`VBox` row
+  whose children overflow the content box by even 1–2 px renders a per-row ▲▼ vertical scrollbar the user
+  can scroll by accident (shifting the row content). Fix: set `overflow='hidden'` explicitly on such row
+  layouts (applied to the Section 3 "Harmonize labels" rows of `4_remap_events_edf*`); keep the intended
+  scroll only on the outer list container.
+
 ## Tool descriptions
 
 ### 1. EDF Inspector (`1_inspect_edf_voila.ipynb`, `1_inspect_edf_perdataset.py`, `1_inspect_edf_perparticipant.py`)
@@ -101,7 +210,7 @@ Inspects EDF file parameters across an entire dataset **without loading signal d
 - Signal clipping (dynamic range ≤ 500 µV)
 - Poor resolution (dynamic range ≥ 0.1 µV per digital unit)
 
-**Anonymization check** (section 1.3 in Voila / section 1.4 in Jupyter): inspects the EDF+ *Local Patient ID* field (80-byte header) to detect non-anonymized patient names. The EDF+ format encodes this field as `code sex birthdate name` (space-separated); Compumedics writes the name as `LASTNAME_FIRSTNAME` and replaces it with `X_X` on anonymized export. The check isolates the name sub-field (4th token onward), strips placeholder characters (`X`, `x`, `_`, whitespace), and flags the file if anything remains. Additionally, each non-placeholder name token (≥ 3 characters, to avoid false positives from short codes or initials) is searched case-insensitively in the file stem to detect PII leaking into the file name. Two warning levels:
+**Anonymization check** (section 1.3 in Voila / section 1.4 in Jupyter): inspects the EDF+ *Local Patient ID* field (80-byte header) to detect non-anonymized patient names. The EDF+ format encodes this field as `code sex birthdate name` (space-separated); Compumedics writes the name as `LASTNAME_FIRSTNAME` and replaces it with `X_X` on anonymized export. The check isolates the name sub-field (4th token onward), strips placeholder characters (`X`, `x`, `_`, `,`, `;`, whitespace), and flags the file if anything remains. The `,` and `;` separators are stripped so that headers anonymized by *other* systems using a `Lastname,Firstname` placeholder (e.g. `Xxxxxxx,Xxxx`) are still recognized as anonymized, not just the Compumedics `X_X` form. Additionally, each non-placeholder name token (≥ 3 characters, to avoid false positives from short codes or initials) is searched case-insensitively in the file stem to detect PII leaking into the file name. Two warning levels:
 - `PII in header AND file name` — real name found in both header and file name.
 - `header NOT anonymized (file name looks clean)` — real name in header but file name appears clean; the important case where the file was renamed but the header was forgotten.
 Files where the check cannot be performed (read failures) are already captured in `failed_edf_read.tsv`. The `patient_name` field (raw name sub-field, before cleaning) is also stored as a column in `FULL_summary_table_edf.tsv` for quick cross-reference.
@@ -165,7 +274,7 @@ Condition 3 is required for EDFs exported by `mne.export.export_raw()`, which wr
 
 **Skip + incremental workflow**: like the EDF inspector, folder selection is decoupled from running. Selecting the folder refreshes an info line ("N / M participant(s) already configured" — counted against the existing `remap_reref_persubject.json`); the scan runs on an explicit **Run scan** button. A **"Skip participants already configured"** checkbox (checked by default) excludes participants already in the JSON from the scan, so the configurations and every downstream section involve only the new participants, whose entries are merged into the JSON on save (see Section 5). Participant ids and file paths are compared with `os.path.normcase` (case/separator-insensitive). `failed_edf_read.tsv` is merged on file path the same way, so it reflects the current config state rather than only the last scan.
 
-**Robust JSON loading**: every read of `remap_reref_persubject.json` (info line, scan filter, save-merge, section 6 test) goes through a lenient loader that parses strictly first and, on failure, repairs a single trailing comma before a closing `}`/`]` (a common hand-edit mistake) before retrying.
+**Robust JSON loading** (see *Cross-cutting procedures*): every read of `remap_reref_persubject.json` (info line, scan filter, save-merge, section 6 test) goes through the shared lenient loader.
 
 **Section 6 — Test the JSON**: applies each participant's remap + re-reference and reports the resulting channel configurations (harmonization succeeds when a single configuration remains). A **scope** toggle selects what to test — **Whole database** (default; every participant in the JSON that has an EDF in the folder, normcase-matched) or **New files (this session)**. The toggle and run button persist in their own area with results rendered below, so the test can be re-run with a changed scope (e.g. verify the just-modified participants, then the whole database) without redoing the workflow.
 
@@ -176,15 +285,23 @@ Condition 3 is required for EDFs exported by `mne.export.export_raw()`, which wr
 Interactive tool to harmonize sleep stage labels across a heterogeneous database, converting different scoring conventions (e.g. `0,1,2,3,4` or `W,S1,S2,S3,S4`) to the standard AASM format (`W`, `N1`, `N2`, `N3`, `R`).
 
 **Workflow (5 sections):**
-1. **Scan** — Select data folder, hypnogram suffix, and output suffix → auto-detects files recursively; reports unique label configurations, flags boundary `?` epochs, and highlights suspicious labels (any label not in `DEFAULT_MAPPING`, including short alphanumeric labels like `U` or `M`). Also reports: how many remapped files already exist with the output suffix; a list of `.txt` files matching neither suffix (informational, only when both suffixes are defined); automatically exports `mid_uncertain_epochs_to_verify.tsv` if mid-recording `?` epochs or unexpected labels are found. If the TSV already exists (e.g. edited manually between sessions), it is loaded automatically and corrections are pre-applied in memory — the file is never overwritten at scan time. Optional checkbox to exclude participants whose remapped file already exists from all downstream processing.
-2. **Uncertain and unexpected epoch review** — Two independent sub-widgets, each activated when the relevant issue is found:
-   - **2a — Mid-recording `?` correction**: one-by-one navigation through all mid-recording `?` epochs; displays ±N context epochs (adjustable slider, default 5); per-epoch assignment with auto-advance; warns user to cross-check in scoring software. Clicking "Corrections done" writes the unified `mid_uncertain_epochs_to_verify.tsv` with all current corrections.
-   - **2b — Unexpected label review**: navigation through all epochs carrying a label not in `DEFAULT_MAPPING` (e.g. `U`, `M`); "Jump to label" dropdown to filter by label type; context table identical to 2a; **Apply to this epoch** for per-epoch assignment (auto-advances); **Apply to all in this file** to batch-replace all occurrences of the current label within the current participant. Corrections update `hypno_data` in memory; fully corrected labels disappear from Section 3 configs on next run. Corrections are persisted in the same `mid_uncertain_epochs_to_verify.tsv` when "Corrections done" is clicked.
+1. **Scan** — Select data folder, hypnogram suffix, and output suffix → auto-detects files recursively; reports unique label configurations and flags problematic epochs in a **single combined message** — mid-recording `?` epochs and suspicious labels (any label not in `DEFAULT_MAPPING`, e.g. `U`/`M`) are listed together, one aligned row per label (`?` treated as a label), each showing the file count, epoch count, and the **affected file names** (the quoted label is left-padded so the columns align for multi-character labels). Boundary `?` epochs (first/last ~10) are not flagged here — they are mapped in Section 3. Also reports: how many remapped files already exist with the output suffix; a list of `.txt` files matching neither suffix (informational, only when both suffixes are defined); automatically exports `mid_uncertain_epochs_to_verify.tsv` if mid-recording `?` epochs or unexpected labels are found. If the TSV already exists (e.g. edited manually between sessions), it is loaded automatically and its corrections are pre-applied in memory; the flags are computed on the **original** labels (before applying the TSV), so the pre-corrected epochs still appear in Section 2 (pre-filled) instead of disappearing — the TSV file is never overwritten at scan time. Optional checkbox to exclude participants whose remapped file already exists from all downstream processing.
+2. **Uncertain and unexpected epoch review** — A **single review widget** (shown whenever any mid-recording `?` or unexpected label is found) navigates all flagged epochs in one flat list, handling both kinds together: mid-recording `?` epochs and epochs carrying a label not in `DEFAULT_MAPPING` (e.g. `U`, `M`).
+   - **Show** filter dropdown: *All issues* / *Mid-recording `?`* / one entry per unexpected label, to focus the navigation.
+   - ±N context epochs (adjustable slider, default 5); the current epoch in red, already-corrected epochs in green ✓, other still-pending flagged epochs in orange.
+   - **Apply to this epoch** (assign + auto-advance) and **Apply to all in this file** (batch-replace every flagged occurrence of the current label within the current participant — now works for mid-`?` too).
+   - Combobox pre-filled from `DEFAULT_MAPPING` **only for unexpected labels**; mid-recording `?` are left blank (a mid-night `?` is unlikely to be Wake, so the user picks explicitly from the full list).
+   - The confirmation line shows `old → new` using the original flagged label (correct even when the epoch was pre-loaded from an existing TSV, where `hypno_data` already holds the new value).
+   - Corrections update `hypno_data` in memory and a single internal `STATE.corrections` dict; fully corrected labels disappear from Section 3 configs on next run. Clicking "Corrections done" persists all corrections into `mid_uncertain_epochs_to_verify.tsv`.
 3. **Remap labels** — Per-configuration accordion widget with combobox suggestions pre-filled from `DEFAULT_MAPPING`; suspicious labels are highlighted in red with inline epoch context; warns if the final mapping leaves non-AASM labels; confirmation required before proceeding
 4. **Save** — Writes remapped hypnograms next to originals using the output suffix defined in Section 1; end message confirms completion and recalls the suffix used
 5. **Verify** — Before/after configuration summary; verdict fails only if non-AASM labels remain (multiple configurations with valid AASM labels are acceptable — e.g. insomnia patients legitimately missing N3)
 
-**Hypnogram suffix auto-detection**: when the data folder is selected, the tool scans `.txt` files next to each EDF, counts candidate suffixes (all files per EDF are matched — no early break), and auto-fills the `Hypnogram suffix:` widget with the most common suffix. In case of equal counts, the **shortest** suffix is preferred — the goal is to select the raw (unremapped) hypnogram, not an already-processed version. This is the reverse of the strategy used in `5_quality_overview_voila` and `6_preprocessing_voila`, which prefer the longest suffix among candidates appearing for ≥50% of the maximum count. All detected suffixes and their counts are shown in a colour-coded info label below the widget (green = all EDFs matched, orange = partial match or no files found).
+**Custom (non-AASM) stages** (see *Cross-cutting procedures*): tool 3 is the **only** writer of `config_param/custom_stages.json`. A `Custom stages` field (Section 1, comma-separated, auto-filled from any existing JSON) lists labels deliberately kept outside the AASM set; `current_acceptable()` = `STANDARD_LABELS | {MT} | <field>`, so those labels no longer trip the Section 5 verdict. Section 3's **Save remapping** detects non-AASM *target* labels and offers a **➕ Register** button that appends them to the field; Section 4's **Save files** then **merges** the declared stages that actually survive in the remapped output into `custom_stages.json`. Downstream, tools 5/6/7 auto-load this file so the kept labels are recognised (hypnospectrogram, per-stage tables, rejection) instead of being flagged as unrecognised.
+
+**Declared custom stages are first-class, not errors** (UX): a label listed in the Section 1 `Custom stages` field is no longer treated as suspect/unexpected. **Section 1** reports it on its own info line (`'M' : N file(s), K epoch(s) — ids…`) and excludes it from the **Section 2** review widget and the `mid_uncertain_epochs_to_verify.tsv`. **Section 3** suggests the *raw* custom label as its own target (identity, "keep" — the user may still rename it), shown in blue with a "rename if needed" note rather than suspect-red, and offers it in the combobox options. **All post-remap reporting keys off the labels actually present in the OUTPUT, not the raw field**, so renaming e.g. `M→SD` reports and saves only `SD` (never the now-unused `M`): Section 3's save splits output non-AASM targets into *registered* (already in the field → green "kept" line) vs *unregistered* (→ the ➕ Register warning); **Section 4** shows declared custom stages as a green **info box** and only **genuine** non-AASM, non-custom labels block saving / require the confirm-checkbox (MT is treated as acceptable); the **conclusion** notes that tools 5/6/7 will recognise the kept stages; **Section 5**'s success line lists the custom stages actually present in the reloaded files. The Section 1 field is never auto-pruned of renamed-away labels (they may still be in use by another configuration), and `save_custom_stages` filters to output-present stages, so `custom_stages.json` stays correct regardless.
+
+**Hypnogram suffix auto-detection** (see *Cross-cutting procedures*): tool 3 auto-fills the `Hypnogram suffix:` widget with the **shortest** candidate suffix on ties — the goal is the raw (unremapped) hypnogram, not an already-processed one (the reverse of tools 5/6, which prefer the longest).
 
 **Key constants:**
 - `DEFAULT_MAPPING`: `0→W`, `1→N1`, `2→N2`, `3→N3`, `4→N3`, `5→R`, `?→W`, `S1→N1`…
@@ -193,7 +310,9 @@ Interactive tool to harmonize sleep stage labels across a heterogeneous database
 
 **Outputs**:
 - One `.txt` file per participant with the output suffix (e.g. `_Hypnogram_remapped.txt`), one label per line
-- `mid_uncertain_epochs_to_verify.tsv` — written to `<data_folder>/` at scan time when mid-recording `?` epochs or unexpected labels are found; columns: `participant_id`, `epoch_index`, `epoch_time_sec`, `total_epochs`, `original_label` (`?` for mid-recording unscored epochs, or the raw unexpected label e.g. `U`, `M`), `context` (±5 epochs), `corrected_label`; updated with all corrections (both types) after "Corrections done" is clicked. If the file already exists at scan time it is loaded and applied in memory instead of being overwritten — corrections whose `original_label` no longer matches the current hypnogram value (re-scored since the TSV was written) are flagged as conflicts and shown in a warning panel in Section 2.
+- `mid_uncertain_epochs_to_verify.tsv` — written to `<data_folder>/` at scan time when mid-recording `?` epochs or unexpected labels are found; columns: `participant_id`, `epoch_index`, `epoch_time_sec`, `total_epochs`, `original_label` (`?` for mid-recording unscored epochs, or the raw unexpected label e.g. `U`, `M`), `context` (±5 epochs), `corrected_label`; updated with all corrections after "Corrections done" is clicked. If the file already exists at scan time it is loaded and applied in memory instead of being overwritten; the pre-loaded corrections are shown in a summary panel (as `ep.N: old→new`) and also appear **pre-filled** in the Section 2 review widget (flags are computed on the original labels, so they are not hidden). Corrections whose `original_label` no longer matches the current hypnogram value (re-scored since the TSV was written) are flagged as conflicts and shown in a warning panel in Section 2.
+
+- `config_param/custom_stages.json` — written/merged when the user keeps non-AASM labels as custom stages (see *Custom (non-AASM) stages* above); a flat `{"custom_stages": [...]}` list consumed by tools 5/6/7.
 
 `check_hypno_config.py` is the legacy script that preceded this notebook; kept for reference.
 
@@ -201,16 +320,18 @@ Interactive tool to harmonize sleep stage labels across a heterogeneous database
 
 Interactive tool to **visualize** the scored-event configurations present across a heterogeneous database and **harmonize** their raw labels to a single canonical vocabulary — the event analogue of tool #2 (channel selection & remapping). Scored events are annotated during sleep scoring and exported by Profusion/Compumedics (apnea, hypopnea, arousals, limb movements, PLM, SpO2 desaturation…).
 
-**Event sourcing (CSV-first / XML-fallback)**: a shared `load_events(edf_path)` helper reads the Compumedics `*_event_xml.csv` (`Name, Start, Duration` in seconds) first and, when it is absent, parses the `<ScoredEvents>` of the `*.edf.XML` (Profusion `CMPStudyConfig`; `<Input>` is ignored). Both sources were verified equivalent on ICEBERG. The `<ScoredEventSettings>` catalogue (the profile's possible event types) is **not** used for grouping.
+**Event sourcing (CSV-first / XML-fallback)**: a shared `load_events(edf_path, csv_suffix='_event_xml.csv')` helper reads the Compumedics event CSV (`Name, Start, Duration` in seconds) first and, when it is absent, parses the `<ScoredEvents>` of the `*.edf.XML` (Profusion `CMPStudyConfig`; `<Input>` is ignored). Both sources were verified equivalent on ICEBERG. The `<ScoredEventSettings>` catalogue (the profile's possible event types) is **not** used for grouping.
+
+**Configurable event-CSV suffix**: the Compumedics event-CSV name is no longer hardcoded. A **`CSV suffix:`** text field (default `_event_xml.csv`) drives `event_companion_paths(edf_path, csv_suffix)` / `load_events(edf_path, csv_suffix)`, so datasets exported with a different CSV suffix are supported. On folder selection the suffix is **auto-detected** (mirroring the hypnogram-suffix detection of `5_quality_overview`, see *Cross-cutting procedures*): the `.csv` files next to each EDF are scanned, candidate suffixes counted, and the field auto-filled with the **most frequent** suffix (shortest on ties — events have no "more specific remapped" variant, unlike hypnograms), with a colour-coded info line (green = all EDFs matched, orange = partial/none). The chosen suffix feeds both the Section 1 scan and the Section 1bis CSV-vs-XML check; the XML fallback (`.edf.XML`) is unchanged.
 
 **Configuration grouping**: files are grouped by their `frozenset` of **unique event labels actually present** — two files with the same unique labels share one configuration even if their event counts/timing differ.
 
 **Workflow (sections):**
-1. **Scan** — select the data folder (recursive `rglob('*.edf')`); selecting the folder only refreshes an info line, the scan runs on an explicit **Run scan** button. A **"Skip labels already mapped"** checkbox (on by default) hides labels already present in an existing `event_remap.json` (incremental harmonization when a new cohort is added).
+1. **Scan** — select the data folder (recursive `rglob('*.edf')`); selecting the folder only refreshes an info line **and auto-detects the event-CSV suffix** (editable `CSV suffix:` field, colour-coded detection line — see *Configurable event-CSV suffix* above), the scan runs on an explicit **Run scan** button. A **"Skip labels already mapped"** checkbox (on by default) hides labels already present in an existing `event_remap.json` (incremental harmonization when a new cohort is added).
 1bis. **(Optional) CSV vs XML consistency check** — opt-in button; for every file having both companions, compares the CSV and the XML `<ScoredEvents>` (name + start + duration, tolerance 1e-3 s) and writes `event_source_mismatch.tsv`. Opt-in because it forces reading both files for every EDF.
-2. **Visualize configurations** — one panel per unique config (sorted labels + expandable file-id list) plus a global table of every raw label with its file count and total occurrences.
-3. **Harmonize labels** — one editable row per unique raw label (combobox pre-filled from `DEFAULT_EVENT_MAPPING`, free text allowed), with an **ignore** toggle (stored as `null`). Filtered by the skip checkbox.
-4. **Preview & save** — builds a flat `{raw_label: canonical_label}` mapping and **merges** it into `config_param/event_remap.json` via the lenient JSON loader (labels mapped this session replace their old value, all others kept; keys sorted). Unmapped non-ignored labels are reported and not saved.
+2. **Visualize configurations** — because two files sharing the same label names can still form distinct configs (a config = the exact set of labels *present*, so a missing label splits it off), the configs are not stacked: a **dropdown** ("Show config:") selects one configuration to detail (its sorted unique labels + file/label counts), and a **"Show file ids" toggle button** (replacing the old `<details>` arrow) shows/hides that config's file-id list in a scrollable box. The global table of every raw label (file count + total occurrences + suggested canonical) is kept below.
+3. **Harmonize labels** — one editable row per unique raw label (combobox pre-filled from `DEFAULT_EVENT_MAPPING`, free text allowed), with an **ignore** toggle (stored as `null`); filtered by the skip checkbox. Each row is a bordered, column-aligned line for readability (the row layout forces `overflow='hidden'` so the jupyter-widgets default `.widget-box { overflow:auto }` does not raise a stray per-row scrollbar — see CLAUDE.md). A **"Validate mapping & ignores"** button summarizes the choices (N mapped / N ignored / N left empty, warning on empties) and **unlocks** the Section 4 save button (which starts disabled). Editing any row after validating (or re-running the scan / toggling the skip checkbox) re-locks Section 4 and clears the previous save preview, so the saved JSON always reflects the latest Section 3 selection.
+4. **Preview & save** — enabled only after Section 3 validation; builds a flat `{raw_label: canonical_label}` mapping and **merges** it into `config_param/event_remap.json` via the lenient JSON loader (labels mapped this session replace their old value, all others kept; keys sorted). Unmapped non-ignored labels are reported and not saved.
 5. **Verify** — applies the saved mapping to every configuration, reports the resulting harmonized labels, and passes when no raw label is left unmapped (ignored labels count as handled). A scope dropdown can restrict the view to configs with unmapped labels.
 
 **`DEFAULT_EVENT_MAPPING`** (editable suggestions, snake_case canonical vocabulary): apnea subtypes kept (`apnea_obstructive` / `apnea_central` / `apnea_mixed`), `hypopnea`, `spo2_desaturation`, arousal subtypes kept (`arousal_respiratory` / `arousal_spontaneous` / `arousal_limb` / `arousal`), limb laterality collapsed (`limb_movement`, `plm`). `suggest_canonical()` also tolerates a trailing `(Left)`/`(Right)` marker.
@@ -220,8 +341,6 @@ Interactive tool to **visualize** the scored-event configurations present across
 - `event_source_mismatch.tsv` — only if the CSV-vs-XML check is run; columns `file_id, n_csv, n_xml, n_only_in_csv, n_only_in_xml, labels_only_in_csv, labels_only_in_xml, status`
 - `failed_event_read.tsv` — files with no readable event companion (only if any failed)
 
-**TODO**: back-port the XML fallback into `live_explore`'s `load_events_csv()` (see `tools/TODO_live_explore_event_xml_fallback.md`).
-
 ### 5. Quality overview (`5_quality_overview_voila.ipynb`)
 
 *(Stable tool — formerly “Phase 1” of the preprocessing pipeline.)*
@@ -229,11 +348,13 @@ Implemented as `tools/5_quality_overview_voila.ipynb`. Produces one `mne.Report`
 
 **EDF scan**: recursive (`rglob('*.edf')`), so datasets organized in subfolders (e.g. `group1/`, `group2/`) are fully covered without needing to run the tool per subfolder.
 
-**Hypnogram suffix auto-detection**: when the data folder is selected, the tool scans `.txt` files next to each EDF, counts candidate suffixes (all files per EDF are matched — no early break), and auto-fills the `Hypno suffix:` widget. Selection rule: among suffixes whose count is ≥ 50% of the maximum count, the **longest** is preferred (more specific = remapped/processed version); count is the tiebreaker when lengths are equal. The 50% threshold prevents rare or accidental long suffixes from winning when remapping is far from complete. All detected suffixes and their counts are shown in a colour-coded info label below the widget (green = all EDFs matched, orange = partial match or no files found). The same rule applies in `6_preprocessing_voila`.
+**Hypnogram suffix auto-detection** (see *Cross-cutting procedures*): tools 5 and 6 prefer the **longest** suffix among candidates appearing for ≥ 50% of the maximum count (more specific = remapped/processed version; count breaks ties on equal length). The 50% threshold prevents a rare accidental long suffix from winning when remapping is far from complete.
 
 **Live output warnings**: if a hypnogram is not found, fails to load, has a length mismatch with the EDF, or contains unrecognised stage labels, a plain-text `⚠` warning is printed in the notebook output area immediately after the per-participant result line (in addition to the yellow banner already shown in the HTML report's Overview section).
 
 **Hypnogram label validation**: after mapping labels to YASA integers (`W→0`, `N1→1`, `N2→2`, `N3→3`, `R→4`), the tool checks for unrecognised labels. `MT` (movement time) is silently tolerated — YASA treats it as an artifact epoch (NaN). Any other unrecognised label triggers a warning. Two severity levels: if > 10% of epochs are unrecognised, `hypno_vec` is set to `None` (spectrogram skipped, error-level warning pointing to `3_remap_hypno_voila`); if ≤ 10%, `hypno_vec` is kept but a warning lists the unrecognised labels and their count. This catches hypnograms that were not yet remapped to AASM convention (e.g. `S1/S2/S3/S4` or raw numeric labels).
+
+**Custom (non-AASM) stages** (see *Cross-cutting procedures*): an editable `Custom stages` field (auto-filled from `config_param/custom_stages.json`) registers project-specific labels. Registered labels are treated as **recognised** — they no longer count toward the >10% skip and are not set to `None` — the YASA hypnospectrogram is replaced by the shared `plot_hypnospectrogram()` (custom labels stacked below N3, their own colours), and `quality_summary_by_stage.tsv` + the `dataset_overview.html` by-stage tables/boxplot insets iterate `['W','N1','N2','N3','R'] + custom_stages` (`stage_map` extends the YASA codes with `5+i`).
 
 **Spectrogram fault tolerance**: the `yasa.hypno_upsample_to_data()` + `yasa.plot_spectrogram()` calls are wrapped in a `try/except`. If YASA raises an exception, the channel's spectrogram section in the HTML report shows the error message and processing continues to the next channel and participant without interruption.
 
@@ -253,7 +374,7 @@ Implemented as `tools/5_quality_overview_voila.ipynb`. Produces one `mne.Report`
 | `std_uV` | < 5.0 µV | Dead / near-dead channels |
 | `hist_extreme_pct` | > 1.0% | In-range clipping (saturation within declared EDF range) |
 
-`flat_pct` = fraction of consecutive sample pairs with \|diff\| < `max(2×ADC_step, 0.06 µV)`. `bounds_pct` = fraction of samples within 0.5 µV of the EDF physical_min/max header limits. `hist_extreme_pct` = fraction of samples in the outermost histogram bins. **Kurtosis is intentionally NOT used as a flagging criterion** — normal PSG EEG has physiologically high kurtosis (spindles, K-complexes produce values of 100–500), making it unreliable without per-subject normalization. `p99_abs_uV` and `p999_abs_uV` (99th and 99.9th percentile of |amplitude|) are recorded as informational metrics in `quality_summary.tsv` but are not currently used for flagging; they are useful for cross-channel and cross-dataset amplitude comparison.
+`flat_pct` = fraction of consecutive sample pairs with \|diff\| < `max(2×ADC_step, 0.06 µV)`. `bounds_pct` = fraction of samples within 0.5 µV of the EDF physical_min/max header limits, reconstructed in µV by `get_phys_bounds_uV()`. **Unit handling**: MNE keeps `_raw_extras['physical_max']`/`['offsets']` in each channel's *native* EDF physical unit (µV, mV, V…), not in µV, whereas the signal is read as `raw.get_data() * 1e6` (always µV). `get_phys_bounds_uV()` therefore multiplies both bounds by `extras['units'][ch_idx] * 1e6` (MNE's native-unit→volts factor: `1e-6` µV, `1e-3` mV, `1.0` V) so the comparison is unit-consistent. This is essential for non-EEG channels: Compumedics EOG/EMG/ECG are declared in **mV** (e.g. `physical_max = 1.0 mV`), so without the conversion they are compared against a 1.0 µV bound — 1000× too small — and `bounds_pct` flags ~98–100 % of a perfectly healthy signal. EEG channels (declared in µV) are unaffected. `hist_extreme_pct` = fraction of samples in the outermost histogram bins. **Kurtosis is intentionally NOT used as a flagging criterion** — normal PSG EEG has physiologically high kurtosis (spindles, K-complexes produce values of 100–500), making it unreliable without per-subject normalization. `p99_abs_uV` and `p999_abs_uV` (99th and 99.9th percentile of |amplitude|) are recorded as informational metrics in `quality_summary.tsv` but are not currently used for flagging; they are useful for cross-channel and cross-dataset amplitude comparison.
 
 **`dataset_overview.html` — dataset-level summary**: generated at the end of every run from the full cumulative `quality_summary.tsv` (reflects all participants processed to date, not just the current run). Contains two levels:
 - **Global section (all electrodes pooled)**: stats table (mean / median / p5 / p25 / p75 / p95 per metric), **mean (median) by sleep stage table** (metrics as rows — `mean_uV`, `std_uV`, `flat_pct`, `bounds_pct`, `hist_extreme_pct`, `p99_abs_uV`, `p999_abs_uV` — stages W/N1/N2/N3/R as columns; shown only when `quality_summary_by_stage.tsv` is present), n_peaks frequency table by electrode (flags DC drift and quantization cases), pooled boxplots (one subplot per key metric; each subplot contains a **stage inset** in its upper-right corner showing per-stage boxplots with stage colours W/N1/N2/N3/R — inset shown only when stage data is available; stage colours: W `#969696`, N1 `#9e9ac8`, N2 `#807dba`, N3 `#6a51a3`, R `#c994c7`), grouped boxplots (one subplot per key metric, x-axis = electrode — compares electrodes side by side).
@@ -274,12 +395,13 @@ Key metrics shown in plots: `std_uV`, `flat_pct`, `bounds_pct`, `hist_extreme_pc
 
 *(Stable tool — formerly “Phase 2” of the preprocessing pipeline.)*
 
-Implemented as a Voila notebook with four sections: (1) path configuration, (2) preprocessing and rejection parameters, (3) participant selection, (4) processing loop.
+Implemented as a Voila notebook with four sections: (1) path configuration, (2) preprocessing and rejection parameters, (3) participant selection, (4) processing loop. **Section 2 is organised into two headed sub-sections**: **Preprocessing** (resampling + bandpass filter) and **Epoch rejection** (peak-to-peak amplitude per stage, flat signal & gradient, 1/f fit quality, and the optional event-based rejection — see below).
 
 **Inputs**:
 - `quality_summary.tsv` from Phase 1 — `exclude` column identifies channels to drop before preprocessing
 - `remap_reref_persubject.json` from `2_select&remap_channels_edf` — drives channel remapping and re-referencing per participant
 - Raw EDF files and remapped hypnograms (default suffix `_Hypnogram_remapped.txt`)
+- *(optional, for event-based rejection)* `config_param/event_remap.json` from `4_remap_events_edf` and the per-EDF scored-event companions (`*_event_xml.csv` / `*.edf.XML`). Section 1 has an explicit `event_remap.json` `FileChooser` (auto-pointed at `<edf_folder>/config_param/` when present) and an editable **`Event CSV suffix:`** field auto-detected from the `.csv` companions next to the EDFs (most frequent suffix, shortest on ties; colour-coded info line), mirroring the suffix auto-detection of tools 4 / 5.
 
 **Channel-name handling when loading EDF data from notebook outputs** (critical):
 
@@ -309,9 +431,7 @@ The two tools then differ only in what follows:
   ```
   A `present`-empty guard (e.g. if the rename failed) marks the participant as failed and skips it, so a single bad file never crashes the run.
 
-**Shared utility functions** (defined identically in `5_quality_overview_voila` and `6_preprocessing_voila`, used right after `read_raw_edf`):
-- `drop_suffix_duplicates(raw)` — MNE ≥ 1.8 appends `-0`/`-1` to duplicate channel names; this keeps only the `-0` variant and drops the rest. Returns `(raw, dropped_list)`.
-- `adapt_remap_dict_to_suffixes(raw, remap_dict)` — rewrites the remap dict so a base name (`Fp1`) matches MNE's suffixed name (`Fp1-0`) when duplicates were present, so `rename_channels` still applies.
+**Shared utility functions** (`drop_suffix_duplicates(raw)` → `(raw, dropped_list)`, and `adapt_remap_dict_to_suffixes(raw, remap_dict)`): defined identically in `5_quality_overview_voila` and `6_preprocessing_voila`, used right after `read_raw_edf` — see *Cross-cutting procedures → MNE EDF signal loading pattern*.
 
 **Preprocessing steps** (applied in this order, each optional via widget):
 1. **Resampling** — `raw.resample(target_freq, npad='auto')`. Target frequency chosen by user; applied before filtering to avoid aliasing. Step is skipped if checkbox is unchecked.
@@ -320,24 +440,26 @@ The two tools then differ only in what follows:
 
 **Epoching**: 30-second fixed-length epochs created with `mne.make_fixed_length_epochs(raw, duration=30)`. Sleep stage assigned to each epoch from the hypnogram; epochs at the tail beyond the hypnogram length are discarded.
 
-**Epoch rejection — five methods**:
+**Epoch rejection — six methods** (the sixth, *Event overlap*, is optional and off by default):
 
-All methods operate on the raw epoch data in µV (`epochs.get_data() * 1e6`, shape `n_epochs × n_channels × n_times`). Rejection masks are boolean arrays of shape `(n_epochs, n_channels)` — a `True` entry means that (epoch, channel) pair was flagged. An epoch is considered **rejected** if *any* channel is flagged by *any* method.
+All methods operate on the raw epoch data in µV (`epochs.get_data() * 1e6`, shape `n_epochs × n_channels × n_times`). Rejection masks are boolean arrays of shape `(n_epochs, n_channels)` — a `True` entry means that (epoch, channel) pair was flagged. An epoch is considered **rejected** if *any* channel is flagged by *any* method. A single ordered registry — `METHOD_ORDER = ['amplitude', 'flat', 'gradient', '1f_error', '1f_r2', 'event']` with `METHOD_CODE`/`MULTIPLE_CODE` — is the one source of truth shared by the mask builder, heatmap, per-epoch log, per-stage summary and global table, so `event` appears in every output **only when event rejection actually ran** and older event-free outputs keep their original column set.
 
 | Method | Signal feature | Default threshold | Notes |
 |--------|---------------|-------------------|-------|
 | **Amplitude** | Peak-to-peak = `max(epoch) − min(epoch)` | W: 300, N1: 250, N2/N3: 200, REM: 250 µV | Per-stage threshold; W/REM more lenient because muscle and eye-movement artefacts are physiologically common in those stages. Equivalent to MNE's `drop_bad(reject=...)` criterion. |
 | **Flat signal** | Peak-to-peak < threshold | 1 µV | Detects disconnected electrodes or amplifier saturation within a single epoch. Logically identical to MNE's `drop_bad(flat=...)` criterion: both compare `ptp` against a low-amplitude threshold. |
 | **Gradient** | `max(|diff(epoch)|)` across time | 100 µV/sample | Maximum sample-to-sample absolute difference; sensitive to sudden jumps, electrode pops, and movement artefacts not captured by peak-to-peak. `diff` and `max` both operate on `axis=-1` (time axis) to handle the 3D `(n_epochs, n_channels, n_times)` array correctly. |
-| **Manual events** *(planned — Phase A)* | Scored events (arousal, apnea, hypopnea, limb movement…) overlapping the epoch | — | Format resolved: events harmonized via `event_remap.json` (tool 4), loaded with the shared CSV-first / XML-fallback `load_events()`. Design in *Planned modules → Event-based epoch rejection (Phase A)*. |
 | **1/f fit quality** | Specparam aperiodic fit on Welch PSD (4 s windows, 2–30 Hz, `aperiodic_mode='fixed'`, `max_n_peaks=0`) | MAE > 0.15 OR R² < 0.95 | Fit restricted to ≥2 Hz to limit influence of slow-wave non-stationarity. `max_n_peaks=0` skips peak detection for speed (we only need the aperiodic metrics). A failed fit is treated as a double flag (both error and R²). |
+| **Event containment** *(optional, off by default)* | 30 s epoch **containing the onset** of any **selected** canonical scored-event type (arousal, apnea, hypopnea, limb movement, SpO2 desaturation…) | **onset-only** — the epoch holding the event `Start`; the annotated `Duration` is **intentionally ignored** (clinicians often score only the onset without a reliable duration), so each event flags exactly one epoch | **Epoch-level** flag, replicated across all channels → single `flag_event` column. Events read with the shared CSV-first / XML-fallback `load_events(edf, csv_suffix)`; raw labels mapped to canonical via `event_remap.json` (tool 4). UI: a checkbox to activate, **a wrapping row of checkboxes for the canonical types** (all shown at once, populated from the chosen `event_remap.json`), and an inline note explaining the onset-only rule so the choice is informed. A **"Count affected epochs"** button reports, over the participants currently checked in Section 3, how many epochs each selected type would flag (overall + per stage) using only the hypnogram length/stages and events — no signal is read. Missing/unreadable event companions are non-fatal (the file keeps the other 5 methods, never added to `failed`). |
 
-**Heatmap — `_rejection_heatmap.png`**: channels (Y-axis) × epochs (X-axis); each cell coloured by the flagging method with priority encoding when multiple methods fire. A hypnogram strip is drawn above the main heatmap. Colour scheme: dark purple = none, red = amplitude, blue = flat, orange = gradient, yellow = 1/f error, green = 1/f R², dark red = multiple. Title includes overall rejection percentage.
+**Custom (non-AASM) stages** (see *Cross-cutting procedures*): an editable `Custom stages` field (Section 1, auto-filled from `config_param/custom_stages.json`) extends the per-stage logic. Each custom stage gets its **own amplitude-threshold widget** (default 250 µV, generated dynamically when the field changes) feeding `ptp_thresholds`; the per-participant summary, `global_rejection_by_stage.tsv`, the heatmap hypnogram strip and the **"Count affected epochs"** estimate all iterate `['W','N1','N2','N3','R'] + custom_stages`. Custom-stage epochs are still rejected by the other (stage-independent) methods regardless.
+
+**Heatmap — `_rejection_heatmap.png`**: channels (Y-axis) × epochs (X-axis); each cell coloured by the flagging method with priority encoding when multiple methods fire. A hypnogram strip is drawn above the main heatmap. Colour scheme: dark purple = none, red = amplitude, blue = flat, orange = gradient, yellow = 1/f error, green = 1/f R², **magenta = event**, dark red = multiple. Title includes overall rejection percentage.
 
 **Two-step QC approach** — Phase 2 does **not** drop epochs. It saves ALL epochs (including flagged ones) with an MNE `metadata` DataFrame attached, so downstream Phase 2b can inspect rejected epochs before finalising the rejection.
 
 **Outputs per participant** (in `<derivatives_root>/sub-{file_id}/`):
-- `{file_id}_all-epo.fif` — all epochs with `epochs.metadata` DataFrame (columns: `epoch_idx`, `stage`, `reject_flag`, `reject_method`, `flag_amplitude`, `flag_flat`, `flag_gradient`, `flag_1f_error`, `flag_1f_r2`)
+- `{file_id}_all-epo.fif` — all epochs with `epochs.metadata` DataFrame (columns: `epoch_idx`, `stage`, `reject_flag`, `reject_method`, `flag_amplitude`, `flag_flat`, `flag_gradient`, `flag_1f_error`, `flag_1f_r2`, plus `flag_event` **when event rejection ran**). The per-epoch and per-stage TSVs (`_epoch_rejection.tsv`, `_rejection_summary.tsv`) and `global_rejection_by_stage.tsv` gain the matching `flag_event` column / `event` rows / `*_event` columns the same way — additively, so event-free runs are byte-compatible with earlier outputs.
 - `{file_id}_rejection_mask.tsv` — per-(epoch, channel) rejection table; human-readable and manually editable before Phase 2b (columns: `epoch_idx`, `stage`, `channel`, `reject_flag`, plus one bool column per method)
 - `{file_id}_rejection_log.tsv` — rejection counts per stage per method (columns: `file_id`, `stage`, `method`, `n_total`, `n_rejected`, `pct_rejected`)
 - `{file_id}_rejection_heatmap.png` — channels × epochs colour-coded heatmap
@@ -361,7 +483,9 @@ Interactive inspection of **one EDF file at a time** — load it once, then expl
 
 **Rendering**: static matplotlib PNG for v1 (fast, no extra dependency, embeds into reports). A future migration of Section 3 to an interactive canvas (`ipympl`/Plotly) for click-to-seek and direct mouse annotation is tracked in `tools/TODO_live_explore_interactive_migration.md`.
 
-**Event annotations**: when a Compumedics `*_event_xml.csv` (columns `Name, Start, Duration` in seconds) is found next to the EDF, its events (arousals, apnea/hypopnea, limb movement, SpO2 desaturation…) are overlaid colour-coded on the Section 3 epoch view and ticked on the navigator.
+**Event annotations**: scored events are loaded with the shared **CSV-first / XML-fallback** `load_events(edf_path)` — the Compumedics `*_event_xml.csv` (`Name, Start, Duration` in seconds) is read first and, when absent, the `<ScoredEvents>` of the `*.edf.XML` (Profusion `CMPStudyConfig`) is parsed as a fallback (returns a `Name/Start/Duration` DataFrame plus a `source` tag, surfaced in the load summary as `events (from csv|xml)`). Its events (arousals, apnea/hypopnea, limb movement, SpO2 desaturation…) are overlaid colour-coded on the Section 3 epoch view and ticked on the navigator.
+
+**Custom (non-AASM) stages** (see *Cross-cutting procedures*): an editable `Custom stages` field (Section 1, auto-filled from the EDF folder's `config_param/custom_stages.json`) sets a global `CUSTOM_STAGES` at load. The Section 2 hypnospectrogram uses the shared `plot_hypnospectrogram()` (custom labels stacked below N3); `validate_hypno` treats registered labels as known (no warning); and the per-stage mean PSD, the Section 4 clean-vs-rejected PSD, the rejection heatmap strip, the per-stage summary and the navigator hypnogram axis all iterate `STAGES + CUSTOM_STAGES`. Section 4's per-stage amplitude rejection uses the existing `ptp_thresholds.get(stage, 250.0)` fallback for custom stages (quick single-file preview — the authoritative per-stage thresholds live in tool 6).
 
 **Outputs** (written only on explicit Save): `<hypno_stem>_rescored.txt` + `<hypno_stem>_rescore_log.tsv` (next to the input hypnogram), `<edf_stem>_live_rejection_mask.tsv` (next to the EDF).
 
@@ -375,20 +499,15 @@ Full PSG spectral pipeline: epoch rejection → PSD (Welch, 4 s windows) → ape
 
 Modules still in development. The quality-overview (5) and preprocessing (6) tools above are stable and were promoted out of this section.
 
-### Event-based epoch rejection (Phase A)
+### Event-based epoch rejection (Phase A) — **implemented in tool 6**
 
-Implements the **"Manual events"** rejection method reserved in `6_preprocessing_voila.ipynb` (and mirrored in `7_live_explore_1file`'s quick rejection), now that event harmonization exists (tool 4). Design:
-- Load `config_param/event_remap.json`; read each file's events with the shared `load_events()` (CSV-first / XML-fallback); map raw → canonical labels.
-- New UI block "Reject epochs overlapping events": a multiselect of canonical event types (or inferred categories — `apnea_*`, `arousal_*`, `plm`, `limb_movement`, `spo2_*`) that should flag an epoch, an optional **minimum overlap (s)** (default 0 = any overlap) and an optional **pad (s)** around each event.
-- For each 30 s epoch, flag it when it overlaps any selected event by ≥ the minimum overlap. The flag is epoch-level (replicated across channels in the mask).
-- Add a `flag_event` column to the per-(epoch, channel) mask and `epochs.metadata`, a new heatmap colour, and a row per (stage, `method=event`) in `_rejection_log.tsv`.
+Promoted out of this section: the **"Event overlap"** rejection method is now part of `6_preprocessing_voila.ipynb` (Section 2 → *Epoch rejection*). See the tool-6 description above for the UI, the `event_remap.json` chooser + auto-detected `Event CSV suffix`, the "Count affected epochs" button, and the additive `flag_event` outputs. (The mirror in `7_live_explore_1file`'s quick rejection remains a possible follow-up.)
 
 ### Event-epoch visualizer (Phase B)
 
-Helps decide whether a given event *type* is worth feeding into Phase A. Extends `7_live_explore_1file`'s Section 3 (which already overlays `*_event_xml.csv` spans):
+Helps decide whether a given event *type* is worth feeding into Phase A. Extends `7_live_explore_1file`'s Section 3 (which already overlays scored-event spans via the shared CSV-first / XML-fallback `load_events()`):
 - an **event-type filter** on the navigator: "jump to next/previous epoch overlapping event type X", with a per-type count;
 - a per-type **accept/reject decision** widget that writes a small `event_type_decisions.tsv` feeding Phase A's default selection.
-Requires the XML fallback in `load_events_csv()` (see `tools/TODO_live_explore_event_xml_fallback.md`).
 
 ### Interactive QC of rejected epochs (Phase 2b)
 Load `_all-epo.fif` + `_rejection_mask.tsv`, display the heatmap for navigation, show the raw signal of flagged epochs for visual inspection, allow manual override of individual entries in the mask, then save a final `{file_id}_clean-epo.fif` with only the validated-clean epochs.

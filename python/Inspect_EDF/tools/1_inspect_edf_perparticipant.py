@@ -151,7 +151,7 @@ def check_anonymization(patient_id, file_stem):
     else:
         name_subfield = str(patient_id).strip()
         id_format = 'non-standard'
-    cleaned = re.sub(r'[Xx_\s]', '', name_subfield)
+    cleaned = re.sub(r'[Xx_,;\s]', '', name_subfield)
     header_anonymized = (cleaned == '')
     name_in_filename = False
     if not header_anonymized:
@@ -325,7 +325,8 @@ with open(f"{summary_path}/EDF_perParticipant_report.html", "w", encoding="utf-8
             df['group'] = np.nan # initialyze column 'group' with NaN
             # get group from participants table if any (else group will be inferred from subfolder or filename extension later)
             if found_group:
-                df['group'] = subj_table.loc[subj_table['participant_id'] == sub_name, 'group'].iloc[0]
+                # normcase both sides: participant_id comes from the table (config), sub_name from the file stem (disk)
+                df['group'] = subj_table.loc[subj_table['participant_id'].astype(str).map(os.path.normcase) == os.path.normcase(sub_name), 'group'].iloc[0]
     
             # extract filename component before and after subject number (so we assume subject name contains at least incrementing numbers that are at the beginning of the file name)  
             #   ^       → start of string  
@@ -361,8 +362,8 @@ with open(f"{summary_path}/EDF_perParticipant_report.html", "w", encoding="utf-8
             
             #######################################################################
             # extract EEG info
-            # define common EEG label from the 10-10 convention
-            COMMON_EEG_label = r'\bFp1\b|\bFpz\b|\bFp2\b|\bAF7\b|\bAF3\b|\bAFz\b|\bAF4\b|\bAF8\b|\bF7\b|\bF5\b|\bF3\b|\bF1\b|\bFz\b|\bF2\b|\bF4\b|\bF6\b|\bF8\b|\bFT7\b|\bFC5\b|\bFC3\b|\bFC1\b|\bFCz\b|\bFC2\b|\bFC4\b|\bFC6\b|\bFT8\b|\bT7\b|\bC5\b|\bC3\b|\bC1\b|\bCz\b|\bC2\b|\bC4\b|\bC6\b|\bT8\b|\bTP7\b|\bCP5\b|\bCP3\b|\bCP1\b|\bCPz\b|\bCP2\b|\bCP4\b|\bCP6\b|\bTP8\b|\bP7\b|\bP5\b|\bP3\b|\bP1\b|\bPz\b|\bP2\b|\bP4\b|\bP6\b|\bP8\b|\bPO7\b|\bPO5\b|\bPO3\b|\bPOz\b|\bPO4\b|\bPO6\b|\bPO8\b|\bO1\b|\bOz\b|\bO2\b|\bM1\b|\bM2\b|\bEEG\b|\bA2\b|\bA1\b'
+            # define common EEG label from the 10-10 (MCN) convention plus older 10-20 labels (T3/T4/T5/T6 = modern T7/T8/P7/P8)
+            COMMON_EEG_label = r'\bFp1\b|\bFpz\b|\bFp2\b|\bAF7\b|\bAF3\b|\bAFz\b|\bAF4\b|\bAF8\b|\bF7\b|\bF5\b|\bF3\b|\bF1\b|\bFz\b|\bF2\b|\bF4\b|\bF6\b|\bF8\b|\bFT7\b|\bFC5\b|\bFC3\b|\bFC1\b|\bFCz\b|\bFC2\b|\bFC4\b|\bFC6\b|\bFT8\b|\bT7\b|\bC5\b|\bC3\b|\bC1\b|\bCz\b|\bC2\b|\bC4\b|\bC6\b|\bT8\b|\bTP7\b|\bCP5\b|\bCP3\b|\bCP1\b|\bCPz\b|\bCP2\b|\bCP4\b|\bCP6\b|\bTP8\b|\bP7\b|\bP5\b|\bP3\b|\bP1\b|\bPz\b|\bP2\b|\bP4\b|\bP6\b|\bP8\b|\bPO7\b|\bPO5\b|\bPO3\b|\bPOz\b|\bPO4\b|\bPO6\b|\bPO8\b|\bO1\b|\bOz\b|\bO2\b|\bM1\b|\bM2\b|\bT3\b|\bT4\b|\bT5\b|\bT6\b|\bEEG\b|\bA2\b|\bA1\b'
             # select only EEG channels and return a warning if the number of participant is smaller/higher
             mask_ch = df['transducer_type'].str.contains(r'EEG|AGAGCL ELECTRODE', case = False, na=False) | df['channel'].str.contains(COMMON_EEG_label, case = False, na=False) # create a mask that returns true for lines containing either EEG/AGAGCL ELECTRODE in the transducer_type column or containing a common EEG label in the channel column
             df_ch = df[mask_ch]
@@ -536,8 +537,8 @@ if not anon_df.empty:
         except Exception:
             existing_anon = None
     if existing_anon is not None and not existing_anon.empty:
-        attempted = set(anon_df['subject'])
-        existing_anon = existing_anon[~existing_anon['subject'].isin(attempted)]
+        attempted = {os.path.normcase(s) for s in anon_df['subject'].astype(str)}
+        existing_anon = existing_anon[~existing_anon['subject'].astype(str).map(os.path.normcase).isin(attempted)]
         anon_df = pd.concat([existing_anon, anon_df], ignore_index=True)
     anon_df.to_csv(anon_tsv_path, sep='\t', index=False)
     print(f'Saving anonymization check to:\n{anon_tsv_path}')
