@@ -151,7 +151,7 @@ def check_anonymization(patient_id, file_stem):
     else:
         name_subfield = str(patient_id).strip()
         id_format = 'non-standard'
-    cleaned = re.sub(r'[Xx_\s]', '', name_subfield)
+    cleaned = re.sub(r'[Xx_,;\s]', '', name_subfield)
     header_anonymized = (cleaned == '')
     name_in_filename = False
     if not header_anonymized:
