@@ -60,6 +60,14 @@ The "what to do / what not to break" reminders, grouped by theme. Each points to
   re-run the generator. **Tool 8 is unchanged** (CSV-first/XML-fallback). Re-run
   `tools_curry/_make_tool4_curry.py` after editing the EDF Voila.
   Labels harmonized to canonical via `config_param/event_remap.json`. → SPEC *Cross-cutting → Event sourcing* + §4.
+- **Manual annotations (`{id}_manual_events.tsv`, tool 7)**: events added by hand in tool 7's navigator go
+  **beside the recording**, next to the scored companions (an annotation belongs to the *recording*, not to
+  one tool-6 run) — a **sibling** file, never inside tool 6's `{id}_event_onsets.tsv`. First three columns =
+  `_event_onsets.tsv`'s, so the two concatenate. Tool 6 **appends** them only when `cb_manual_events` is
+  ticked (**off by default** → byte-identical); their labels are already canonical, so
+  `augment_remap_for_manual` identity-maps **only** the rows tagged `Source='manual'` (an unmapped *scored*
+  label must stay unmapped). Tools 4/8 untouched. Re-run both Curry generators. → SPEC *Cross-cutting →
+  Event sourcing → Manual annotations* + §7.
 - **Per-event-type persistence (tool 6 → 7bis/7)**: when event flagging runs on a file that has events, tool 6
   writes two **optional/additive** sidecars beside `_epoch_channel_rejection.tsv` — `{id}_event_epoch_flags.tsv`
   (per-epoch `evt_<type>` flags, for 7bis event sub-selection) and `{id}_event_counts.tsv` (raw `n_events` per
@@ -181,6 +189,13 @@ The "what to do / what not to break" reminders, grouped by theme. Each points to
   (`METHOD_ORDER`, palette, custom-stage helpers, Welch-PSD, **PSD smoothing `smooth_psd_median`/`smooth_psd_lowess`**,
   1/f fit) must stay in sync with tool 6. `compute_psds(…, smoothing=info['psd_smoothing'])` re-applies the
   tool-6 smoothing so the recomputed plots/attribution match the flags (`smoothing=None` → byte-identical).
+  **Epoch identity**: the UI shows `Epoch 123 (#124) — 01:01:30 — 23:23:54` — Compumedics numbers from 1 at
+  the recording start and tool 6 epochs from t=0 with no crop, so `#N = index + 1` (editable offset); the
+  clock comes from the `.fif`'s `meas_date` (**no raw reload**). `epoch_idx` **stays the 0-based MNE index**
+  everywhere — it is the join key with tools 6/7bis/9. **Review tracking**: `visited` feeds a status banner
+  (loud when the decision was *changed*), a `reviewed n/N` HTML strip and the Section-4 strip
+  (`plot_review_strip(..., visited=)`, `None` ⇒ byte-identical), persisted as the additive `seen` column +
+  `n_seen`/`pct_seen` and re-read at load.
   An **optional "Show EOG/EMG context" toggle** (default off) stacks the EOG-L/EOG-R/EMG traces under the
   per-epoch montage, loaded on demand from the `{file_id}_context-epo.fif` companion (`load_context_epochs`,
   aligned by epoch index) — still no raw-EDF reload; absent companion → toggle is a no-op. The navigator
@@ -226,6 +241,17 @@ The "what to do / what not to break" reminders, grouped by theme. Each points to
   `SpectralModel` sync constraint. Outputs split data → `derivatives/features_spectral/`, reports
   → `reports_features_spectral/`; database tables are globbed from disk and **padded to the channel union**
   because 7/7bis drop channels per participant. → SPEC §9.
+- **Sleep macrostructure (`10_sleep_macrostructure_voila`)**: hypnogram + scored events + **EDF header only**
+  (never the epochs, never the EEG signal; single-channel `include=` reads for the optional `Light`/`SpO2`
+  only) — the documented exception to *feature tools start from the clean epochs*. Binary header read, **not
+  edfio** (crashes on 73.edf). Policies live in SPEC §10, do not re-derive them: 0-based epochs with an
+  **exclusive** lights-on, stage durations within SPT, no sleep → NaN (never 0); **MT/custom = YASA
+  convention** (in TIB, out of TST/WASO, `SPT = TST + WASO + other`, `OTHER_STAGE_POLICY` commented alt);
+  lights source order txt → `Light` channel → participant table → bounds with `lights_source` provenance and
+  the *last-ON-before-first-sleep / first-ON-after-last-sleep* rule; `hypopnea*`/`arousal*` matched by prefix;
+  unmapped labels **not counted** + warned. Copies tool 6's event chain (its XML parser gains an additive
+  `Desaturation` column). Skip marker = `{file_id}_sleep_metrics.tsv` (checks TSV written first); globals
+  globbed. Every metric is declared once in the `METRICS` registry — add there, never ad hoc.
 - **Any tool computing a PSD**: work in **µV²/Hz** and guard logs with `np.where(psd > 0, psd, np.nan)` —
   **never** `psd + 1e-10` on a V²/Hz array (that is a 100 µV²/Hz floor, above most of the sleep spectrum).
   With **multitaper**, pass `normalization='full'`: MNE's `'length'` default is not a density (off by
