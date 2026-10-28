@@ -1,7 +1,7 @@
 # Plan : Score_EDF autonome (autoscoring sans le pipeline SomnoLens)
 
 **Statut** : brouillon à relire (2026-10-27). Rien n'est implémenté avant ta confirmation.
-**Contexte** : le portage de Score_EDF dans l'outil 3bis est fait (`plan_score_edf_fixes.md`, partie F). Tu veux
+**Contexte** : le portage de Score_EDF dans l'outil 3bis est fait (SPEC §3bis ; plan `plan_score_edf_fixes.md` dans l'historique git). Tu veux
 aussi garder un outil **autonome** pour qui veut seulement de l'autoscoring, sans passer par les outils 1 à 3 de
 SomnoLens (pas de JSON de l'outil 2, pas d'hypnogramme réécrit par l'outil 3).
 
@@ -42,7 +42,7 @@ SomnoLens (pas de JSON de l'outil 2, pas d'hypnogramme réécrit par l'outil 3).
   parce que le notebook importe `stagers` *pendant* le premier `with channel_mapping(...)`. Un import fait avant
   (par un autre code, un test) casse tout (`KeyError: 'M1'`, vu dans le script de comparaison).
 - Les points vérifiés du rapport (`DreamToolkit_Claude_Report.md`) : #1 (année à 2 chiffres, gravité faible),
-  #3, #4, #9, #13, #14 ; #17 et #19 sans objet (voir `plan_score_edf_fixes.md`, phase 2).
+  #3, #4, #9, #13, #14 ; #17 et #19 sans objet (détail : `plan_score_edf_fixes.md`, phase 2, historique git).
 
 ## Installation pour un utilisateur sans expérience (partie D du premier plan)
 

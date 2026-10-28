@@ -4,7 +4,7 @@ Automatic sleep scoring with GSSC, YASA and SleepFM: the computation and the fig
 
 The GSSC functions were MOVED VERBATIM from tool 3bis (its cell 2), plus its guarded GSSC import (cell 1) and
 `score_night`, the scoring part of its `score_one`, so both tools chain the same steps. YASA and SleepFM were
-ported from python/Score_EDF (tools/plan_score_edf_fixes.md, part F): same inputs and computations, read from
+ported from python/Score_EDF (SPEC §3bis): same inputs and computations, read from
 tool 2's configuration instead of Score_EDF's channel aliases. SleepFM itself lives in sleepfm_lib.py.
 Tool 3bis keeps its user interface and everything it writes; tool 0 calls the same functions on one night.
 

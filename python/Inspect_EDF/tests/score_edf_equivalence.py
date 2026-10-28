@@ -1,4 +1,4 @@
-r"""Score_EDF -> tool 3bis: does the new tool reproduce what Score_EDF computed? (tools/plan_score_edf_fixes.md)
+r"""Score_EDF -> tool 3bis: does the new tool reproduce what Score_EDF computed? (SPEC §3bis, Validation against Score_EDF)
 
 Not a pytest test: a before / after check run by hand, like outside_chain.py. Both tools are run in the SAME
 environment (autoscore: the one Score_EDF was written for, YASA 0.7), so a difference comes from the code only.

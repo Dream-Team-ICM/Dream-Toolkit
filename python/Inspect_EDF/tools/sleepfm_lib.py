@@ -1,7 +1,7 @@
 """
 SleepFM-Clinical for tool 3bis (automatic sleep scoring): find or download the official model, prepare its input
 montage, run it. Ported from python/Score_EDF (sleephd/sleepfm.py, sleephd/signals.py), see
-tools/plan_score_edf_fixes.md (part F).
+SPEC §3bis.
 
 SleepFM (Thapa et al. 2026, Nature Medicine) is not a Python package: it is a folder of code + pretrained weights
 published on GitHub (licence CC BY-NC 4.0, non-commercial use). Only the 9 files the scoring needs are used, at

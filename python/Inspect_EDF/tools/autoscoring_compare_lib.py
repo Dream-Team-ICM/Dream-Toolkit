@@ -1,7 +1,7 @@
 """
 Tool 3bis step 2: compare the automatic scorings (step 1) with the expert hypnogram, the way python/Score_EDF did.
 Its alignment (sleephd/alignment.py), recalibrations (sleephd/recalibration.py), agreement metrics and figures
-(scoredf/plots.py) are ported here (tools/plan_score_edf_fixes.md, part F). Reads only step 1's outputs and the
+(scoredf/plots.py) are ported here (SPEC §3bis). Reads only step 1's outputs and the
 expert hypnogram (tool 3 format): no EDF.
 
 The output tables keep Score_EDF's layout (epochs_all_stagers.csv, agreement_summary.csv), stage names

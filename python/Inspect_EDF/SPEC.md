@@ -1192,7 +1192,7 @@ Classifier, `gssc==0.0.9`, pip-only, CPU torch from conda-forge), **YASA** (`Sle
 hypnogram and to compare with the expert one where it exists. Two steps: **step 1** (Sections 1-3) runs each
 ticked model on each night and writes that model's outputs; **step 2** (Section 4) compares the models with the
 expert hypnogram on every night together, the computation of `python/Score_EDF` ported on 2026-10-27
-(`tools/plan_score_edf_fixes.md`, part F). **Voila only**: no Curry twin, no batch `.py`. Like tool 5, it knows
+(plan `tools/plan_score_edf_fixes.md`, in the git history). **Voila only**: no Curry twin, no batch `.py`. Like tool 5, it knows
 nothing of exclusions (no registry read or write, `ParticipantSelector` called with `excluded=None`). Renamed
 from `3bis_autoscoring_gssc_voila.ipynb` on 2026-10-27 (no longer GSSC only); its GSSC output folders keep
 their names (`derivatives/autoscoring_gssc/`, `reports_autoscoring_gssc/`).
@@ -2853,15 +2853,46 @@ Related open question: *light / full install* in `tools/plan_rename_somnolens.md
 - **Validation**: build an env from the slimmed file (plus `pytest`) and run the test suite in it (full level), plus a launch of
   every Voila tool; then update *Conda environment* above and the installation tutorial.
 
-### Tool 3bis: comparison outputs in the SomnoLens layout (TODO)
+### Tool 3bis: follow-ups of the Score_EDF port (TODO)
 
-Section 4 (comparison of the models, ported from Score_EDF on 2026-10-27) keeps Score_EDF's output layout on
-purpose (user decision, plan Q6): `<study>/autoscore_outputs/` with `epochs_all_stagers.csv`,
-`agreement_summary.csv` and PNG figures, Score_EDF's stage names (Wake, REM) and its empty `tet` column (a
-measure of the nap study it came from). To harmonise with the rest of the toolkit: data in
-`derivatives/autoscoring_comparison/` and an HTML report in `reports_autoscoring_comparison/` (TSV, the toolkit's
-stage names W / R, per-night tables globbed for the database ones), the recalibration parameters saved (today only
-in the log), and the "Skip already processed" / cumulative logic of the other tools.
+Left out of the port of 2026-10-27 (`tools/plan_score_edf_fixes.md`, deleted once done: see the git history).
+- **Comparison outputs in the SomnoLens layout.** Section 4 keeps Score_EDF's output layout on purpose (user
+  decision, plan Q6): `<study>/autoscore_outputs/` with `epochs_all_stagers.csv`, `agreement_summary.csv`,
+  `channels_used.csv` and PNG figures, Score_EDF's stage names (Wake, REM) and its empty `tet` column (a measure
+  of the nap study it came from). To harmonise: data in `derivatives/autoscoring_comparison/` and an HTML report in
+  `reports_autoscoring_comparison/` (TSV, the toolkit's stage names W / R, per-night tables globbed for the
+  database ones), the recalibration parameters saved (today only in the log), and the "Skip already processed" /
+  cumulative logic of the other tools.
+- **Skip with changed settings** (plan 1.7): with *Skip* ticked, a model already scored for a participant is not
+  rerun even when its settings changed since (electrodes, reference, EOG / EMG choice, consensus mode). Compare the
+  settings with the night's `_scoring_params.json` and warn (or rescore), as tool 6 warns on a different signal
+  preparation.
+- **Speed** (plan 3.1, 3.5, 3.6; measured on night 100: 89 s for the three models, reading is not the bottleneck):
+  one EDF read per night shared by the models (today one read of its own channels per model); torch's thread count
+  and SleepFM encoder batches > 1 (memory to watch); YASA scored in parallel across nights.
+- **SleepFM's respiration**: score with the RESP modality masked (its staging head takes a mask per modality) on our
+  nights; if the stages hold, RESP is not needed. Only if SleepFM proves clearly better on our data **and** another
+  database has respiratory names it does not recognise: optional RESP menus in tool 2's `context_channels`
+  (additive block, omitted when empty). EOG / EMG / ECG must keep coming from tool 2, never from SleepFM's own name
+  list (it files `Pleth` among the EMG).
+- **Tool 0's step 3**: offers GSSC only; YASA and SleepFM could be added (same `autoscoring_lib` functions).
+- **Standalone Score_EDF** (autoscoring without the SomnoLens pipeline): draft plan `tools/plan_score_edf_standalone.md`
+  (rebuild it on 3bis's libraries, raw hypnograms, channel aliases, one-click install).
+
+### Code review of 2026-10-24: Inspect_EDF findings (TODO, small)
+
+From `python/Score_EDF/DreamToolkit_Claude_Report.md`, checked against the code on 2026-10-28:
+- **#8 / #16, file opened without `with`**: `edf_io_lib._events_df_from_txt` (`open(txt_path, 'rb').read()`),
+  `tools_curry/curry_header.py` and `curry_io.py`. Harmless in CPython (closed at once), but write
+  `Path(...).read_bytes()`. `_events_df_from_txt` has copies in tools 4 / 7 kept identical by
+  `tests/test_edf_io_sync.py`: edit them all, then re-run the Curry generators.
+- **#10, `edf_io_lib.load_events` swallows its errors**: the TXT → CSV → XML fallback is intended, but a broken
+  file is skipped silently. Keep the fallback, and return which source failed and why, for the tools to log it.
+- **#20, `macrostructure_lib.read_edf_header_info`**: offsets written as `16 * n_ch + 80 * n_ch …`. Name them, or
+  read the header with `edf_io_lib.read_edf_header_custom`.
+- **#11 (checked, no change)**: `macrostructure_lib._clock_to_hours` only places the lights-off / on bars of a
+  figure, on the toolkit's noon-to-noon clock scale (same as tool 3bis's `clock_hours`): a daytime nap is just drawn
+  to the right of the nights.
 
 ### Event-based epoch rejection (Phase A): **implemented in tool 7**
 
