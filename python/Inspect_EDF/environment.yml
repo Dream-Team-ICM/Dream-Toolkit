@@ -1,4 +1,4 @@
-name: inspect_edf
+name: somnolens
 channels:
   - conda-forge
 dependencies:

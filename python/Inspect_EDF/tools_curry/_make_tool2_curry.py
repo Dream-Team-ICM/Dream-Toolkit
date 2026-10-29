@@ -2,8 +2,8 @@
 Generate 2_select&remap_channels_curry_voila.ipynb from the EDF original.
 Works at the parsed-JSON level (join source lines, replace, re-split).
 
-Run from Inspect_EDF root:
-    & "$env:LOCALAPPDATA\miniforge3\envs\inspect_edf\python.exe" tools_curry/_make_tool2_curry.py
+Run from SomnoLens root:
+    & "$env:LOCALAPPDATA\miniforge3\envs\somnolens\python.exe" tools_curry/_make_tool2_curry.py
 """
 import json, os, sys
 

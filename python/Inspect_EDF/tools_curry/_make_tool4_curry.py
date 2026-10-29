@@ -18,8 +18,8 @@ Adaptations from the EDF version:
 The French-label suggestions (FRENCH_EVENT_RULES / suggest_canonical) and the canonical vocabulary
 are format-agnostic and pass through unchanged — Curry benefits from them directly.
 
-Run from Inspect_EDF root:
-    & "$env:LOCALAPPDATA\\miniforge3\\envs\\inspect_edf\\python.exe" tools_curry/_make_tool4_curry.py
+Run from SomnoLens root:
+    & "$env:LOCALAPPDATA\\miniforge3\\envs\\somnolens\\python.exe" tools_curry/_make_tool4_curry.py
 """
 
 import json, os, sys, ast

@@ -16,7 +16,7 @@ file, the human outputs included:
 The recordings themselves (.edf ...) are inputs that no tool modifies: they are neither copied nor compared.
 
 Usage, from the repo root:
-    $py = "$env:LOCALAPPDATA\miniforge3\envs\inspect_edf\python.exe"
+    $py = "$env:LOCALAPPDATA\miniforge3\envs\somnolens\python.exe"
     & $py tests/refactor_check.py save before        # keep a copy of the current chain outputs
     ... move the code, run the tests: the chain reruns from the first changed tool ...
     & $py tests/refactor_check.py compare before     # every difference; exit code 1 when any

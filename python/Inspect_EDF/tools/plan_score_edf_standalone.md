@@ -55,6 +55,6 @@ SomnoLens (pas de JSON de l'outil 2, pas d'hypnogramme réécrit par l'outil 3).
 
 ## Questions ouvertes
 - Option A ou B ?
-- Où vit l'outil autonome : `python/Score_EDF/` (à côté de son code actuel, archivé) ou dans `Inspect_EDF/tools/`
+- Où vit l'outil autonome : `python/Score_EDF/` (à côté de son code actuel, archivé) ou dans `SomnoLens/tools/`
   (même dépôt que les bibliothèques) ?
 - Garde-t-on les sorties actuelles de Score_EDF (`autoscore_outputs/`) ou celles de 3bis (par modèle) ?

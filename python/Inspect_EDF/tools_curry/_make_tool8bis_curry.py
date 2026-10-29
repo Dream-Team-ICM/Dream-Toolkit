@@ -7,7 +7,7 @@ Tool 8bis is FORMAT-AGNOSTIC: it reads only the tool-7 `{file_id}_all-epo.fif` a
 **verbatim copy** of the EDF notebook with only the title retitled.
 
 Re-run this after editing `tools/8bis_reject_automatically_voila.ipynb`:
-    & "$env:LOCALAPPDATA\miniforge3\envs\inspect_edf\python.exe" tools_curry/_make_tool8bis_curry.py
+    & "$env:LOCALAPPDATA\miniforge3\envs\somnolens\python.exe" tools_curry/_make_tool8bis_curry.py
 """
 import ast
 import json

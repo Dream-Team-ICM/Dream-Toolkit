@@ -1,7 +1,7 @@
 """
 One-shot script to generate 3_remap_hypno_curry_voila.ipynb from the EDF original.
-Run from the Inspect_EDF root:
-    & "$env:LOCALAPPDATA\miniforge3\envs\inspect_edf\python.exe" tools_curry/_make_tool3_curry.py
+Run from the SomnoLens root:
+    & "$env:LOCALAPPDATA\miniforge3\envs\somnolens\python.exe" tools_curry/_make_tool3_curry.py
 """
 import json
 import os

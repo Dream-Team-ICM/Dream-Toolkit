@@ -1,4 +1,4 @@
-# Dream-Toolkit: Inspect_EDF
+# Dream-Toolkit: SomnoLens
 
 For the full project description, tool inventory, design rationale, byte offsets, verification notes, and
 planned modules, see [SPEC.md](SPEC.md). **Read SPEC.md once at the start of each task**: the decisions
@@ -176,8 +176,8 @@ The "what to do / what not to break" reminders, grouped by theme. Each points to
   Defaults (GSSC alone) keep GSSC's former outputs. Consensus = gssc's native `loudest_vote`. gssc 0.0.9's
   `mne_infer` returns no probabilities, so `gssc_combination_logits` **reproduces its loop** (verified identical
   stages): **gssc is pinned to 0.0.9**, re-check that loop before any upgrade. `TORCH_FORCE_NO_WEIGHTS_ONLY_LOAD=1`
-  for torch ≥ 2.6. Each model's hypnogram goes beside the EDF (tool-3 format, one suffix per model). SleepFM needs
-  the `autoscore` env; its 9 model files are downloaded and checked by SHA-256 (`sleepfm_lib`). **Computation +
+  for torch ≥ 2.6. Each model's hypnogram goes beside the EDF (tool-3 format, one suffix per model). SleepFM runs
+  in the `somnolens` env too; its 9 model files are downloaded and checked by SHA-256 (`sleepfm_lib`). **Computation +
   figures: `tools/autoscoring_lib.py` (step 1, shared with tool 0's step 3), `sleepfm_lib.py`,
   `autoscoring_compare_lib.py` (step 2)**: edit the libraries, not the notebook. Section 4 must keep reproducing
   Score_EDF with its settings: re-run `tests/score_edf_equivalence.py` after changing it. → SPEC §3bis.
@@ -356,7 +356,7 @@ The "what to do / what not to break" reminders, grouped by theme. Each points to
   cell 1** in place of the import, then strips `bounds_pct` and adds the ±500 µV cap on that copy (its match
   strings target the library's text): re-run the generator after editing the lib too. → SPEC §6 + *Curry 9*.
 - **Canonical launch cwd = repo root, and shared-module imports must be cwd-independent**: every tool is run
-  from `Inspect_EDF/` (see SPEC *How to run*), but the shared-module import must still resolve from either
+  from `SomnoLens/` (see SPEC *How to run*), but the shared-module import must still resolve from either
   cwd. The Curry twins (1,2,4,6,7) probe `cwd`, `cwd/tools_curry`, `dirname(cwd)/tools_curry` for
   `curry_header.py`. 8bis (EDF + Curry) probes the `tools/` variants for `qc_rejected_epochs_lib.py`. This
   block lives in the **generators** (except tool 1 = hand-edited, no generator): fix it there and
@@ -403,7 +403,7 @@ The "what to do / what not to break" reminders, grouped by theme. Each points to
 - **Running Python**: `conda` is **not** on PATH. miniforge3 is at `$env:LOCALAPPDATA\miniforge3`. Always use
   the explicit interpreter, not `conda run`, `conda activate`, or bare `python`:
   ```powershell
-  & "$env:LOCALAPPDATA\miniforge3\envs\inspect_edf\python.exe" tools/my_script.py
+  & "$env:LOCALAPPDATA\miniforge3\envs\somnolens\python.exe" tools/my_script.py
   ```
 - **Editing large notebooks**: `Read`/`Edit`/`NotebookEdit` are blocked or size-capped on big `.ipynb`
   files: use the **rename-to-`.txt`** method (and the JSON-surgery fallback) in SPEC.md →

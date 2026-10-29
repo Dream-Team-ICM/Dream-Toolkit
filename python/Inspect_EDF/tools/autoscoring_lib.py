@@ -54,8 +54,8 @@ except Exception as e:
     GSSC_VERSION, TORCH_VERSION = None, None
     GSSC_MSG = (
         '<div style="border:2px solid #c0392b;background:#fdecea;padding:8px 12px;border-radius:4px;">'
-        f'<b>GSSC is not available</b> ({e}). Install it in the <code>inspect_edf</code> environment, '
-        'then restart this page:<br><code>conda install -n inspect_edf -c conda-forge pytorch-cpu</code><br>'
+        f'<b>GSSC is not available</b> ({e}). Install it in the <code>somnolens</code> environment, '
+        'then restart this page:<br><code>conda install -n somnolens -c conda-forge pytorch-cpu</code><br>'
         '<code>python -m pip install gssc==0.0.9</code></div>')
 
 YASA_OK = False

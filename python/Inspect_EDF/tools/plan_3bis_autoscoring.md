@@ -28,8 +28,8 @@ Decisions taken with the user:
   `environment.yml`:
   ```powershell
   # from a miniforge prompt
-  conda install -n inspect_edf -c conda-forge pytorch-cpu
-  & "$env:LOCALAPPDATA\miniforge3\envs\inspect_edf\python.exe" -m pip install gssc==0.0.9
+  conda install -n somnolens -c conda-forge pytorch-cpu
+  & "$env:LOCALAPPDATA\miniforge3\envs\somnolens\python.exe" -m pip install gssc==0.0.9
   ```
   pip then sees torch already installed and does not reinstall it. If conda hits the ICM SSL error (as
   for pytest), fallback: `python -m pip install torch --index-url https://download.pytorch.org/whl/cpu`.

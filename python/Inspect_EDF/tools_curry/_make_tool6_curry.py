@@ -13,8 +13,8 @@ Changes from EDF version:
   (DISPLAY_YLIM_UV = 500 uV): DC-coupled data has no export clipping, so drift can
   blow up the p99.9 autoscale and crush the real EEG
 
-Run from Inspect_EDF root:
-    & "$env:LOCALAPPDATA\\miniforge3\\envs\\inspect_edf\\python.exe" tools_curry/_make_tool6_curry.py
+Run from SomnoLens root:
+    & "$env:LOCALAPPDATA\\miniforge3\\envs\\somnolens\\python.exe" tools_curry/_make_tool6_curry.py
 """
 
 import json, os, sys

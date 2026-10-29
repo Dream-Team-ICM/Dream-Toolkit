@@ -18,7 +18,7 @@ the filtered metric table, the topomap panel (Curry keeps a real DigMontage thro
 triage layer, the channels x epochs flagging heatmap and the 1/f subsample/parallel levers.
 
 Re-run this after editing `tools/8_reject_manually_voila.ipynb`:
-    & "$env:LOCALAPPDATA\miniforge3\envs\inspect_edf\python.exe" tools_curry/_make_tool8_curry.py
+    & "$env:LOCALAPPDATA\miniforge3\envs\somnolens\python.exe" tools_curry/_make_tool8_curry.py
 """
 import ast
 import json

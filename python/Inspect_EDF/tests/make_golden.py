@@ -2,8 +2,8 @@ r"""(Re)build a golden snapshot: run the full chain on a test dataset with the C
 the outputs in tests/golden/<dataset>/.
 
 Run it only on code you trust (before a change), from the repo root:
-    & "$env:LOCALAPPDATA\miniforge3\envs\inspect_edf\python.exe" tests/make_golden.py --dataset synthetic
-    & "$env:LOCALAPPDATA\miniforge3\envs\inspect_edf\python.exe" tests/make_golden.py --dataset real
+    & "$env:LOCALAPPDATA\miniforge3\envs\somnolens\python.exe" tests/make_golden.py --dataset synthetic
+    & "$env:LOCALAPPDATA\miniforge3\envs\somnolens\python.exe" tests/make_golden.py --dataset real
 
 tests/golden/synthetic/ is versioned; tests/golden/real/ is git-ignored (real participant data).
 The run folder (%TEMP%/dtk_golden/<dataset>) is kept so the outputs can be inspected.

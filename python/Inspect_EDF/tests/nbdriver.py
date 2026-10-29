@@ -24,7 +24,7 @@ from time import monotonic
 import nbformat
 from nbclient import NotebookClient
 
-REPO_ROOT = Path(__file__).resolve().parent.parent      # Inspect_EDF/ = the canonical launch cwd
+REPO_ROOT = Path(__file__).resolve().parent.parent      # SomnoLens/ = the canonical launch cwd
 
 # Windows: the Selector event loop is the one zmq supports natively (the default Proactor loop makes
 # it run an extra selector thread). Not enough on its own against the hangs: see _repoll_channel.

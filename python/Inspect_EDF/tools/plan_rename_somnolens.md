@@ -1,8 +1,9 @@
 # Plan : renommer `Inspect_EDF` en `SomnoLens` (+ remise à jour des mentions)
 
-Statut : **validé, EN ATTENTE** : à lancer seulement quand tu auras fini ton poster (annotation du 2026-10-16).
-Au lancement, je commence par t'envoyer la liste de préparation (Phase 0), tu la fais à la main, puis tu
-me dis quand commencer.
+Statut : **EN COURS**, lancé le 2026-10-29. Ordre réel : les phases 2 et 3 (textes) sont faites et mises en scène
+**avant** le renommage, car VS Code (et la session Claude) tient le dossier ouvert : le `git mv` ne peut se faire
+qu'en dernier, VS Code fermé. Reste : commit des textes, Phases 0-1 (toi, hors VS Code), puis Phases 4-5 dans une
+nouvelle session Claude ouverte sur `SomnoLens/`.
 
 ## Contexte
 
@@ -28,61 +29,89 @@ me dis quand commencer.
 
 ## TODO
 
-### Phase 0 : préparation (faite par toi, à mon signal)
-- [ ] Je t'envoie cette liste au lancement ; tu me confirmes quand c'est fait.
-- [ ] État git propre : tu commites ou mets de côté le travail en cours.
-- [ ] Fermer tout ce qui tient des fichiers ouverts dans le dossier : fenêtres VS Code, serveurs Voila/Jupyter,
-      noyaux Python, PowerPoint (poster). Sous OneDrive, un fichier verrouillé fait échouer le renommage à moitié.
+### Phase 0 : préparation (faite par toi, après les phases 2-3)
+- [x] Liste envoyée au lancement (2026-10-29).
+- [ ] État git propre : commiter les textes mis en scène (commit 1, message proposé dans la conversation), et
+      commiter ou mettre de côté ton travail en cours (`tools/1_inspect_edf_voila.ipynb`, tutoriels `.docx`).
+      Le renommage reste alors un commit **pur** (100 % de similarité, `git log --follow` sans surprise).
+- [ ] Fermer tout ce qui tient des fichiers ouverts dans le dossier : **toutes** les fenêtres VS Code (donc cette
+      session Claude), serveurs Voila/Jupyter, noyaux Python, Word (tutoriels), PowerPoint (poster), explorateur
+      Windows ouvert dans le dossier. Sous OneDrive, un fichier verrouillé fait échouer le renommage à moitié.
+- [ ] (Conseillé) Suspendre la synchronisation OneDrive le temps du renommage (icône OneDrive → Suspendre 2 h).
 
-### Phase 1 : renommer
-- [ ] Depuis `Dream-Toolkit/` : `git mv python/Inspect_EDF python/SomnoLens`, puis `git status` doit montrer
-      des *renamed* (pas de suppressions + ajouts). Les fichiers non versionnés (test_data, etc.) suivent le dossier.
-- [ ] `conda rename -n inspect_edf somnolens` (pas de réseau nécessaire), puis vérifier
-      `& "$env:LOCALAPPDATA\miniforge3\envs\somnolens\python.exe" -c "import mne, yasa, gssc"`.
-- [ ] Rouvrir VS Code sur `python/SomnoLens/`.
+### Phase 1 : renommer (toi, dans une fenêtre PowerShell ouverte hors de VS Code)
+```powershell
+cd "C:\Users\yvan.nedelec\OneDrive - ICM\Documents\RE_yvan\projects\Dream-Toolkit"
+git mv python/Inspect_EDF python/SomnoLens
+git status                                    # que des "renamed:" (pas de deleted + new file)
+& "$env:LOCALAPPDATA\miniforge3\Scripts\conda.exe" rename -n inspect_edf somnolens
+& "$env:LOCALAPPDATA\miniforge3\envs\somnolens\python.exe" -c "import mne, yasa, gssc; print('ok')"
+```
+- [ ] `git mv` : `git status` doit montrer des *renamed* (pas de suppressions + ajouts). Les fichiers non
+      versionnés (test_data, etc.) suivent le dossier. Si `git mv` échoue (« Permission denied ») : un fichier est
+      encore ouvert, fermer le programme et relancer (rien n'a bougé).
+- [ ] `conda rename` (pas de réseau nécessaire ; il copie l'environnement puis supprime l'ancien, quelques minutes), puis
+      vérifier l'import. Ton PATH utilisateur ne contient aucun dossier `inspect_edf` (vérifié) : rien à y changer.
+- [ ] Commit 2 (le renommage seul), puis rouvrir VS Code sur `python/SomnoLens/` et lancer une nouvelle session
+      Claude : « continue le plan_rename_somnolens, phases 4-5 ».
 
-### Phase 2 : mentions actives à mettre à jour (vérifiées par grep le 2026-10-14, à re-greper au lancement)
+### Phase 2 : mentions actives à mettre à jour (re-grepées le 2026-10-29, faites et mises en scène le 2026-10-29)
 Dossier (`Inspect_EDF`) :
-- [ ] `CLAUDE.md` : titre, « from `Inspect_EDF/` » (section *Canonical launch cwd*).
-- [ ] `SPEC.md` : titre, racine de l'arborescence, « repo root (`Inspect_EDF/`) ».
-- [ ] `tests/nbdriver.py` (commentaire de `REPO_ROOT`).
-- [ ] `tools_curry/_make_tool{2,3,4,6,7}_curry.py` : docstring « Run from Inspect_EDF root ».
+- [x] `CLAUDE.md` : titre, « from `Inspect_EDF/` » (section *Canonical launch cwd*).
+- [x] `SPEC.md` : titre, racine de l'arborescence, « repo root (`Inspect_EDF/`) », titre *Code review … findings*.
+- [x] `tests/nbdriver.py` (commentaire de `REPO_ROOT`).
+- [x] `tools_curry/_make_tool{2,3,4,6,7}_curry.py` : docstring « Run from Inspect_EDF root ».
+- [x] `tools/plan_score_edf_standalone.md` (trouvé au re-grep).
 
 Environnement (`inspect_edf` → `somnolens`) :
-- [ ] `environment.yml` (`name:`).
-- [ ] `CLAUDE.md` (*Running Python*) ; `SPEC.md` (env, procédure notebooks, gssc, *How to run*, tests).
-- [ ] `tools/autoscoring_lib.py` : **message affiché à l'utilisateur** quand GSSC manque.
-- [ ] Docstrings de lancement : `tests/conftest.py`, `tests/make_golden.py`, `tests/refactor_check.py`,
+- [x] `environment.yml` (`name:`).
+- [x] `CLAUDE.md` (*Running Python*) ; `SPEC.md` (env, procédure notebooks, gssc, *How to run*, tests, §3bis, §5,
+      *Lighter conda environments*).
+- [x] `tools/autoscoring_lib.py` : **message affiché à l'utilisateur** quand GSSC manque.
+- [x] Docstrings de lancement : `tests/conftest.py`, `tests/make_golden.py`, `tests/refactor_check.py`,
       `tools/6bis_metrics_correlation.py`, `tools/compare_flat_spectrogram_fix.py`,
       `tools/simple_hypnospectro_yasa_vs_fix.py`, `tools/images/_make_unicorn_gif.py`,
-      `tools_curry/_make_tool*_curry.py` (7 fichiers), `tools_curry/test_mne_curry_header.py`.
-- [ ] `tools/plan_3bis_autoscoring.md` (plan gardé en référence).
+      `tools_curry/_make_tool*_curry.py` (7 fichiers), `tools_curry/test_mne_curry_header.py`,
+      `tools/test_data/test_spectral/make_test_spectral.py` (non versionnés : modifiés, pas mis en scène).
+- [x] `tools/plan_3bis_autoscoring.md` (plan gardé en référence).
+- [x] Trouvé au re-grep : métadonnées `kernelspec` `inspect_edf` (pas un noyau Jupyter enregistré, Voila
+      retombait sur `python3`) → `python3` dans 3bis, 7, Curry 1, Curry 7 ; texte « Environment » de 3bis et
+      `CLAUDE.md` §3bis : SleepFM tourne aussi dans `somnolens` (ils disaient encore « needs the `autoscore` env »).
+- [ ] **Reste** : `"display_name": "inspect_edf"` dans `tools/1_inspect_edf_voila.ipynb` (métadonnée, son
+      `name` est déjà `python3`). Non touché : ce fichier porte ton travail en cours. À changer en
+      `"Python 3 (ipykernel)"` avec ton commit, ou VS Code le réécrira tout seul en `somnolens` à la prochaine
+      sauvegarde avec ce noyau.
 
 Documents :
-- [ ] (D4) `README.md` de SomnoLens (remplace `README.docx`) : présentation, outils actuels (0 à 9, Curry
-      expérimental), outils prévus, installation légère / complète, démarrage rapide, structure des sorties.
-- [ ] (D5) Un pointeur dans `Dream-Toolkit/README.md`.
-- [ ] Description de `SPEC.md` (*Project overview*) : elle dit encore « databases in EDF format » ; élargir à
-      inspection, harmonisation, prétraitement, extraction de mesures, EDF + Curry (expérimental).
+- [x] (D4) `README.md` de SomnoLens (remplace `README.docx`, supprimé par `git rm`) : présentation, outils
+      actuels (0 à 9, Curry expérimental), outils prévus, installation (actuelle + légère / complète prévue),
+      démarrage rapide, dossier d'étude, licence (à confirmer, GSSC AGPL, SleepFM CC BY-NC).
+- [x] (D5) Un pointeur dans `Dream-Toolkit/README.md`.
+- [x] Description de `SPEC.md` (*Project overview*) : élargie (inspection, harmonisation, prétraitement,
+      extraction de mesures, EDF + Curry expérimental) + un paragraphe **Name** (ancien nom, environnement).
 - [ ] **Toi, à la main** : les tutoriels `.docx`, en particulier `tutorials/1_install_python.docx` (4 mentions
       de `inspect_edf`, la commande périmée `voila inspect_edf_voila.ipynb` → `voila tools/1_inspect_edf_voila.ipynb`,
       **les captures d'écran**, et l'installation légère / complète une fois la Phase 6 tranchée).
-- [ ] **Toi, plus tard** : « SomnoLens » sur le poster (tu le modifies directement dans PowerPoint). ==> déjà faitc
+- [x] **Toi, plus tard** : « SomnoLens » sur le poster (tu le modifies directement dans PowerPoint). ==> déjà fait
 
 Ne pas toucher : `tools/old/`, `tools/jupyter_notebook/` (archives gelées), `.ipynb_checkpoints/`, les sorties
 de données (`tools/test_data/summary_inspection/`, `tools/ICEBERG_snippet/`, rapports HTML), qui contiennent
 d'anciens chemins absolus (voir Phase 5).
 
-### Phase 3 : mettre l'arborescence de SPEC.md à jour (indépendant du renommage)
-- [ ] **Listé mais absent** : `tools/preprocessing_phase1_example_scripts/` → supprimer la ligne.
-- [ ] **Versionnés mais absents de l'arborescence** : `README.md` (ex-`README.docx`), `pytest.ini`,
+### Phase 3 : mettre l'arborescence de SPEC.md à jour (indépendant du renommage, fait le 2026-10-29)
+- [x] **Listé mais absent** : `tools/preprocessing_phase1_example_scripts/` → supprimer la ligne.
+- [x] **Versionnés mais absents de l'arborescence** : `README.md` (ex-`README.docx`), `pytest.ini`,
       `tutorials/` (4 guides Word : installation, montage Profusion, export EDF), `tests/outside_chain.py`,
-      `tests/refactor_check.py`.
-- [ ] Vérifier que les noms de dossiers de sortie cités dans l'arbre et dans *How to run* suivent les
-      renommages récents (`preproc_epo/`, `reports_preproc/`, `reports_inspection/`).
+      `tests/refactor_check.py`, + `tests/score_edf_equivalence.py`.
+- [x] Vérifier que les noms de dossiers de sortie cités dans l'arbre et dans *How to run* suivent les
+      renommages récents (`preproc_epo/`, `reports_preproc/`, `reports_inspection/`) : à jour ; les anciens noms
+      restants (`raw_epo`, `clean_epo_*`) sont des notes de migration, gardées.
+- [ ] À ta décision : l'arborescence cite deux fichiers **non versionnés** (`tools/sleep_metrics_formulas.txt`,
+      les définitions des métriques de l'outil 5, et `tools/images/_make_unicorn_gif.py`). Les versionner, ou
+      retirer la mention ?
 
 ### Phase 4 : outils annexes
-- [ ] Mes mémoires Claude (4 fichiers citent `Inspect_EDF`/`inspect_edf`) : je les mets à jour. Elles sont
+- [x] Mes mémoires Claude (6 fichiers citaient `Inspect_EDF`/`inspect_edf`) : mises à jour le 2026-10-29. Elles sont
       rangées sous `Dream-Toolkit`, donc le renommage ne les perd pas.
 - [ ] **Conversations Claude Code** : elles sont rangées par dossier, dans
       `~/.claude/projects/c--Users-…-Dream-Toolkit-python-Inspect-EDF/` (14 conversations aujourd'hui).

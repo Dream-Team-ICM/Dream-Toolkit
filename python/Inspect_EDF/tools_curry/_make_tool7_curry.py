@@ -13,8 +13,8 @@ Adaptations from the EDF version:
 Everything else (rejection methods, heatmap, per-stage summaries, skip/merge, custom stages,
 sidecar JSON read by tool 8) is format-agnostic and kept byte-for-byte.
 
-Run from Inspect_EDF root:
-    & "$env:LOCALAPPDATA\\miniforge3\\envs\\inspect_edf\\python.exe" tools_curry/_make_tool7_curry.py
+Run from SomnoLens root:
+    & "$env:LOCALAPPDATA\\miniforge3\\envs\\somnolens\\python.exe" tools_curry/_make_tool7_curry.py
 """
 
 import json, os, sys
