@@ -110,7 +110,9 @@ notebooks, rename around the extension blocks (**rename-to-`.txt`** method):
 Defined in `environment.yml`. Key packages:
 - **Python 3.12.10**
 - **MNE 1.12**: EDF reading, epoching, signal processing (bumped from 1.9 for Curry `.cdt` support, the EDF tools run unchanged on it)
-- **YASA 0.6**: sleep staging, hypnogram handling, spectral helpers
+- **YASA 0.6**: sleep staging, hypnogram handling, spectral helpers. Its sleep staging depends on the version of
+  **antropy** (brought by YASA, 0.1.9 here): keep `antropy<0.2`, the computation YASA's classifiers were trained
+  with (§3bis, *Same models in the user environment*)
 - **pandas 2.2, numpy 2.2**: data manipulation
 - **voila 0.5, ipywidgets 8.1, ipyfilechooser 0.6**: interactive GUI layer
 - **chardet 5.2**: encoding detection for EDF headers
@@ -1304,6 +1306,20 @@ context, intended). With the defaults, recalibrations A and B change as intended
 made Score_EDF's all-channel read upsample every 256-Hz EEG channel to 512 Hz (tool 3bis reads them at 256 Hz; on
 the original file 5 / 2 / 59 epochs differed for GSSC / YASA / SleepFM). Time on night 100: tool 3bis 89 s for the
 three models (GSSC 43 s, YASA 7 s, SleepFM 39 s) against Score_EDF's 259 s (544 s and a 17-GB peak with `DHR`).
+
+**Same models in the user environment** (`inspect_edf`: python 3.12, numpy 2.2, torch 2.8, YASA 0.6.5, antropy
+0.1.9) against the `autoscore` run above (python 3.10, numpy 1.26, torch 2.5.1, YASA 0.7.0, antropy 0.2.3), night
+100, same settings: SleepFM identical (5,652 5-s steps, max difference 2e-6, 2026-10-27), GSSC identical (same
+stage on 941 / 941 epochs, probabilities equal to the 4 stored decimals, 2026-10-29), YASA **not quite**: 2 / 941
+epochs differ on C3-M2 (κ 0.51 in both), 190 / 941 on this night's poor C4-A1 (an uncertain model, where a small
+feature change flips the stage). The only cause is **antropy**: its 0.2 fixed an off-by-one in the Higuchi
+fractal dimension (`range(1, n_max)` → `range(1, n_max + 1)`), one of YASA's features (the other 140 features
+are equal), while YASA's classifiers (the `_0.5.0` files, 2021, byte-identical up to YASA 0.8.1) were trained
+with the former computation. Hence **`antropy<0.2`** wherever YASA scores: the model then sees its features as
+trained, and a study scores the same in every environment. YASA's results depend on that version, so it belongs
+in the provenance (today `_scoring_params.json` records `yasa_version` only: add `antropy_version` at the version
+refresh, *Planned modules*). **YASA 0.8 removes `SleepStaging.predict_proba()`** (deprecated in 0.7), which
+`score_night_yasa` calls: keep `yasa=0.6.*` until that refresh moves it to `predict().proba`.
 
 **Code location** (tool-0 redesign, phase 2): the computation and the figures live in
 **`tools/autoscoring_lib.py`**, moved verbatim from the notebook's former cell 2, with the guarded GSSC import
@@ -2854,9 +2870,31 @@ Related open question: *light / full install* in `tools/plan_rename_somnolens.md
   missing" message must say so. Today's env, `autoscore`, is python 3.10 / numpy 1.26 / torch 2.5.1 (Score_EDF's
   versions; `Score_EDF/environment_autoscore_debugyn.yml`, + `chardet`), the user env python 3.12 / numpy 2.2 /
   torch 2.8. Tool 3bis no longer needs torch < 2.6 (`weights_only=False` in `sleepfm_lib`,
-  `TORCH_FORCE_NO_WEIGHTS_ONLY_LOAD=1` for GSSC), and SleepFM gives the same results under python 3.12 / numpy 2.2 /
-  torch 2.8 (checked 2026-10-27, *Conda environment* above): the autoscoring env can take the user env's versions.
+  `TORCH_FORCE_NO_WEIGHTS_ONLY_LOAD=1` for GSSC), and SleepFM and GSSC give the same results under python 3.12 /
+  numpy 2.2 / torch 2.8, YASA too with `antropy<0.2` (checked 2026-10-27 / 29, §3bis *Same models in the user
+  environment*): the autoscoring env can take the user env's versions.
   Until the split, `inspect_edf` holds the autoscoring packages too (user decision 2026-10-27: `einops` added).
+- **Version refresh, done with the split** (user decision, 2026-10-29). The rule, for every package: **versions
+  pinned** in the environment files (as today), **refreshed deliberately**, one or two times a year or when a need
+  arises, a few weeks after a release (not the day it comes out), each refresh validated by the full test suite,
+  its intended output changes listed in `INTENDED_CHANGES` and noted here with the date. A study is processed
+  from start to end with one version: refresh between studies, never in the middle. Not "always the latest"
+  (results can change silently, as antropy 0.2 moves YASA's stages, and one update drags others along), nor frozen
+  for good (old versions vanish from the channels, as the `pytorch` one did, and a late jump of several versions
+  costs more than following them). For this first refresh, every pin moves to its current stable version; known
+  points for **YASA 0.8** (0.8.1 of 2026-10-25, read from its wheel, not installed):
+  - `SleepStaging.predict_proba()` is removed: `score_night_yasa` takes `predict().proba` (about 3 lines; the new
+    column names `WAKE` / `REM` are already renamed to `W` / `R`).
+  - It requires **pandas ≥ 2.3** (pinned 2.2 today: every tool, hence the full test suite) and `pooch`; numpy,
+    mne, lightgbm already fit.
+  - Same classifiers (byte-identical `_0.5.0` files), but the feature computation was rewritten (all channels
+    filtered at once, a new channel pick): measure the stages on night 100 as for YASA 0.7 (§3bis), and rerun the
+    YASA part of `tests/score_edf_equivalence.py`.
+  - `from yasa.plotting import spectrogram_lspopt` (`quality_lib`, every hypnospectrogram) still works, but it
+    is a re-export of the `lspopt` package: import it from `lspopt` directly (the same function, outputs
+    unchanged), then re-run `_make_tool6_curry.py`.
+  - Keep `antropy<0.2` (YASA 0.8.1 accepts antropy ≥ 0.1.9) and add `antropy_version` to YASA's
+    `_scoring_params.json`.
 - **Windows gotchas found on the way**: the `pytorch` conda channel is retired (HTTP 403): use conda-forge's
   `pytorch`. conda-forge's `libtorch 2.5.1` fails to load (`DLL load failed ... torch._C`) with
   `intel-openmp 2024.2`, which no longer exports the `_vcomp_*` functions its `fbgemm.dll` imports: pin

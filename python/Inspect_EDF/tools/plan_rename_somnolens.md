@@ -150,6 +150,12 @@ rend pas la distribution très classique ni intuitive). Pistes à comparer, rien
       Épingler `antropy<0.2` dans l'installation (YASA reste alors tel qu'il a été entraîné, et reproductible).
 - [ ] ⚠ **YASA 0.8 cassera l'outil 3bis** : `predict_proba()` (utilisé par `score_night_yasa`) est déprécié en 0.7
       et retiré en 0.8. Garder `yasa=0.6.*`, ou passer à `predict().proba` avant de monter de version.
+- [ ] **Rafraîchir toutes les versions avec ce chantier** (décision du 2026-10-29) : versions fixées, mises à jour
+      délibérément (une à deux fois par an, quelques semaines après une sortie), chaque mise à jour validée par la
+      suite de tests complète, une étude traitée avec une seule version. Pour ce premier rafraîchissement, toutes
+      les versions passent à leur dernière version stable, YASA 0.8 compris : `predict().proba`, pandas ≥ 2.3,
+      import de `lspopt` en direct, `antropy<0.2`, `antropy_version` dans les paramètres. Détail : SPEC
+      *Planned modules → Lighter conda environments*, point *Version refresh*.
 - [ ] Le message de `autoscoring_lib.py` quand GSSC manque (`GSSC_MSG`), et ceux de YASA (`YASA_MSG`) et de
       SleepFM (`SLEEPFM_DEPS_MSG`), devront pointer vers l'installation complète.
 - [ ] ⚠ **Licences à vérifier avant de distribuer l'installation complète** (vérifié sur GitHub le 2026-10-16) :
