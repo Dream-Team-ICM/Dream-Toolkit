@@ -2,8 +2,10 @@
 
 Statut : **EN COURS**, lancé le 2026-10-29. Ordre réel : les phases 2 et 3 (textes) sont faites et mises en scène
 **avant** le renommage, car VS Code (et la session Claude) tient le dossier ouvert : le `git mv` ne peut se faire
-qu'en dernier, VS Code fermé. Reste : commit des textes, Phases 0-1 (toi, hors VS Code), puis Phases 4-5 dans une
-nouvelle session Claude ouverte sur `SomnoLens/`.
+qu'en dernier, VS Code fermé. Faits le 2026-10-29 : commit 1 (`18bfb45`, les textes), le renommage de
+l'environnement (Claude), le `git mv` + commit 2 (`cd1faa3`, toi), les vérifications de la Phase 5 (Claude). Reste :
+les points marqués *toi* (conversations, interpréteur VS Code, tutoriels, fichiers non versionnés de la Phase 3), et
+la destination de la Phase 6 avant de supprimer ce plan (voir *Après validation*).
 
 ## Contexte
 
@@ -31,29 +33,41 @@ nouvelle session Claude ouverte sur `SomnoLens/`.
 
 ### Phase 0 : préparation (faite par toi, après les phases 2-3)
 - [x] Liste envoyée au lancement (2026-10-29).
-- [ ] État git propre : commiter les textes mis en scène (commit 1, message proposé dans la conversation), et
-      commiter ou mettre de côté ton travail en cours (`tools/1_inspect_edf_voila.ipynb`, tutoriels `.docx`).
-      Le renommage reste alors un commit **pur** (100 % de similarité, `git log --follow` sans surprise).
-- [ ] Fermer tout ce qui tient des fichiers ouverts dans le dossier : **toutes** les fenêtres VS Code (donc cette
+- [x] État git propre : textes commités (commit 1, `18bfb45`). La modification de `tools/1_inspect_edf_voila.ipynb`
+      n'est que des sorties de cellules (exécution dans VS Code) : `git restore` avant le `git mv` (Phase 1). Les
+      tutoriels `.docx` modifiés restent non mis en scène : le commit 2 reste un renommage **pur**.
+- [x] Fermer tout ce qui tient des fichiers ouverts dans le dossier : **toutes** les fenêtres VS Code (donc cette
       session Claude), serveurs Voila/Jupyter, noyaux Python, Word (tutoriels), PowerPoint (poster), explorateur
       Windows ouvert dans le dossier. Sous OneDrive, un fichier verrouillé fait échouer le renommage à moitié.
-- [ ] (Conseillé) Suspendre la synchronisation OneDrive le temps du renommage (icône OneDrive → Suspendre 2 h).
+- [x] (Conseillé) Suspendre la synchronisation OneDrive le temps du renommage (icône OneDrive → Suspendre 2 h).
 
-### Phase 1 : renommer (toi, dans une fenêtre PowerShell ouverte hors de VS Code)
+### Phase 1 : renommer
+- [x] **Environnement** `inspect_edf` → `somnolens` : fait par Claude le 2026-10-29 (il ne dépend pas du dossier).
+      `conda rename` (copie depuis le cache conda, aucun téléchargement) a laissé **deux défauts**, corrigés :
+      1. **PyTorch ne se chargeait plus** (`DLL load failed while importing _C`). Deux paquets livrent
+         `Library\bin\libiomp5md.dll` : `intel-openmp 2024.2.1` (celui dont ont besoin PyTorch et MKL) et un vieux
+         `openmp 5.0.0` (tiré par `libflang 5.0.0`). La copie a posé la version d'`openmp 5.0.0` par-dessus. Corrigé
+         par `conda install -n somnolens --offline --force-reinstall --no-deps intel-openmp=2024.2.1=h57928b3_1083`.
+         Seul fichier en conflit entre paquets (vérifié sur tout l'environnement).
+      2. **18 lanceurs `.exe` installés par pip** (`pytest`, `nbdime`, `gssc_*`) gardaient le chemin de l'ancien
+         environnement (conda ne réécrit pas les binaires). Corrigé par
+         `python -m pip install --force-reinstall --no-deps pytest==9.1.1 nbdime==4.0.2 gssc==0.0.9`.
+      Vérifié ensuite : `import torch, gssc, mne, yasa, specparam, edfio, voila, einops, ...` OK, `pytest.exe` OK.
+      Le dossier `envs\inspect_edf` (99 fichiers `.conda_trash` laissés par conda) est supprimé.
+- [x] **Dossier** (toi, le 2026-10-29, commit `cd1faa3` : 246 fichiers renommés, 0 ligne ajoutée ou retirée ;
+      plus aucun dossier `python/Inspect_EDF` sur le disque) :
 ```powershell
 cd "C:\Users\yvan.nedelec\OneDrive - ICM\Documents\RE_yvan\projects\Dream-Toolkit"
+git restore python/Inspect_EDF/tools/1_inspect_edf_voila.ipynb
 git mv python/Inspect_EDF python/SomnoLens
-git status                                    # que des "renamed:" (pas de deleted + new file)
-& "$env:LOCALAPPDATA\miniforge3\Scripts\conda.exe" rename -n inspect_edf somnolens
-& "$env:LOCALAPPDATA\miniforge3\envs\somnolens\python.exe" -c "import mne, yasa, gssc; print('ok')"
+git diff --cached --shortstat -M              # attendu : "N files changed, 0 insertions(+), 0 deletions(-)"
+git commit -m "SomnoLens rename (2/2): python/Inspect_EDF -> python/SomnoLens (pure rename)" -m "Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
+code python/SomnoLens
 ```
-- [ ] `git mv` : `git status` doit montrer des *renamed* (pas de suppressions + ajouts). Les fichiers non
-      versionnés (test_data, etc.) suivent le dossier. Si `git mv` échoue (« Permission denied ») : un fichier est
-      encore ouvert, fermer le programme et relancer (rien n'a bougé).
-- [ ] `conda rename` (pas de réseau nécessaire ; il copie l'environnement puis supprime l'ancien, quelques minutes), puis
-      vérifier l'import. Ton PATH utilisateur ne contient aucun dossier `inspect_edf` (vérifié) : rien à y changer.
-- [ ] Commit 2 (le renommage seul), puis rouvrir VS Code sur `python/SomnoLens/` et lancer une nouvelle session
-      Claude : « continue le plan_rename_somnolens, phases 4-5 ».
+      Les fichiers non versionnés (test_data, etc.) suivent le dossier. Si `git mv` échoue (« Permission denied ») :
+      un fichier est encore ouvert, fermer le programme et relancer (rien n'a bougé).
+- [x] Puis, dans VS Code rouvert sur `SomnoLens/`, une nouvelle session Claude : « continue le
+      plan_rename_somnolens, phases 4-5 ».
 
 ### Phase 2 : mentions actives à mettre à jour (re-grepées le 2026-10-29, faites et mises en scène le 2026-10-29)
 Dossier (`Inspect_EDF`) :
@@ -77,10 +91,9 @@ Environnement (`inspect_edf` → `somnolens`) :
 - [x] Trouvé au re-grep : métadonnées `kernelspec` `inspect_edf` (pas un noyau Jupyter enregistré, Voila
       retombait sur `python3`) → `python3` dans 3bis, 7, Curry 1, Curry 7 ; texte « Environment » de 3bis et
       `CLAUDE.md` §3bis : SleepFM tourne aussi dans `somnolens` (ils disaient encore « needs the `autoscore` env »).
-- [ ] **Reste** : `"display_name": "inspect_edf"` dans `tools/1_inspect_edf_voila.ipynb` (métadonnée, son
-      `name` est déjà `python3`). Non touché : ce fichier porte ton travail en cours. À changer en
-      `"Python 3 (ipykernel)"` avec ton commit, ou VS Code le réécrira tout seul en `somnolens` à la prochaine
-      sauvegarde avec ce noyau.
+- [x] ~~`"display_name": "inspect_edf"` dans `tools/1_inspect_edf_voila.ipynb`~~ : **sans objet**. La version
+      commitée a déjà `"Python 3 (ipykernel)"` ; le `inspect_edf` n'était que dans la copie de travail exécutée
+      dans VS Code, restaurée en Phase 1 (vérifié le 2026-10-29).
 
 Documents :
 - [x] (D4) `README.md` de SomnoLens (remplace `README.docx`, supprimé par `git rm`) : présentation, outils
@@ -118,15 +131,28 @@ d'anciens chemins absolus (voir Phase 5).
       Pour les retrouver dans `/resume` depuis le nouveau dossier, on les **copie** (sans supprimer l'original)
       dans le dossier équivalent `…-python-SomnoLens/`, que Claude Code crée à la première session lancée
       depuis `SomnoLens`. On teste d'abord avec une seule conversation, puis on copie le reste si elle apparaît.
-- [ ] `.claude/settings.local.json` ne contient aucun chemin vers `Inspect_EDF` : rien à faire.
+      - [x] Test (Claude, 2026-10-29) : la plus récente, `daf2a234-…` (celle du commit 1 et du renommage de
+            l'environnement), est copiée dans `…-python-SomnoLens/`.
+      - [ ] **Toi** : vérifier qu'elle apparaît dans l'historique des conversations de VS Code (et qu'elle s'ouvre).
+            Si oui, Claude copie les 13 autres (avec leurs sous-dossiers de sous-agents).
+- [x] `.claude/settings.local.json` ne contient aucun chemin vers `Inspect_EDF` (re-vérifié le 2026-10-29) : rien à faire.
 
 ### Phase 5 : vérifications
-- [ ] `grep -rn "Inspect_EDF\|inspect_edf"` sur les fichiers actifs : il ne doit rester que les noms de
-      fichiers de l'outil 1 et les archives.
-- [ ] Tests **quick** (`-m quick`) depuis le nouveau dossier avec le nouvel environnement : le renommage ne
-      touche aucun calcul, et `nbdriver` calcule la racine du dépôt à partir de son propre emplacement. Le cache
-      de la chaîne (`%TEMP%\dtk_tests`) reste valable (empreintes = contenu des fichiers, pas leurs chemins).
-- [ ] Lancer une app Voila à la main (ex. `voila tools/1_inspect_edf_voila.ipynb`).
+- [x] `grep -rn "Inspect_EDF\|inspect_edf"` sur les fichiers actifs (versionnés + scripts et configurations non
+      versionnés) le 2026-10-29 : il ne reste que les noms de fichiers de l'outil 1 (D3), les archives, les deux
+      mentions historiques voulues (`README.md`, paragraphe **Name** de `SPEC.md`) et `python/Check_EDF/`
+      (ancien projet à part, hors chantier).
+- [x] Tests **quick** (`-m quick`) depuis le nouveau dossier avec l'environnement `somnolens`, le 2026-10-29 :
+      **72 passés** en 2 min 25.
+- [x] Serveur Voila (`voila tools/1_inspect_edf_voila.ipynb --no-browser`), le 2026-10-29 : page servie (HTTP
+      200), noyau démarré sans erreur. Il reste à toi de l'ouvrir une fois dans le navigateur si tu veux le voir.
+- [ ] **Toi** : VS Code n'a rien demandé parce que l'extension Python **choisit un interpréteur toute seule**
+      pour un dossier qu'elle ne connaît pas (clé `autoSelectedWorkspacePythonInterpreter` du nouveau dossier),
+      sans dire lequel. L'ancien dossier envoyait ses notebooks sur `envs\inspect_edf\python.exe`, qui n'existe
+      plus. À faire une fois : `Ctrl+Maj+P` → « Python: Select Interpreter » → `somnolens`, et dans un notebook
+      ouvert, « Select Kernel » (en haut à droite) → *Python Environments* → `somnolens`. Le PATH de la session
+      ne contient plus `envs\inspect_edf\Scripts` (vérifié).
+- [x] ~~`tools/1_inspect_edf_voila.ipynb` : `display_name`~~ : sans objet (voir Phase 2).
 - [ ] Effet attendu, sans gravité : l'outil 1 compare les fichiers sur leur chemin absolu (`path` de
       `FULL_summary_table_edf.tsv`). Les jeux de données **rangés dans le dépôt** (`tools/test_data`,
       `tools/ICEBERG_snippet`) seront donc ré-inspectés une fois. Les études rangées ailleurs ne changent pas.
@@ -149,7 +175,9 @@ d'anciens chemins absolus (voir Phase 5).
 **6b. Comment distribuer les outils** (aujourd'hui, ils vivent dans le dépôt global de l'équipe, ce qui ne
 rend pas la distribution très classique ni intuitive). Pistes à comparer, rien n'est décidé :
 - [ ] **Dépôt GitHub dédié `SomnoLens`**, extrait du dépôt d'équipe en **gardant l'historique** (`git subtree
-      split`) ; le dépôt d'équipe le référence (sous-module, ou simple lien).
+      split`) ; le dépôt d'équipe le référence (sous-module, ou simple lien). Un dépôt
+      https://github.com/YvanNed/SomnoLens existe déjà, avec un `README.md` antérieur : le **synchroniser** avec le
+      nouveau `README.md` (2026-10-29) à l'étape de la distribution.
 - [ ] **Paquet installable** (`pip install somnolens`) avec une commande qui ouvre un menu des outils Voila ;
       les données de test et les archives restent hors du paquet.
 - [ ] **Installation Windows « en un clic »** pour les non-programmeurs : un script `.bat` qui crée
@@ -206,4 +234,8 @@ rend pas la distribution très classique ni intuitive). Pistes à comparer, rien
       - Faire relire ce point par le service juridique de l'ICM (en même temps que 6a).
 
 ## Après validation
-Supprimer ce fichier une fois le renommage fait et vérifié (dans un commit à part).
+Supprimer ce fichier une fois le renommage fait et vérifié (dans un commit à part). **Mais d'abord**, donner une
+destination à la Phase 6 : SPEC (*Lighter conda environments*) renvoie à la §6c de ce plan, et les points
+licence / distribution (6a, 6b) ne sont écrits nulle part ailleurs. À trancher : les reporter en anglais dans
+SPEC *Planned modules* (nouvelle section *Distribution and licensing*, + le pointeur de *Lighter conda
+environments* mis à jour), ou garder la Phase 6 dans un plan à part (`tools/plan_distribution_somnolens.md`).
