@@ -67,7 +67,7 @@ Documents :
 - [ ] **Toi, à la main** : les tutoriels `.docx`, en particulier `tutorials/1_install_python.docx` (4 mentions
       de `inspect_edf`, la commande périmée `voila inspect_edf_voila.ipynb` → `voila tools/1_inspect_edf_voila.ipynb`,
       **les captures d'écran**, et l'installation légère / complète une fois la Phase 6 tranchée).
-- [ ] **Toi, plus tard** : « SomnoLens » sur le poster (tu le modifies directement dans PowerPoint).
+- [ ] **Toi, plus tard** : « SomnoLens » sur le poster (tu le modifies directement dans PowerPoint). ==> déjà faitc
 
 Ne pas toucher : `tools/old/`, `tools/jupyter_notebook/` (archives gelées), `.ipynb_checkpoints/`, les sorties
 de données (`tools/test_data/summary_inspection/`, `tools/ICEBERG_snippet/`, rapports HTML), qui contiennent
@@ -127,15 +127,31 @@ rend pas la distribution très classique ni intuitive). Pistes à comparer, rien
       l'environnement et lance l'outil 1, en complément des tutoriels.
 
 **6c. Installation légère / complète** (à trancher avant de réécrire le tutoriel d'installation) :
-- [ ] **Légère** = tous les outils sauf l'autoscoring : l'environnement actuel **moins** `pytorch-cpu` et `gssc`.
-- [ ] **Complète** = légère **+** `pytorch-cpu` + `gssc` (outil 3bis) **+** ce dont a besoin `python/Score_EDF/`
-      (plusieurs Go).
-- [ ] ⚠ **Conflit de versions à résoudre** : `Score_EDF/environment_autoscore.yml` demande python 3.10,
-      numpy 1.26, yasa ≥ 0.7 et torch < 2.6, alors que SomnoLens tourne sous python 3.12, numpy 2.2 et yasa 0.6.
-      Trois options : aligner `Score_EDF` sur SomnoLens (à tester), garder **deux environnements séparés**
-      (`somnolens` léger + un environnement d'autoscoring), ou une installation par « extras »
-      (`pip install somnolens[autoscoring]`) si la piste du paquet (6b) est retenue.
-- [ ] Le message de `autoscoring_lib.py` quand GSSC manque devra pointer vers l'installation complète.
+- [ ] **Légère** = tous les outils sauf l'autoscoring : l'environnement actuel **moins** `pytorch-cpu`, `gssc` et
+      les paquets de SleepFM (`einops`, `loguru`, `pyyaml` ; `h5py` reste, `mne` l'apporte). `yasa` reste aussi
+      (léger, sans torch). À trancher : YASA seul dans la légère suffit-il pour proposer l'outil 3bis sans torch ?
+- [ ] **Complète** = légère **+** `pytorch-cpu` + `gssc` + les paquets de SleepFM (outil 3bis). Plus besoin de
+      `python/Score_EDF/` : son calcul est porté dans 3bis (2026-10-27). Le modèle SleepFM (~29 Mo) n'est pas dans
+      l'environnement : il se télécharge au premier usage. Le poids vient surtout de `pytorch-cpu`.
+- [x] ~~Conflit de versions~~ **résolu pour l'outil 3bis** (testé le 2026-10-27 et le 2026-10-29, nuit 100) : les
+      trois modèles tournent dans l'environnement SomnoLens (python 3.12, numpy 2.2, torch 2.8, yasa 0.6.5) avec
+      les mêmes résultats que dans l'environnement `autoscore` de Score_EDF (python 3.10, numpy 1.26, torch 2.5.1,
+      yasa 0.7.0). Torch < 2.6 et yasa ≥ 0.7 ne sont plus nécessaires.
+      | Modèle | SomnoLens vs `autoscore` |
+      |---|---|
+      | SleepFM | identique : 5 652 pas de 5 s, écart max des probabilités 2e-6, aucun stade différent |
+      | GSSC | identique : 941 époques, aucun stade différent (probabilités égales aux 4 décimales gardées) |
+      | YASA | quasi identique : 2 époques sur 941 diffèrent sur C3-M2 (κ 0,51 des deux côtés) ; 190 sur la mauvaise dérivation C4-A1 de cette nuit (modèle incertain : un petit écart de feature change le stade) |
+      Seul le code d'origine de Score_EDF n'a pas tourné dans l'environnement SomnoLens. Il n'en a plus besoin
+      (option A du plan `plan_score_edf_standalone.md` : le reconstruire sur les bibliothèques de 3bis).
+- [ ] ⚠ **YASA dépend de la version d'`antropy`** (cause de l'écart ci-dessus) : antropy 0.2 a corrigé une erreur
+      d'un pas dans la dimension fractale de Higuchi (`range(1, n_max)` → `range(1, n_max + 1)`). Les classifieurs de
+      YASA (fichiers `_0.5.0`, 2021) ont été entraînés avec l'ancien calcul, que garde l'antropy 0.1.9 de SomnoLens.
+      Épingler `antropy<0.2` dans l'installation (YASA reste alors tel qu'il a été entraîné, et reproductible).
+- [ ] ⚠ **YASA 0.8 cassera l'outil 3bis** : `predict_proba()` (utilisé par `score_night_yasa`) est déprécié en 0.7
+      et retiré en 0.8. Garder `yasa=0.6.*`, ou passer à `predict().proba` avant de monter de version.
+- [ ] Le message de `autoscoring_lib.py` quand GSSC manque (`GSSC_MSG`), et ceux de YASA (`YASA_MSG`) et de
+      SleepFM (`SLEEPFM_DEPS_MSG`), devront pointer vers l'installation complète.
 - [ ] ⚠ **Licences à vérifier avant de distribuer l'installation complète** (vérifié sur GitHub le 2026-10-16) :
       | Dépendance | Licence |
       |---|---|
@@ -147,7 +163,11 @@ rend pas la distribution très classique ni intuitive). Pistes à comparer, rien
       - `tools/autoscoring_lib.py` (`gssc_combination_logits`) **reproduit la boucle de scoring de GSSC** : si c'est
         une copie de leur code, ce fichier relève lui-même de l'AGPL. À isoler (module optionnel) ou à
         licencier à part.
-      - Vérifier aussi les licences des dépendances de `Score_EDF` (pytorch, `sleephd`, etc.).
+      - **SleepFM** (outil 3bis) : code et poids sous **CC BY-NC 4.0** (usage **non commercial**, vu sur GitHub lors
+        du portage). SomnoLens ne les redistribue pas : ils se téléchargent depuis le dépôt officiel au premier usage.
+        À signaler dans la documentation de l'outil 3bis.
+      - Vérifier aussi les licences des autres paquets de l'installation complète (pytorch, `einops`, `loguru`,
+        `pyyaml`), plus ceux de `Score_EDF` si sa version autonome est distribuée.
       - Faire relire ce point par le service juridique de l'ICM (en même temps que 6a).
 
 ## Après validation
