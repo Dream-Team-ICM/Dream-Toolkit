@@ -2826,6 +2826,19 @@ change (the HTML reports are a separate question). Tool 0's display conventions 
 for the figures.
 Could also harmonize the file selection and automatic detection (1st I wanted to force users to select the correct file they need to use to force them to really understand what they need to do and what is required for each step, but with the increase of generated files and report, I think it is better to direct to the files directly (but still editable if the user want to use  another file) with warnings when a file is missing).
 And also propose and harmonize a way to rename the output ? Could be interesting for tool 2 to have multiple remap_reref_ to run the tools on different configuration of channels (but ask the question of how to seperate the next outputs of the different tools if they are run on different configuration)  
+**Intro cells** (the presentation at the top of each page; found by the audit of 2026-10-29, see *Clean-up before
+distribution*):
+- Tools 1 and 2 end on internal names: "developed on the ICEBERG database and tested on APOMORPHEE (from Noémie's
+  internship)" (tool 1), "developed on the APOMORPHEE database and tested on ICEBERG" (tool 2), each followed by
+  "last update …, YN". Replace them with the folder layouts the tool recognises (e.g. "Developed and tested on PSG
+  databases exported from Compumedics Profusion, with groups as subfolders or nights as file-name suffixes") and
+  drop the "last update" lines (git keeps the dates). Same for the ICEBERG / APOMORPHEE code comments of tool 1
+  (Voila + both batch scripts) and tool 2: hidden in Voila, but readable in the repository.
+- Tool 1: a placeholder is left, "**(insert a link on how to make a routine in Compumedics)**": point to
+  `tutorials/2_create_EEG_montage_Profusion.docx`.
+- Tool 1: "It is a compressed 16-bit format" is wrong. EDF is not compressed: each sample is stored as a 16-bit
+  integer, scaled between the physical minimum and maximum set at export.
+- Tool 2: typo "dispaly".
 
 ### English everywhere: harmonize the language of every tool (TODO)
 
@@ -2964,10 +2977,8 @@ first release, whatever the distribution route; re-run the tests of every tool t
   drew it (`tools/images/_make_unicorn_gif.py`) is not versioned: just delete it.
 - **Saved outputs in the notebooks**: tool 1 (one of them a `FileChooser` showing this machine's path), tool 2 and
   its Curry twin. Clear every output, and add a quick test that fails when a tracked tool notebook has outputs.
-- **Internal names in user-facing text**: tool 1's intro ("developed on the ICEBERG database and tested on
-  APOMORPHEE (from Noémie's internship)"), tool 2's ("developed on APOMORPHEE, tested on ICEBERG"), and the
-  ICEBERG / APOMORPHEE comments of tool 1 (Voila + both batch scripts) and tool 2: describe the folder layouts
-  instead (groups as subfolders, nights as file-name suffixes).
+- **Internal names in user-facing text** (intros of tools 1 and 2, ICEBERG / APOMORPHEE comments): with the other
+  intro fixes in *Display harmonization across the Voila tools*.
 - **"…or ask Yvan."** in the error messages of tool 1 (Voila ×4, `1_inspect_edf_perdataset.py` ×3): point to the
   project's issue tracker or contact address once decided. The `@author: yvan.nedelec` headers of the three
   scripts can stay (authorship), or move to an `AUTHORS` / `CITATION.cff` file.
