@@ -8,6 +8,7 @@ dependencies:
   - pandas=2.2.*
   - mne=1.12.*
   - yasa=0.6.*
+  - antropy=0.1.9     # YASA's sleep staging: its classifiers were trained with antropy < 0.2 (SPEC §3bis)
   - voila=0.5.*
   - notebook=7.4.*
   - chardet=5.2.*

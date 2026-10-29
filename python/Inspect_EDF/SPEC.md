@@ -111,8 +111,9 @@ Defined in `environment.yml`. Key packages:
 - **Python 3.12.10**
 - **MNE 1.12**: EDF reading, epoching, signal processing (bumped from 1.9 for Curry `.cdt` support, the EDF tools run unchanged on it)
 - **YASA 0.6**: sleep staging, hypnogram handling, spectral helpers. Its sleep staging depends on the version of
-  **antropy** (brought by YASA, 0.1.9 here): keep `antropy<0.2`, the computation YASA's classifiers were trained
-  with (§3bis, *Same models in the user environment*)
+  **antropy**, pinned to **0.1.9** in `environment.yml` (2026-10-29; YASA 0.6.5 accepts any antropy, so a new
+  install would otherwise take 0.2.x): the computation YASA's classifiers were trained with (§3bis, *Same models in
+  the user environment*)
 - **pandas 2.2, numpy 2.2**: data manipulation
 - **voila 0.5, ipywidgets 8.1, ipyfilechooser 0.6**: interactive GUI layer
 - **chardet 5.2**: encoding detection for EDF headers
