@@ -965,3 +965,52 @@ def score_night_sleepfm(edf_path, cfg_entry, sleepfm_root, reference=REFERENCE_C
             'starts_s': r['starts_s'], 'stops_s': r['stops_s'], 'probs_5s': r['probs'], 'source': r['source'],
             'features': r['features'], 'fc_weight': r['fc_weight'], 'fc_bias': r['fc_bias'], 'used': used,
             'reference': ref_desc, 'notes': notes, 'tail_context_chunks': tail_context_chunks}
+
+
+# ---------------------------------------------------------------------------------------------------------
+# Skip check (tool 3bis Section 3): a night already scored, but with other settings than this run's
+# ---------------------------------------------------------------------------------------------------------
+def stored_reference_choice(params):
+    """The EEG-reference choice (REFERENCE_OPTIONS) a stored scoring was made with, from its
+    _scoring_params.json. A contralateral run that fell back to tool 2's reference (mastoid missing) says so in
+    its notes; a file without `eeg_reference` predates the choice (tool 2's reference was the only one)."""
+    text = params.get('eeg_reference')
+    if text is None:
+        return REFERENCE_DECLARED
+    fell_back = any('no contralateral mastoid' in str(n) for n in params.get('notes') or [])
+    return REFERENCE_CONTRALATERAL if text.startswith('contralateral') or fell_back else REFERENCE_DECLARED
+
+
+def stored_scoring_settings(algo, params):
+    """The settings a stored scoring was made with ({setting: text}), read from its _scoring_params.json, in
+    the words of tool 3bis's run_settings (the same keys and values)."""
+    settings = {'reference': stored_reference_choice(params),
+                'expert hypnogram': params.get('expert_hypnogram_suffix') or 'none'}
+    if algo == 'GSSC':
+        settings['mode'] = params.get('scoring_mode')
+        settings['EEG'] = ', '.join(sorted(params.get('eeg_used') or [])) or 'none'
+        settings['EOG'] = params.get('eog_mode')
+    elif algo == 'YASA':
+        # eeg_used = the derivation ('C4-M1', 'Cz-(M1+M2)/2'), or the electrode alone with tool 2's reference
+        settings['EEG'] = re.sub(r'-(M1|M2|\(M1\+M2\)/2)$', '', params.get('eeg_used') or '')
+        settings['EOG'] = params.get('eog_choice')
+        settings['chin EMG'] = params.get('emg_choice')
+    else:
+        tail = params.get('tail_context_min')
+        settings['tail context'] = 'whole night' if tail is None else f'{tail} min'
+    return settings
+
+
+def scoring_settings_mismatch(stored, now):
+    """The settings of a stored scoring (stored_scoring_settings) that differ from this run's (`now`, same
+    keys), as 'EEG C3, C4 → C3; EOG L − R bipolar → None'. '' when none differs."""
+    changed = []
+    for key, value in now.items():
+        before = stored.get(key)
+        if key == 'expert hypnogram':           # a file-name suffix: compared like a path
+            same = os.path.normcase(str(before)) == os.path.normcase(str(value))
+        else:
+            same = before == value
+        if not same:
+            changed.append(f'{key} {before} → {value}')
+    return '; '.join(changed)

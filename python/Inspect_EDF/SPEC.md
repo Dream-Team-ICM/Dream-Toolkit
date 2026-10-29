@@ -1252,7 +1252,19 @@ context, band-pass, device). SleepFM adds `{id}_hypnodensity_5s.tsv` (`file_id, 
 p_R, source` primary/tail, full precision) and `{id}_sleepfm_features.npz` (`features`, `fc_weight`, `fc_bias`,
 `start_s`). **Skip**: per model (a participant counts as processed when every ticked model's outputs are complete,
 recomputed when the ticks change; at Run, a model already complete for a participant is skipped, the others run);
-complete = hypnogram + hypnodensity + report (+ SleepFM's 5-s table and features).
+complete = hypnogram + hypnodensity + report (+ SleepFM's 5-s table and features). **A scoring kept by Skip although
+made with other settings** (2026-10-28) is still skipped (as in tool 6, the warning only names the change): its
+`already scored, skipped.` line gets `⚠ made with other settings (then → this run): EEG C3, C4 → C3; EOG L − R bipolar → None (untick
+Skip to redo it)` and the run ends with a count. The participants every ticked model already scored, left out by the
+participant selector, are checked before the loop. The settings compared, read back from the night's
+`_scoring_params.json` (`stored_scoring_settings`, nothing added to the file) against the notebook's `run_settings`
+(`scoring_settings_mismatch`, `autoscoring_lib`): the EEG reference choice (a contralateral run that fell back to
+tool 2's reference for want of a mastoid counts as contralateral, from its notes; a GSSC file without
+`eeg_reference` predates the choice: tool 2's reference) and the expert hypnogram suffix (`none` when none was
+found; compared like a path) for every model; GSSC's mode, electrodes (only those the night has: a ticked electrode
+it lacks would not change its scoring) and EOG mode; YASA's electrode (its derivation `C4-M1` read back as `C4`), EOG
+and chin-EMG choices; SleepFM's tail context (`SLEEPFM_FULL_TAIL`). The choice is compared, not its effect: an EOG
+mode changed on a night without EOG is reported too.
 
 **Section 4, comparison of the models (step 2)** (`autoscoring_compare_lib`, Score_EDF's `sleephd/alignment.py`,
 `recalibration.py`, `scoredf/plots.py`): reads only step 1's outputs and the expert hypnogram (Section 1 suffix,
@@ -2863,10 +2875,6 @@ Left out of the port of 2026-10-27 (`tools/plan_score_edf_fixes.md`, deleted onc
   `reports_autoscoring_comparison/` (TSV, the toolkit's stage names W / R, per-night tables globbed for the
   database ones), the recalibration parameters saved (today only in the log), and the "Skip already processed" /
   cumulative logic of the other tools.
-- **Skip with changed settings** (plan 1.7): with *Skip* ticked, a model already scored for a participant is not
-  rerun even when its settings changed since (electrodes, reference, EOG / EMG choice, consensus mode). Compare the
-  settings with the night's `_scoring_params.json` and warn (or rescore), as tool 6 warns on a different signal
-  preparation.
 - **Speed** (plan 3.1, 3.5, 3.6; measured on night 100: 89 s for the three models, reading is not the bottleneck):
   one EDF read per night shared by the models (today one read of its own channels per model); torch's thread count
   and SleepFM encoder batches > 1 (memory to watch); YASA scored in parallel across nights.
