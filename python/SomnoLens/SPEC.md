@@ -2954,6 +2954,52 @@ history). Nothing is decided yet unless stated.
   - a one-click Windows install for non-programmers: a `.bat` that creates the environment and launches tool 1,
     alongside the tutorials.
 
+### Clean-up before distribution (TODO)
+
+From an audit of 2026-10-29 (tracked files, saved notebook outputs, the folder's git history). To do before the
+first release, whatever the distribution route; re-run the tests of every tool touched.
+- **The unicorn goes**: in tool 5bis, `SHOW_UNICORN`, `UNICORN_GIF_NAME`, `_find_unicorn_gif()` (setup cell) and
+  `out_unicorn` / `show_unicorn()` (Validate), then `tools/images/unicorn_wink.gif` (162 KB), its §5bis sentence,
+  its tree mention and the CLAUDE.md reminder (*the unicorn GIF on Validate is deliberate*). The local script that
+  drew it (`tools/images/_make_unicorn_gif.py`) is not versioned: just delete it.
+- **Saved outputs in the notebooks**: tool 1 (one of them a `FileChooser` showing this machine's path), tool 2 and
+  its Curry twin. Clear every output, and add a quick test that fails when a tracked tool notebook has outputs.
+- **Internal names in user-facing text**: tool 1's intro ("developed on the ICEBERG database and tested on
+  APOMORPHEE (from Noémie's internship)"), tool 2's ("developed on APOMORPHEE, tested on ICEBERG"), and the
+  ICEBERG / APOMORPHEE comments of tool 1 (Voila + both batch scripts) and tool 2: describe the folder layouts
+  instead (groups as subfolders, nights as file-name suffixes).
+- **"…or ask Yvan."** in the error messages of tool 1 (Voila ×4, `1_inspect_edf_perdataset.py` ×3): point to the
+  project's issue tracker or contact address once decided. The `@author: yvan.nedelec` headers of the three
+  scripts can stay (authorship), or move to an `AUTHORS` / `CITATION.cff` file.
+- **`tools/check_hypno_config.py`**: the legacy script that preceded tool 3 (§3, "kept for reference") holds a
+  personal path to a study folder and French messages: delete it.
+- **Left out of the distribution**: the archives `tools/old/` (30 successive versions of tool 2, personal paths
+  inside) and `tools/jupyter_notebook/` (frozen), which stay in Dream-Toolkit's history; the plans kept as
+  references (`tools/plan_3bis_autoscoring.md`, `plan_9_spectral_features.md`, `plan_score_edf_standalone.md`,
+  in French), once their open points are in this section; `tests/score_edf_equivalence.py`, a one-off validation
+  of the port that needs `../Score_EDF` (outside the folder), or keep it with a skip when Score_EDF is absent.
+- **Developer documents**: decide whether `SPEC.md` and `CLAUDE.md` ship as developer documentation. If they do,
+  strip what is about this machine or the lab (CLAUDE.md's *Operational notes (this machine)*, colleagues' first
+  names, study names and night numbers in SPEC's validation notes).
+- **Links outside the folder**, broken by a split: `README.md` → `../../README.md` (Dream-Toolkit), SPEC's
+  `python/Score_EDF/…` references.
+- **`tutorials/1_install_python.docx`**: its SSL workaround turns certificate checks off (`conda config --set
+  ssl_verify no`); use `conda config --set ssl_verify truststore` (the system's certificates, what works on ICM's
+  network) and put network-specific advice in a clearly marked "behind an institutional proxy" note. It also cites
+  an internal IT document (DSI `migration-to-miniforge.pdf`) and an author / date line. The light / full install
+  goes in at the same time (*Lighter conda environments*).
+- **A `LICENSE` file** in the folder (today only on GitHub), once the licence is settled (*Distribution and
+  licensing*).
+- **Only what git tracks is distributed**: the folder also holds untracked files that must never leave the lab
+  (real PSG in `tools/test_data/`, `tools/ICEBERG_snippet/`, `tools/generate_739_not_anonymized.py`, colleagues'
+  scripts, `.claude/`). Never share a copy of the folder (zip, OneDrive link): a clean clone or the subtree split.
+- **The git history**, if the split keeps it: no data file was ever committed (deleted files are notebooks,
+  synthetic goldens, scripts, plans, `README.docx`), but 12 commits add or remove a personal path (mostly the
+  archives) and the 55 notebooks deleted since may hold old saved outputs. Scan it (`git log -G` for paths and
+  participant identifiers) before publishing; rewrite it (`git filter-repo`) or publish without history if needed.
+- Covered elsewhere: French messages (*English everywhere*), developer-only packages in `environment.yml`
+  (*Lighter conda environments*), the look of the tools (*Display harmonization across the Voila tools*).
+
 ### Tool 3bis: follow-ups of the Score_EDF port (TODO)
 
 Left out of the port of 2026-10-27 (`tools/plan_score_edf_fixes.md`, deleted once done: see the git history).
