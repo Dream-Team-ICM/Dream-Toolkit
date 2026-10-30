@@ -47,6 +47,7 @@ Un message qui est aussi écrit dans un fichier (journal enregistré, rapport) n
 - **Fonctionnement** : dans les outils 2 et 3, chaque section a un bouton « Run … » qui ne sert qu'à faire
   apparaître ses widgets (héritage de la version Jupyter) ; l'outil 4 construit déjà ses sections tout seul
   après le scan (c'est le modèle à suivre).
+  ==> puisque le bouton "Run" de chaque section qui fait apparaitre les widget est un héritage des versions jupyter, on peut en effet suivre le model de 4. 
 
 ---
 
@@ -129,13 +130,16 @@ verte à la fin sans échec, orange s'il y a eu des échecs. Une seule forme pou
 **Outputs**: … (dans quel dossier)
 **Sections**: 1. …, 2. …, 3. …
 
-<details><summary>More: background and notes</summary>
+<details><summary>Details</summary>
 … le reste du texte actuel, gardé …
 </details>
 ```
 
+==> si possible il faudrait rajouter les ref correspondant aux outils, soit dans une dernière sous-section de l'intro ou alors dans une section à la fin du notebook
+
 Le bloc repliable (`<details>`) garde les longs textes sans allonger la page (contexte EDF de l'outil 1, les
 modèles de 3bis, l'arborescence des sorties de l'outil 7, les règles de 8bis…) : voir question 4.
+==> si possible il faudrait rajouter les ref correspondant aux outils, soit dans ce bloc details de l'intro ou alors dans une section à la fin du notebook
 
 **Titres proposés** (les « Phase 1 / 2 / 2b » disparaissent des titres) :
 
@@ -335,14 +339,20 @@ participant » / « Remove my exclusion »).
 
 1. **Orange d'attention** : `#e65100` (déjà utilisé, contraste 3.8:1 sur blanc, assez pour du gras ou une
    bordure) ou un orange plus sombre, `#bf4b00` (5:1, plus lisible en texte courant mais plus « brun ») ?
+   ==> `#e65100` je préfère celle la
 2. **Symboles des journaux `print()`** : unifier aussi les journaux à l'écran en ✅ ⚠ ❌ (aujourd'hui ⚠ et ⚠️,
    ✅ ✓ ✔, ❌ ✗) ? Je le recommande ; un journal qui est aussi écrit dans un fichier n'est pas touché.
+   ==> ok pour unifier sur ✅ ⚠️ ❌
 3. **Outil 4, section 1bis** : sous-section optionnelle sans numéro en fin de section 1 (recommandé), ou une vraie
    section 2 avec renumérotation 3 à 6 (le générateur Curry renumérote alors à son tour) ?
+   ==> ok pour sous-section optionnelle sans numéro en fin de section 1
 4. **Longs textes d'intro dans un bloc repliable** `<details>` (recommandé, la page commence par l'essentiel)
    ou entièrement visibles ?
+   ==> ok pour une section details repliées
 5. **Titres** du tableau §3.1 : d'accord, ou à reformuler ?
+==> ok avec les titres proposés
 6. **« Scan »** pour l'entrée des outils 2, 3, 4 et 7 (l'outil 7 perd « Load participants ») : d'accord ?
+==> ok pour Scan
 
 ---
 
