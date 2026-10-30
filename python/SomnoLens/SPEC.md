@@ -2840,6 +2840,32 @@ distribution*):
   integer, scaled between the physical minimum and maximum set at export.
 - Tool 2: typo "dispaly".
 
+### Tools 1 to 4: one code cell per section (TODO, maintenance)
+
+Tools 1 (1,834 lines), 2 (2,026), 3 (1,692) and 4 (884) hold their whole page in a **single code cell**: the
+section headers are `widgets.HTML` placed in one `VBox` at the end of the cell. Split each into one code cell
+per section, like tools 5 to 9 (imports, shared state and helpers in the first cells), so that a section's code
+is easy to find and to update. Nothing changes for the user: the page already shows every section header from
+the start (user decision, 2026-10-29: kept out of the display harmonization, worth doing for later updates).
+The generators `_make_tool{2,3,4}_curry.py` look their replacements up in "the main cell": rewrite that lookup;
+tool 1's twin is hand-edited. Prove the split output-neutral (`tests/refactor_check.py`, `tests/outside_chain.py
+1 3`, `test_tools_1_3_4.py`). Best done after the display harmonization.
+
+### Tool 2: richer context channels (vertical EOG, several EMG, ECG) (TODO)
+
+Tool 2's context-channel section (*Section 2bis*, §2) declares four slots per channel configuration: `eog_left`,
+`eog_right`, `emg`, `ecg`. Wanted (user request, 2026-10-29, its own task):
+- a **vertical EOG** slot (vEOG), with `(none)` when absent;
+- **EMG by site**: chin, arm, leg, with the possibility to add more EMG channels, and `(none)` for each absent one;
+- **ECG**: a similar mechanism if the usual set-ups need it (check the classical montages: one lead or several).
+
+Constraints: the `context_channels` block of `remap_reref_persubject.json` stays **additive and backward
+compatible** (an existing `emg` is read as the chin EMG; JSONs without the new keys stay byte-identical);
+`detect_context_channels` needs site rules (e.g. `chin|menton` → chin, `leg|jambe|tib|LAT|RAT` → leg,
+`arm|bras` → arm), checked on real exports; every consumer is reviewed: tool 7's `[H]` companion (role labels
+`EOG-L` / `EOG-R` / `EMG` / `ECG`, per-role display filters), tool 8's context traces (`DISPLAY_SCALE_UV`,
+`CTX_COLOR`), tool 3bis (its models take the chin EMG), tool 0's explorer; the Curry twin regenerated.
+
 ### English everywhere: harmonize the language of every tool (TODO)
 
 Project rule: every user-facing string is in English. Some tools still show French. Found on 2026-10-19 (quick
