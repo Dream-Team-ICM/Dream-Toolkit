@@ -111,6 +111,15 @@ notebooks, rename around the extension blocks (**rename-to-`.txt`** method):
   `splitlines(keepends=True)` (never `split("\n")`) and re-`compile()` the joined source as a syntax gate.
   An open IDE may re-serialize the notebook between calls: re-read before each pass. Prefer rename-to-`.txt`
   when diff minimality matters.
+- **Pitfalls of the scripted patches** (met during the display harmonization, 2026-11-02):
+  - A Bash heredoc collapses `\\` to `\`: write a patch script that holds backslashes or `\n` escapes with the
+    file-writing tool, not through a heredoc.
+  - The file-writing tool strips the spaces at the end of a physical line: a pattern that matches a notebook line
+    ending with spaces (several lines of tools 1 and 2 do) must be a one-line string with an explicit `\n`.
+  - `rm -rf "$VAR/…"` is refused by a safety check (an empty variable would target the root): delete temporary
+    folders by their literal absolute path.
+  - Never edit `tools/*.ipynb` or a library while a pytest run is going: the suite executes the notebooks, and
+    `tests/chaincache.py` fingerprints them to decide which tools of the chain to rerun.
 
 ## Conda environment
 
