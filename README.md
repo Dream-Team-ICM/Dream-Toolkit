@@ -1,5 +1,11 @@
 # Dream-Toolkit
 
+## SomnoLens: the sleep EEG / PSG toolkit
+
+The point-and-click tools to inspect, harmonize, preprocess and extract measures from sleep EEG / PSG databases
+(EDF recordings) live in [`python/SomnoLens/`](python/SomnoLens/README.md), with their own installation: see its
+README.
+
 ## How to install and run the python jupyter scripts (Ubuntu)
 
 ### Dependencies:
