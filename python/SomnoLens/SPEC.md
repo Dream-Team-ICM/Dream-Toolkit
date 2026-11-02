@@ -3007,6 +3007,12 @@ Tool 0 reads the EDF through `edf_io_lib`; a Curry version needs the Curry reade
 companions) of `tools_curry/curry_header.py` / `curry_io.py` behind the same functions, and is best done after the
 *EDF reading of tools 2, 4, 6, 7 through `edf_io_lib`* item above (same reader-as-argument design).
 
+### Slow-wave and spindle extraction (TODO)
+
+A new feature tool for the sleep microstructure: detection of slow waves and spindles. Everything is still to
+design (inputs, detection method, outputs). It comes before the distribution: the licence step waits for it
+(user decision, 2026-11-02).
+
 ### Lighter conda environments + a dedicated autoscoring environment (TODO)
 
 Goal: a user installs the **strict minimum**, so setup stays fast (the current `somnolens` env weighs ~4.7 GB).
@@ -3078,7 +3084,8 @@ history). Nothing is decided yet unless stated.
 - **Licence, to confirm with ICM's legal / technology-transfer office**: an employee's code in principle belongs
   to the employer. Ask who holds the copyright (the `Copyright (c) …` line of `LICENSE`) and whether a licence is
   imposed (French research bodies often recommend **CeCILL-B**, the BSD-like licence written for French law).
-  Have the dependency points below reviewed at the same time.
+  Have the dependency points below reviewed at the same time. **When**: once the tools are more stable and the
+  slow-wave / spindle extraction is implemented (user decision, 2026-11-02).
 - **Dependencies' licences, before distributing the autoscoring** (checked on GitHub on 2026-10-16): MNE-Python,
   YASA, Voila are BSD-3, specparam and edfio Apache-2.0 (all compatible with BSD-3).
   - **GSSC (tool 3bis) is AGPL-3.0**: strict copyleft, use over a network included. SomnoLens can stay BSD-3 while
