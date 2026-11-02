@@ -1314,7 +1314,7 @@ def references_html():
     refs = ''
     for short, citation, doi in REFERENCES:
         link = f' doi:<a href="https://doi.org/{doi}">{doi}</a>' if doi else ''
-        refs += f'<li><b>{short}</b> - {citation}{link}</li>'
+        refs += f'<li><b>{short}</b>: {citation}{link}</li>'
     return ('<p><b>Read with care.</b> The Ohayon 2004 values are read on the fitted age curves of its '
             'Figure 1 (approximate). They come from healthy, screened subjects recorded in a laboratory, '
             'first (habituation) nights excluded, scored with the Rechtschaffen &amp; Kales rules '
@@ -1323,7 +1323,7 @@ def references_html():
             'at older ages. <i>Convention</i> = commonly used cut-off without a normative study.</p>'
             '<table style="font-size:85%"><tr><th>Metric</th><th>Indicative value</th><th>Source</th>'
             f'<th>Remark</th></tr>{rows}</table>'
-            f'<p><b>References</b></p><ol style="font-size:85%">{refs}</ol>')
+            f'<p><b>Cited works</b> (the short names of the Source column above)</p><ul>{refs}</ul>')
 
 
 def guidance_html(cfg, data_dir, reports_dir, has_subject_info=False, has_comparison=False):

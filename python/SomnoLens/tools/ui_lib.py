@@ -47,7 +47,7 @@ def box_style(kind):
     """The CSS of a boxed message, for a <div> built by hand (a box holding a table...)."""
     color, background, _ = MESSAGE_STYLES[kind]
     return (f'border-left:4px solid {color}; background:{background}; color:#222; '
-            f'padding:6px 10px; margin:6px 0; border-radius:3px;')
+            f'padding:6px 10px; margin:6px 0; border-radius:3px; line-height:1.4;')
 
 
 def box(kind, text, symbol=True):
@@ -59,8 +59,16 @@ def box(kind, text, symbol=True):
 
 
 def help_html(text):
-    """A help line in small grey text (under a folder picker, a field...). `text` is HTML."""
-    return f'<span style="color:{MUTED_COLOR}; font-size:90%;">{text}</span>'
+    """A help line in small grey text (under a folder picker, a field...). `text` is HTML. A block with its own
+    line height: in a widget HTML, a wrapped line would otherwise take a one-line field's height (28 px)."""
+    return f'<div style="color:{MUTED_COLOR}; font-size:90%; line-height:1.4;">{text}</div>'
+
+
+def text_block(html):
+    """A long text of a widget HTML, as a block with a normal line height. The widget's own line height is a
+    one-line field's (28 px, so that a short label lines up with the fields beside it): a text that wraps would
+    otherwise leave a gap between its lines. Its colour and size stay the ones `html` sets."""
+    return f'<div style="line-height:1.4;">{html}</div>'
 
 
 def waiting_html(section):
@@ -137,9 +145,12 @@ WIDE_WIDTH = '620px'       # long lists (label included)
 
 
 def picker_title(name, detail=''):
-    """Title of a folder / file picker: the name in bold, an optional detail in grey."""
-    extra = f' <span style="color:{MUTED_COLOR};">{detail}</span>' if detail else ''
-    return f'<b>{name}</b>{extra}'
+    """Title of a folder / file picker: the name in bold and, on its own line under it, an optional detail in
+    small grey text. The explicit line height matters: the title is a widget HTML whose line height is the
+    height of a one-line field (28 px), which spread a wrapped detail far below the name. The picker is
+    500 px wide: keep a detail under ~85 characters so it stays on one line."""
+    extra = f'<br><span style="color:{MUTED_COLOR}; font-size:90%;">{detail}</span>' if detail else ''
+    return f'<div style="line-height:1.4;"><b>{name}</b>{extra}</div>'
 
 
 def log_output(max_height='400px'):

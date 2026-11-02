@@ -856,7 +856,7 @@ def plot_metric_scatter(metrics, reject_flag, reject_method, thresholds, title_p
 
 
 def plot_channel_flag_heatmap(P, pair_flags, methods_sel, in_scope, badness_pct=None,
-                              dropped_channels=(), custom_stages=(), flags_source=''):
+                              dropped_channels=(), custom_stages=(), flags_source='', drop_pct=None):
     """Channels × epochs flagged-pair heatmap (coloured by flagging method) with a hypnogram strip on
     top and a per-channel badness bar on the right. The counterpart of tool 7's and tool 8bis's
     heatmaps, in tool 8's report — it is what makes "CPz is bad on 59 % of the night" visible BEFORE
@@ -866,6 +866,8 @@ def plot_channel_flag_heatmap(P, pair_flags, methods_sel, in_scope, badness_pct=
     stays a short strip and a 64-channel one stays under ~12 in. `badness_pct` (n_ch,) is the bar; when
     None it is derived from `pair_flags` over the in-scope epochs. Dropped channels get a red bold
     label. `flags_source` is echoed in the title ('reports TSV' vs 'recomputed, time-domain only').
+    The bar axis always spans 0-100 %: a badness is read against the whole night, not against the other
+    channels. `drop_pct` (tool 8's channel-drop threshold, > 0) adds a dashed line at that value.
     Returns a Figure."""
     ch_names = list(P['ch_names'])
     n_ch = len(ch_names)
@@ -935,12 +937,17 @@ def plot_channel_flag_heatmap(P, pair_flags, methods_sel, in_scope, badness_pct=
     ax_b = axes[1][1]
     colours = ['#c0392b' if cn in dropped else '#4a3aa7' for cn in ch_names]
     ax_b.barh(np.arange(n_ch), badness_pct, color=colours, height=0.8)
+    ax_b.set_xlim(0, 100)
+    if drop_pct is not None and drop_pct > 0:
+        ax_b.axvline(drop_pct, color='#444444', ls='--', lw=1.0)
     ax_b.set_ylim(n_ch - 0.5, -0.5)
     ax_b.set_yticks([])
     ax_b.set_xlabel('% focus-stage epochs', fontsize=8)
     ax_b.tick_params(axis='x', labelsize=7)
     ax_b.grid(True, axis='x', alpha=0.25)
-    ax_b.set_title(f'Badness (n={int(insc.sum())})', fontsize=8)
+    # the space above the bar is free (axes[0][1] is off): the threshold goes on a second title line
+    drop_note = f'\ndashed: drop > {drop_pct:g} %' if drop_pct is not None and drop_pct > 0 else ''
+    ax_b.set_title(f'Badness (n={int(insc.sum())}){drop_note}', fontsize=8)
     for sp in ['top', 'right']:
         ax_b.spines[sp].set_visible(False)
 
@@ -1001,7 +1008,7 @@ def build_rejection_table_html(meta, methods_present, stage_order, title='', rej
 def build_participant_report_figs(P, metrics, freqs, psds_uV2, thresholds, custom_stages,
                                   reject_flag=None, reject_method=None, stage_order=None, methods=None,
                                   pair_flags=None, in_scope=None, badness_pct=None,
-                                  dropped_channels=(), flags_source=''):
+                                  dropped_channels=(), flags_source='', drop_pct=None):
     """Assemble the Section-2 figures for one participant. Returns (list_of_(title, fig), table_html).
     `reject_flag` / `reject_method` / `stage_order` / `methods` let tool 8 pass its RECOMPUTED
     selected-methods decision + in-scope stage order; all default to the tool-7 metadata (batch twin
@@ -1035,7 +1042,7 @@ def build_participant_report_figs(P, metrics, freqs, psds_uV2, thresholds, custo
                                                badness_pct=badness_pct,
                                                dropped_channels=dropped_channels,
                                                custom_stages=custom_stages,
-                                               flags_source=flags_source)))
+                                               flags_source=flags_source, drop_pct=drop_pct)))
     figs.append(('PSD overlays (clean median/IQR in front)',
                  plot_psd_overlays_grid(freqs, psds_uV2, stages, reject_flag, reject_method,
                                         stage_order, custom_stages=custom_stages)))

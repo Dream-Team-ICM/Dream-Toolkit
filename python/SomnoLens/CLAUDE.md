@@ -27,7 +27,7 @@ The "what to do / what not to break" reminders, grouped by theme. Each points to
   for EMG). Import it from `tools/edf_io_lib.py`, pre-filled as an editable selection so the user
   can correct misses. Tool 1 inspects EEG/EOG/ECG/EMG with the same *transducer-type OR curated
   name-list* convention, **default selection = EEG + EOG** (ECG/EMG opt-in) in the Voila app and both batch scripts.
-- **Context channels declared once in tool 2 (`2_select&remap_channels_edf*`, Section 2bis)**: identifies,
+- **Context channels declared once in tool 2 (`2_select&remap_channels_edf*`, Section 3)**: identifies,
   **per channel configuration**, the non-EEG *context* channels (`eog_left`, `eog_right`, `emg`, `ecg`)
   via a dataframe-based `detect_context_channels(df_sub)` (same *transducer-type OR name* convention, but on
   the header scan, **not** the raw-based `detect_channel_types`). It **must tolerate a missing `transducer_type`
@@ -164,6 +164,13 @@ The "what to do / what not to break" reminders, grouped by theme. Each points to
   code-visible Jupyter versions of tools 0–4 are **archived, frozen** in `tools/jupyter_notebook/` (since
   2026-10-08): never edit or sync them, never create a Jupyter version for a new tool. Outputs are TSV
   (machine) + HTML (human). → SPEC *Cross-cutting → Single delivery*.
+- **Voila page conventions = `tools/ui_lib.py`** (imported as `UI` by every page and Curry twin): intro template
+  + References, `section_html` / `subsection_html` (continuous numbering), message colours, buttons by role
+  (`run` / `save` green, `read` blue = **Scan** as the entry button, `caution`, `helper`), widths, `picker_title`
+  / `help_html` / `text_block` (a long widget text needs one: a widget HTML spaces wrapped lines by 28 px),
+  progress bars. **No button that only reveals widgets**: a section builds itself after the step it
+  needs (`waiting_html` until then). A new page or widget follows it; `tests/test_ui_lib.py` guards the pages.
+  → SPEC *Cross-cutting → Voila page conventions*.
 
 **Per-tool** (→ SPEC §1bis / §5 / §7 / §8 / §8bis / §9)
 - **Anonymization (`1bis_anonymize_edf*`)**: copy the file, then overwrite **only** `patient_id` and

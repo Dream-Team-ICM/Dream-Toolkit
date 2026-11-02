@@ -428,18 +428,18 @@ replace_in_cell(cell3,
     "# Why a first run without preparation: the metrics are computed on the prepared signal, and a high-pass\n"
     "# smooths away part of the defects this overview looks for.\n"
     "signal_prep_hint = widgets.HTML(\n"
-    "    f'<small style=\"color:{UI.MUTED_COLOR};\">First run: leave both unticked to see the data as recorded. A high-pass '\n"
+    "    UI.text_block(f'<small style=\"color:{UI.MUTED_COLOR};\">First run: leave both unticked to see the data as recorded. A high-pass '\n"
     "    'attenuates or erases clipping, quantization, flat segments and DC drift (the metrics are computed on '\n"
     "    'the prepared signal). Use it in a second run, to harmonise a dataset with different acquisition '\n"
-    "    'high-passes or to judge the signal as tool 7 will filter it.</small>'\n"
+    "    'high-passes or to judge the signal as tool 7 will filter it.</small>')\n"
     ")\n",
     "# Curry data are DC-coupled: the high-pass is ticked by default to remove the DC offset, and the hint\n"
     "# says what it costs (the metrics are computed on the prepared signal).\n"
     "signal_prep_hint = widgets.HTML(\n"
-    "    f'<small style=\"color:{UI.MUTED_COLOR};\">Curry data are DC-coupled, so the high-pass is ticked by default (0.1 Hz) '\n"
+    "    UI.text_block(f'<small style=\"color:{UI.MUTED_COLOR};\">Curry data are DC-coupled, so the high-pass is ticked by default (0.1 Hz) '\n"
     "    'to remove the DC offset. Untick it only to look at the raw offsets. A high-pass attenuates clipping, '\n"
     "    'quantization, flat segments and drift in the metrics (they are computed on the prepared '\n"
-    "    'signal).</small>'\n"
+    "    'signal).</small>')\n"
     ")\n",
     "cell3 signal-preparation hint (Curry)")
 

@@ -175,7 +175,7 @@ def header_channel_table(header):
 
 # ---------------------------------------------------------------------------------------------------------
 # Channel types (detect_channel_types from 0_live_explore_1file; detect_context_channels from
-# 2_select&remap_channels_edf, Section 2bis)
+# 2_select&remap_channels_edf, Section 3)
 # ---------------------------------------------------------------------------------------------------------
 # Anchored full 10-10 system + mastoid / auricular references (M1/M2, A1/A2, as in tools 1 and 2) + older
 # 10-20 temporal labels (T3/T4/T5/T6) + literal 'EEG'.

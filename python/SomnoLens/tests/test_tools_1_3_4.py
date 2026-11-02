@@ -78,10 +78,9 @@ def test_tool3_remaps_a_raw_export_to_aasm(fresh_db):
         nb.pick('chooser', fresh_db)
         nb.set('suffix_box', '_Hypnogram_Export.txt')
         nb.set('output_suffix_box', '_Hypnogram_tool3.txt')     # keep the generated truth untouched
-        nb.click('btn_scan')
-        nb.click('btn_run_remap')
-        nb.click_labelled('Save remapping')
-        nb.click('btn_run_save')
+        nb.click('btn_scan')                                    # sim01's mid-night '?' opens the review
+        nb.click('btn_proceed_s2')                              # no correction: section 3 builds itself
+        nb.click_labelled('Save remapping')                     # section 4 builds itself
         nb.click_labelled('Save files')
         nb.click('btn_run_verify')
         text = nb.widget_text()

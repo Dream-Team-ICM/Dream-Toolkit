@@ -122,11 +122,11 @@ replace_in_cell(main_cell,
     "            print(f\"\\nThere is {len(chooser.edf_files)} .cdt files in your folder!\")",
     "chooser.edf_files discovery"
 )
-# Section 6 test discovery
+# Section 7 test discovery
 replace_in_cell(main_cell,
     "                    if f.suffix.lower() == '.edf' and not f.name.startswith('._')\n",
     "                    if f.suffix == '.cdt' and not f.name.startswith('._')\n",
-    "Section 6 discovery"
+    "Section 7 discovery"
 )
 
 # ---------------------------------------------------------------------------
@@ -248,7 +248,7 @@ NEW_MASK = (
 replace_in_cell(main_cell, OLD_MASK, NEW_MASK, "channel mask")
 
 # ---------------------------------------------------------------------------
-# 5. Section 6 signal load
+# 5. Section 7 signal load
 # ---------------------------------------------------------------------------
 OLD_LOAD = (
     "                                raw = mne.io.read_raw_edf(edf_path, preload=True, include=selected_channels) # we need to preload to use  re-ref; old param from Thomas encoding=\"latin-1\", \n"
@@ -264,7 +264,7 @@ NEW_LOAD = (
     "                            except Exception as e:\n"
     "                                err = f\"\\t❌ Unexpected problem in loading Curry file with mne: {e}\\n\""
 )
-replace_in_cell(main_cell, OLD_LOAD, NEW_LOAD, "Section 6 signal load")
+replace_in_cell(main_cell, OLD_LOAD, NEW_LOAD, "Section 7 signal load")
 
 # ---------------------------------------------------------------------------
 # 6. failed_edf_read.tsv → failed_cdt_read.tsv (all cells)
@@ -272,7 +272,7 @@ replace_in_cell(main_cell, OLD_LOAD, NEW_LOAD, "Section 6 signal load")
 replace_all_cells("failed_edf_read.tsv", "failed_cdt_read.tsv", "failed_cdt_read.tsv")
 
 # ---------------------------------------------------------------------------
-# 7. Section 6 info text about loading
+# 7. Section 6 info text about loading (JSON save)
 # ---------------------------------------------------------------------------
 replace_in_cell(main_cell,
     "display(HTML(f\"<p>- <code>raw = mne.io.read_raw_edf(edf_path, preload=True, include=list(sub_config['remap'].keys()))</code></p>\"))",

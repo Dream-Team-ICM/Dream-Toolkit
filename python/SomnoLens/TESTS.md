@@ -230,13 +230,14 @@ change of date in a report.
 | Area | What is checked |
 |---|---|
 | Every Voila notebook | Opens and runs from top to bottom without error, EDF tools and Curry twins (quick level) |
+| Page look | Every Voila page and Curry twin takes its look from the shared style module (title, section lines, button styles), so no page drifts back to its own style (quick level) |
 | Every tool | No Python error appears in any tool's output during the chain |
 | Every tool | Every reference file is owned by a tool (none escapes the comparison) |
 | Tool 5bis | Validating writes the criteria exclusions to the registry; a new validation replaces them but keeps the manual decisions; a forced inclusion is refused without a comment; the exclusion columns are never mistaken for sleep metrics |
 | Tool 5 | One report per recording (the night with its scored events, the metrics, the checks), each linked from the database report; a recording whose report is missing counts as not processed: it is the only one run again |
 | Tool 6 | The quality tables flag the excluded participants; `dataset_overview.html` counts only the others and names the excluded one; the excluded participant's report shows the banner |
 | Tool 7 | Deselected channels are in the `.fif` (marked bad) and in the settings file, absent from the flagging tables; the per-stage summary is pooled over the non-excluded participants only; a manual exclusion needs a reason; a re-run with nobody to process still refreshes the tables |
-| Tool 8bis | The decision tables keep exactly the epochs and channels the former cleaned copy held; tool-7 deselected channels are recorded as dropped; an event-count threshold excludes a participant, a re-run without it lifts the exclusion |
+| Tool 8bis | The decision tables keep exactly the epochs and channels the former cleaned copy held; tool-7 deselected channels are recorded as dropped; an event-count threshold excludes a participant, a re-run without it lifts the exclusion; with *Skip* ticked, a participant decided with the same settings is skipped and one decided with another threshold is decided again |
 | Tool 8 | The decision tables match the former cleaned copy; the *Exclude* / *Remove my exclusion* button writes and deletes the decision |
 | Tool 9 | Every epoch × channel is in the tables with the right decision flags; dropped channels are still computed; the per-epoch spectrum file exists; night-third counts (rejected, out of scope, % rejected) are those of each stage × third cell |
 | Participant selector | Skip applies in both modes; a subset with already-processed participants shows the warning; the add box only offers participants not yet selected; pasted and clicked ids switch to subset mode; unknown ids are refused; a rescan drops vanished ids |

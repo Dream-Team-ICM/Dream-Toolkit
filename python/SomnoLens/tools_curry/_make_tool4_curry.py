@@ -308,7 +308,7 @@ replace_in_cell(code,
     '<br>&#x2022; then the <b>CSV</b> <code>*_event_xml.csv</code> (suffix in the <b>CSV suffix</b> field);\n'
     '<br>&#x2022; then, as a fallback, the <code>&lt;ScoredEvents&gt;</code> of the <code>*.edf.XML</code>.\n'
     '<br>&#x2022; Selecting the folder auto-detects both suffixes and refreshes the info lines below.\n'
-    '<br>&#x2022; Click <b>Run scan</b> to read the events and list the configurations.\n'
+    '<br>&#x2022; Click <b>Scan</b> to read the events and list the configurations.\n'
     '<br>&#x2022; "Skip labels already mapped" hides labels already present in an existing\n'
     '<code>event_remap.json</code> (incremental harmonization when you add a new cohort).</p>\n'
     '"""))',
@@ -317,7 +317,7 @@ replace_in_cell(code,
     'text export next to it, whose suffix is set in the <b>Event export suffix</b> field below\n'
     '(default <code>_ScoredEvents_Export.txt</code>).\n'
     '<br>&#x2022; Selecting the folder auto-detects the suffix and refreshes the info line below.\n'
-    '<br>&#x2022; Click <b>Run scan</b> to read the events and list the configurations.\n'
+    '<br>&#x2022; Click <b>Scan</b> to read the events and list the configurations.\n'
     '<br>&#x2022; "Skip labels already mapped" hides labels already present in an existing\n'
     '<code>event_remap.json</code> (incremental harmonization when you add a new cohort).</p>\n'
     '"""))',
@@ -360,7 +360,7 @@ replace_in_cell(code,
 # Remove section1bis widgets (run_check_button + tol_seconds + out_check)
 replace_in_cell(code,
     '# Section 1bis\n'
-    'run_check_button = UI.button("Run text/CSV vs XML check", "run", icon="check")\n'
+    'run_check_button = UI.button("Check text/CSV vs XML", "run", icon="check")\n'
     'tol_seconds = widgets.BoundedIntText(value=1, min=0, max=10, description="Match tolerance (s):",\n'
     '                                     style={"description_width": "initial"},\n'
     '                                     layout=widgets.Layout(width="170px"))\n'
@@ -491,7 +491,11 @@ replace_in_cell(code,
 
 # run_scan loop head + failed reason
 replace_in_cell(code,
+    '        scan_progress.max = max(1, len(edfs))\n'
+    '        scan_progress.value = 0\n'
+    "        scan_progress.bar_style = 'info'\n"
     '        for edf in edfs:\n'
+    '            scan_progress.value += 1\n'
     '            fid = edf.stem\n'
     '            try:\n'
     '                events, source = load_events(edf, txt_suffix.value, csv_suffix.value)\n'
@@ -501,7 +505,11 @@ replace_in_cell(code,
     '            if events is None:\n'
     '                failed.append((fid, "no readable event companion (.txt, .csv or .edf.XML)"))\n'
     '                continue\n',
+    '        scan_progress.max = max(1, len(cdts))\n'
+    '        scan_progress.value = 0\n'
+    "        scan_progress.bar_style = 'info'\n"
     '        for cdt in cdts:\n'
+    '            scan_progress.value += 1\n'
     '            fid = cdt.stem\n'
     '            try:\n'
     '                events, source = load_events(cdt, csv_suffix.value)\n'
@@ -545,8 +553,8 @@ replace_in_cell(code,
 
 # Remove the EDF's txt_suffix + txt_suffix_info from the layout row
 replace_in_cell(code,
-    "    section1, chooser, txt_suffix, txt_suffix_info, csv_suffix, csv_suffix_info, existing_info, skip_existing, run_scan_button, out_scan,",
-    "    section1, chooser, csv_suffix, csv_suffix_info, existing_info, skip_existing, run_scan_button, out_scan,",
+    "    section1, chooser, txt_suffix, txt_suffix_info, csv_suffix, csv_suffix_info, existing_info, skip_existing, run_scan_button, scan_progress_row, out_scan,",
+    "    section1, chooser, csv_suffix, csv_suffix_info, existing_info, skip_existing, run_scan_button, scan_progress_row, out_scan,",
     "remove txt_suffix from layout")
 
 replace_in_cell(code,

@@ -41,6 +41,19 @@ def test_section_headers():
     assert UI.section_markdown(1, 'Study folder') == f'{UI.SECTION_RULE}\n\n## 1. Study folder'
 
 
+def test_picker_title_puts_the_detail_on_its_own_line():
+    # the widget HTML's line height is a one-line field's (28 px): the title sets its own
+    title = UI.picker_title('Study folder', '(holds <code>derivatives/</code>)')
+    assert title.startswith('<div style="line-height:1.4;"><b>Study folder</b><br>')
+    assert UI.MUTED_COLOR in title and '(holds <code>derivatives/</code>)' in title
+    assert '<br>' not in UI.picker_title('Study folder')
+
+
+def test_long_texts_get_a_normal_line_height():
+    assert UI.text_block('<small>a long help text</small>') == '<div style="line-height:1.4;"><small>a long help text</small></div>'
+    assert 'line-height:1.4' in UI.help_html('help') and 'line-height:1.4' in UI.box_style('warn')
+
+
 @pytest.mark.parametrize('role', list(UI.BUTTON_ROLES))
 def test_buttons_follow_their_role(role):
     btn = UI.button('Do it', role, tooltip='a tooltip')

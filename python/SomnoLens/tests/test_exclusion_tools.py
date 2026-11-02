@@ -230,6 +230,30 @@ def test_tool8bis_event_threshold_excludes_then_a_rerun_lifts_it(chain, data_cop
     assert run(0).empty                                                 # re-run without it: lifted
 
 
+@pytest.mark.tool8bis
+def test_tool8bis_skip_decides_again_with_other_settings(chain, data_copy):
+    """Skip ticked: a participant decided with the same settings is skipped, one decided with other
+    thresholds is decided again (otherwise the new thresholds would silently not apply)."""
+    fid = ids(chain)[0]
+    record = data_copy / 'reports_rejection_auto' / f'{fid}_autoreject_decision.tsv'
+
+    def run(channel_pct):
+        with NotebookSession(pipeline.T8BIS) as nb:
+            nb.pick('fc_raw', data_copy / 'derivatives' / 'preproc_epo')
+            nb.pick('fc_reports', data_copy / 'reports_preproc')
+            nb.click('btn_scan')
+            nb.set('ft_ch_pct', channel_pct)
+            select_subset(nb, [fid], skip=True)
+            nb.click('btn_run')
+            return nb.widget_text()
+
+    text = run(20.0)                                                    # the chain's own settings
+    assert 'skipped=1' in text and 'decided again' not in text, text[-2000:]
+    text = run(50.0)
+    assert 'skipped=0' in text and f'{fid} (channel_reject_pct)' in text, text[-2000:]
+    assert tsv(record)['channel_reject_pct'].iloc[0] == 50.0
+
+
 # =====================================================================================  tool 8
 @pytest.mark.tool8
 def test_tool8_decision_tables(chain, golden):
