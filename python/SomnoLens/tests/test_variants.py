@@ -176,7 +176,7 @@ def test_tool6_resampling_and_highpass(src, tmp_path):
         nb.set('hp_check', False)
         nb.click('btn_run')
         second_log = nb.widget_text()
-    assert second_log.count('⚠ made with resampled to 128 Hz, high-pass 0.5 Hz, this run: none '
+    assert second_log.count('⚠️ made with resampled to 128 Hz, high-pass 0.5 Hz, this run: none '
                             '(untick Skip to redo it)') == len(IDS), second_log[-2000:]
     reports = data / 'reports_quality_overview'
     q = tsv(reports / 'quality_summary.tsv')

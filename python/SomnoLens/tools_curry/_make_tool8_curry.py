@@ -44,8 +44,8 @@ def replace_in_cell(idx, old, new, what):
 # --- 1. title + prose (cell 0, markdown) ---
 replace_in_cell(
     0,
-    '# Tool 8: Manually reject flagged epochs (Phase 2b)',
-    '# Tool 8: Manually reject flagged epochs, Curry twin (Phase 2b)\n\n'
+    '# Tool 8: Manual epoch rejection',
+    '# Tool 8: Manual epoch rejection (Curry 9 .cdt)\n\n'
     '*Curry twin: functionally identical to the EDF tool 8. Tool 8 reads only tool-7 `*_all-epo.fif` +\n'
     'its optional companions, which the Curry tool 7 writes in the same MNE/TSV format, so no analysis\n'
     'code differs: only the shared-library import path. The high-density support (32–64 channel\n'

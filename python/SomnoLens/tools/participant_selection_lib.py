@@ -207,10 +207,10 @@ def registry_newer_than(data_folder, *tables):
 
 def stale_tables_html(how_to_refresh):
     """Orange box shown at scan / load when `registry_newer_than` is True."""
-    return ('<div style="background:#fff4e5;border:2px solid #ef6c00;color:#7a3e00;padding:8px 12px;'
-            'margin:6px 0;border-radius:4px"><b>&#9888; The exclusion registry changed after this tool\'s '
-            'database tables were built</b>: a participant excluded (or re-included) since then is not '
-            f'flagged in them yet. {how_to_refresh}</div>')
+    import ui_lib as UI      # the look shared by the Voila pages (imported on use: screen only)
+    return UI.box('warn', '<b>The exclusion registry changed after this tool\'s '
+                  'database tables were built</b>: a participant excluded (or re-included) since then is not '
+                  f'flagged in them yet. {how_to_refresh}')
 
 
 STALE_RERUN = ('Click <b>Run</b> with <i>Skip already processed</i> ticked: nobody is reprocessed, the '
@@ -246,7 +246,9 @@ class ParticipantSelector:
 
     def __init__(self, skip_default=True):
         import ipywidgets as w
+        import ui_lib            # the look shared by the Voila pages
         self._w = w
+        self._ui = ui_lib
         self._ids = []                     # all participant ids, display order
         self._done = set()                 # normcase keys of the already-processed ones
         self._excluded = {}                # normcase key -> reason
@@ -343,11 +345,10 @@ class ParticipantSelector:
         if not skipped:
             return ''
         names = ', '.join(skipped[:20]) + (f' (+{len(skipped) - 20} more)' if len(skipped) > 20 else '')
-        return ('<div style="background:#fff4e5;border:2px solid #ef6c00;color:#7a3e00;padding:8px 12px;'
-                'margin:6px 0;border-radius:4px"><b>&#9888; '
-                f'{len(skipped)} of the {len(self.chosen_ids())} selected participant(s) will NOT be '
-                f'processed: already processed</b> ({names}).<br>Untick <b>Skip already processed '
-                'participants</b> to reprocess them.</div>')
+        import ui_lib as UI      # the look shared by the Voila pages (imported on use: screen only)
+        return UI.box('warn', f'<b>{len(skipped)} of the {len(self.chosen_ids())} selected participant(s) will '
+                      f'NOT be processed: already processed</b> ({names}).<br>Untick <b>Skip already processed '
+                      'participants</b> to reprocess them.')
 
     # -- callbacks ----------------------------------------------------------------
     def _on_mode(self, change=None):
@@ -399,7 +400,7 @@ class ParticipantSelector:
             finally:
                 self._cleaning = False
         if unknown:
-            self.lbl_paste.value = f'<span style="color:#c62828">unknown id(s): {", ".join(unknown)}</span>'
+            self.lbl_paste.value = f'<span style="color:{self._ui.ERROR_COLOR}">unknown id(s): {", ".join(unknown)}</span>'
         chosen = {id_key(t) for t in clean}
         self.cmb_add.options = [fid for fid in self._ids if id_key(fid) not in chosen]
         self._refresh()
@@ -413,7 +414,7 @@ class ParticipantSelector:
         if found and not self.subset_mode:
             self.dd_mode.value = 'Subset only'
         self.txt_paste.value = ''
-        self.lbl_paste.value = (f'<span style="color:#c62828">unknown id(s): {", ".join(unknown)}</span>'
+        self.lbl_paste.value = (f'<span style="color:{self._ui.ERROR_COLOR}">unknown id(s): {", ".join(unknown)}</span>'
                                 if unknown else '')
 
     def _refresh(self, change=None):

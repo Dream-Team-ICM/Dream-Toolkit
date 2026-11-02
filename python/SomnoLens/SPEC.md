@@ -2806,6 +2806,25 @@ The selected value must stay the one the run reads (the tests drive `hypno_suffi
 keep those names or adapt the tests). Touches the six notebooks, the Curry twins / generators of tools 3, 4, 6, 7
 and the tests that set these widgets.
 
+**The toolkit's own hypnograms must not win the auto-selection** (user report, 2026-11-02). Tool 3bis writes
+`{id}_hypnogram_<algo>.txt` (gssc / yasa / sleepfm, or the suffixes set in its Section 1) and tool 0 writes
+`<hypnogram>_rescored.txt` next to the recordings. Both are candidate `.txt` suffixes, so "shortest" (tool 3) or
+"longest" (tools 3bis, 5, 6, 7) picks them instead of the expected file: tool 3 takes `_hypnogram_gssc.txt` (19
+characters) over `_Hypnogram_Export.txt` (21), the others take `_Hypnogram_remapped_rescored.txt` over
+`_Hypnogram_remapped.txt`. Same split as the event `.txt` exclusion (*Hypnogram-suffix auto-detection*): they
+stay in the displayed list (and can be chosen, e.g. to run the chain on an automatic or rescored hypnogram) but
+are left out of the automatic choice, and the choice states its intent: tool 3 wants the raw export, tools 3bis
+(expert hypnogram), 5, 6, 7 and 0 want the remapped one. One shared helper (e.g. `pick_hypno_suffix(counts,
+intent)` in `edf_io_lib`) instead of six copies of the rule, and a test with these files present.
+
+**Shorter default names, at the same time** (user request, 2026-11-02): tool 3bis's default output suffixes become
+`{id}_hypno_<algo>.txt` (instead of `{id}_hypnogram_<algo>.txt`), and tool 3's default output suffix
+`{id}_hypno_remapped.txt` (instead of `{id}_Hypnogram_remapped.txt`), so the read side defaults of tools 3bis, 5,
+6, 7, 0 follow. Defaults only: the suffix fields stay editable and the auto-detection keeps finding the existing
+`_Hypnogram_remapped.txt` / `_hypnogram_<algo>.txt` files of the studies already processed (the helper above must
+recognise both spellings). Also to update: the synthetic test data and the goldens that carry these names, the
+test runners that set the suffixes, SPEC (§3, §3bis and every tool that cites them) and the tutorials.
+
 ### Database organisation inferred by tool 1 (TODO, audit first)
 
 Tool 1's reading of how the database is organised (participants from the file names, the sub-folder as a group

@@ -137,8 +137,8 @@ if not os.path.exists(summary_path):
 
 # check if there is a participants.tsv file to get different groups or sessions
 # if there is not a participants.tsv we will try to infer groups from subfolder organization or filename components (additional part from subject number)
-# in ICEBERG, subfolders define groups within the study folder
-# in APOMORPHEE, suffixes define nights ("session") 
+# e.g. subfolders can define groups within the study folder,
+# and file-name suffixes can define nights ("session")
 table_found = False
 for root, dirs, files in os.walk(folder_path):
     if 'participants.tsv' in files:
@@ -186,7 +186,7 @@ for e, edf_path in enumerate(edf_files):
         # get subject name (corresponding to file_name)
         sub_name = edf_path.stem
         
-        # get subject group (from the parent folder because in the ICEBERG database subfolders were created per patient group)
+        # get subject group (from the parent folder, for databases with one subfolder per patient group)
         sub_folder = edf_path.parent.name # get the parent folder of the subject file (path)
         
         # create df from signal info

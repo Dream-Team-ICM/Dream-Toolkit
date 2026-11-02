@@ -35,14 +35,15 @@ LIB_PSL, LIB_QC = TOOLS / 'participant_selection_lib.py', TOOLS / 'qc_rejected_e
 LIB_MACRO, LIB_EIO = TOOLS / 'macrostructure_lib.py', TOOLS / 'edf_io_lib.py'
 LIB_QUAL, LIB_PREP = TOOLS / 'quality_lib.py', TOOLS / 'preprocessing_lib.py'
 LIB_AR, LIB_SPEC = TOOLS / 'autoreject_lib.py', TOOLS / 'spectral_lib.py'
+LIB_UI = TOOLS / 'ui_lib.py'                 # the look of the Voila pages (every tool imports it)
 TOOL_DEPS = {
-    '5': [TOOLS / '5_compute_sleep_macrostructure_voila.ipynb', LIB_PSL, LIB_MACRO, LIB_EIO, LIB_QUAL],
-    '5bis': [TOOLS / '5bis_exclude_sleep_macrostructure_voila.ipynb', LIB_PSL, LIB_MACRO, LIB_EIO],
-    '6': [TOOLS / '6_quality_overview_voila.ipynb', LIB_PSL, LIB_QUAL],
-    '7': [TOOLS / '7_preprocessing_voila.ipynb', LIB_PSL, LIB_PREP, LIB_EIO],       # the libraries import edf_io_lib
-    '8bis': [TOOLS / '8bis_reject_automatically_voila.ipynb', LIB_PSL, LIB_QC, LIB_PREP, LIB_AR, LIB_EIO],
-    '8': [TOOLS / '8_reject_manually_voila.ipynb', LIB_PSL, LIB_QC, LIB_PREP, LIB_EIO],
-    '9': [TOOLS / '9_spectral_features_voila.ipynb', LIB_PSL, LIB_SPEC, LIB_EIO],
+    '5': [TOOLS / '5_compute_sleep_macrostructure_voila.ipynb', LIB_PSL, LIB_MACRO, LIB_EIO, LIB_QUAL, LIB_UI],
+    '5bis': [TOOLS / '5bis_exclude_sleep_macrostructure_voila.ipynb', LIB_PSL, LIB_MACRO, LIB_EIO, LIB_UI],
+    '6': [TOOLS / '6_quality_overview_voila.ipynb', LIB_PSL, LIB_QUAL, LIB_UI],
+    '7': [TOOLS / '7_preprocessing_voila.ipynb', LIB_PSL, LIB_PREP, LIB_EIO, LIB_UI],       # the libraries import edf_io_lib
+    '8bis': [TOOLS / '8bis_reject_automatically_voila.ipynb', LIB_PSL, LIB_QC, LIB_PREP, LIB_AR, LIB_EIO, LIB_UI],
+    '8': [TOOLS / '8_reject_manually_voila.ipynb', LIB_PSL, LIB_QC, LIB_PREP, LIB_EIO, LIB_UI],
+    '9': [TOOLS / '9_spectral_features_voila.ipynb', LIB_PSL, LIB_SPEC, LIB_EIO, LIB_UI],
 }
 # What each tool writes in the data folder (deleted before it reruns)
 TOOL_OUTPUTS = {

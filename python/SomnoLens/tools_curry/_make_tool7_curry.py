@@ -81,8 +81,10 @@ run_cell = cells[8]
 
 # ===========================================================================
 print("=== Cell 0: markdown intro ===")
-replace_in_cell(md0, "# Preprocessing: Phase 2",
-                "# Preprocessing: Phase 2, Curry 9 (.cdt)", "md title")
+replace_in_cell(md0, "# Tool 7: Preprocessing and epoch flagging\n",
+                "# Tool 7: Preprocessing and epoch flagging (Curry 9 .cdt)\n", "md title")
+replace_in_cell(md0, "the study folder (`.edf` recordings and the hypnograms",
+                "the study folder (Curry 9 `.cdt` recordings and the hypnograms", "md inputs")
 replace_in_cell(md0, "[group sub-folders mirroring the EDF folder structure, if any]",
                 "[group sub-folders mirroring the .cdt folder structure, if any]", "md output structure")
 
@@ -255,11 +257,7 @@ replace_in_cell(ui_paths,
     '"""Auto-detect hypnogram .txt suffixes in the .cdt folder and populate the widget."""',
     "cell4 docstring")
 
-# 4e. fc_config title (from select&remap_channels_edf -> curry)
-replace_in_cell(ui_paths,
-    "fc_config.title = '<b>remap_reref_persubject.json</b> (from select&amp;remap_channels_edf) :'",
-    "fc_config.title = '<b>remap_reref_persubject.json</b> (from select&amp;remap_channels_curry) :'",
-    "cell4 fc_config title")
+# 4e. (fc_config title: names tool 2, valid for both formats)
 
 # 4f. Suffix widgets pass through unchanged: the EDF 'Event TXT suffix' (_ScoredEvents_Export.txt)
 # and 'Event CSV suffix' (_event_xml.csv) defaults both suit Curry, so the twin mirrors both fields.

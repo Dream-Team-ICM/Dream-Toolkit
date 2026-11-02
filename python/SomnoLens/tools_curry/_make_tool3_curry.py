@@ -30,8 +30,13 @@ replacements = [
 
     # Title markdown
     (
-        "# Remap hypnogram labels",
-        "# Remap hypnogram labels: Curry 9 (.cdt)"
+        "# Tool 3: Remap the hypnogram labels",
+        "# Tool 3: Remap the hypnogram labels (Curry 9 .cdt)"
+    ),
+    # Intro inputs
+    (
+        "a study folder holding the `.edf` recordings",
+        "a study folder holding the Curry 9 `.cdt` recordings"
     ),
     # Match message "EDF files matched" → ".cdt files matched"
     (
@@ -40,8 +45,8 @@ replacements = [
     ),
     # chooser title hint
     (
-        "Choose your study folder",
-        "Choose your study folder (containing .cdt files)"
+        "UI.picker_title('Study folder')",
+        "UI.picker_title('Study folder', '(containing .cdt files)')"
     ),
 ]
 

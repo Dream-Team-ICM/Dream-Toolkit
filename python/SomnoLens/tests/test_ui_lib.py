@@ -1,0 +1,79 @@
+"""tools/ui_lib.py: the look shared by every Voila page (SPEC *Cross-cutting -> Voila page conventions*)."""
+import json
+import re
+import sys
+from pathlib import Path
+
+import pytest
+
+ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(ROOT / 'tools'))
+import ui_lib as UI  # noqa: E402
+
+pytestmark = pytest.mark.quick
+
+# Every Voila page: the EDF tools and their Curry twins
+PAGES = sorted(ROOT.glob('tools/*_voila.ipynb')) + sorted(ROOT.glob('tools_curry/*_voila.ipynb'))
+
+
+def cells(page):
+    """(cell type, text) of every cell of a notebook."""
+    nb = json.loads(page.read_text(encoding='utf-8'))
+    return [(c['cell_type'], c['source'] if isinstance(c['source'], str) else ''.join(c['source']))
+            for c in nb['cells']]
+
+
+def test_messages_carry_their_colour_and_symbol():
+    assert UI.msg('warn', '2 recordings have no hypnogram.') == \
+        f'<span style="color:{UI.WARN_COLOR}">{UI.WARN} 2 recordings have no hypnogram.</span>'
+    assert UI.ERROR not in UI.msg('error', 'failed', symbol=False)
+    assert UI.msg('muted', 'details') == f'<span style="color:{UI.MUTED_COLOR}">details</span>'
+    box = UI.box('ok', '<b>Done</b>')
+    assert f'border-left:4px solid {UI.OK_COLOR}' in box and f'{UI.OK} <b>Done</b>' in box
+
+
+def test_section_headers():
+    html = UI.section_html(2, 'Parameters', '<p>Set them.</p>')
+    assert html.startswith(f'<div class="{UI.MARKDOWN_CLASS}">{UI.SECTION_RULE}')
+    assert '<h2>2. Parameters</h2>' in html and '<p>Set them.</p>' in html
+    assert '<h2>References</h2>' in UI.section_html(None, 'References')
+    assert '<h3>2.1 Epoching</h3>' in UI.subsection_html('2.1', 'Epoching')
+    assert UI.section_markdown(1, 'Study folder') == f'{UI.SECTION_RULE}\n\n## 1. Study folder'
+
+
+@pytest.mark.parametrize('role', list(UI.BUTTON_ROLES))
+def test_buttons_follow_their_role(role):
+    btn = UI.button('Do it', role, tooltip='a tooltip')
+    assert (btn.button_style, btn.icon) == UI.BUTTON_ROLES[role]
+    assert btn.layout.width == 'max-content' and btn.tooltip == 'a tooltip'
+    assert UI.button('Preview', 'read', icon='eye').icon == 'eye'
+
+
+def test_progress_bar_text_follows_the_bar():
+    bar, row = UI.progress_bar('Participants:')
+    assert row.children[0] is bar and row.children[1].value == ''
+    bar.max, bar.value = 10, 3
+    assert row.children[1].value == '3 / 10'
+    UI.finish_progress(bar)
+    assert bar.bar_style == 'success'
+    UI.finish_progress(bar, n_failed=1)
+    assert bar.bar_style == 'warning'
+
+
+# ---------------------------------------------------------------------------
+# Guards: every page keeps to the conventions (no drift back to a page's own style)
+# ---------------------------------------------------------------------------
+def test_there_are_pages():
+    assert len(PAGES) >= 20, [p.name for p in PAGES]
+
+
+@pytest.mark.parametrize('page', PAGES, ids=lambda p: p.name)
+def test_page_follows_the_conventions(page):
+    found = cells(page)
+    code = '\n'.join(text for kind, text in found if kind == 'code')
+    assert found[0][0] == 'markdown' and found[0][1].startswith('# Tool '), 'the page must open on its "# Tool N: ..." title'
+    assert re.search(r'^\s*import ui_lib as UI\b', code, re.M), 'the page must import ui_lib as UI'
+    assert not re.search(r"button_style\s*=\s*['\"]info['\"]", code), "no 'info' button style: use UI.button and a role"
+    for kind, text in found:
+        if kind == 'markdown' and re.search(r'^## ', text, re.M):
+            assert text.startswith(UI.SECTION_RULE + '\n\n## '), f'section cell without the thick rule: {text[:60]!r}'

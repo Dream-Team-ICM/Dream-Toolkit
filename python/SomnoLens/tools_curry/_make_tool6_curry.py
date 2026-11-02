@@ -262,11 +262,11 @@ replace_in_cell(cell3,
     "edf_files = [f for f in sorted(data_folder.rglob('*')) if f.suffix.lower() == '.edf' and not f.name.startswith('._')]\n"
     "    n_total = len(edf_files)\n"
     "    if n_total == 0:\n"
-    "        existing_reports_info.value = '<small style=\"color:#888;\">No EDF files found in selected folder (recursive scan).</small>'\n",
+    "        existing_reports_info.value = UI.msg('warn', 'No EDF files found in selected folder (recursive scan).')\n",
     "cdt_files = [f for f in sorted(data_folder.rglob('*')) if f.suffix == '.cdt' and not f.name.startswith('._')]\n"
     "    n_total = len(cdt_files)\n"
     "    if n_total == 0:\n"
-    "        existing_reports_info.value = '<small style=\"color:#888;\">No .cdt files found in selected folder (recursive scan).</small>'\n",
+    "        existing_reports_info.value = UI.msg('warn', 'No .cdt files found in selected folder (recursive scan).')\n",
     "cell3 cdt discovery",
 )
 
@@ -294,13 +294,6 @@ replace_in_cell(cell3,
     "f'&nbsp;— {best_count}/{n_total} EDF files matched</small>'",
     "f'&nbsp;— {best_count}/{n_total} .cdt files matched</small>'",
     "cell3 EDF files matched text",
-)
-
-# 3e. fc_config title
-replace_in_cell(cell3,
-    "fc_config.title = '<b>Select remap/reref config JSON</b> (from select&amp;remap_channels_edf):'",
-    "fc_config.title = '<b>Select remap/reref config JSON</b> (from select&amp;remap_channels_curry):'",
-    "cell3 fc_config title",
 )
 
 # 3f. Remove thresh_bounds widget (between thresh_flat and thresh_peaks)
@@ -435,7 +428,7 @@ replace_in_cell(cell3,
     "# Why a first run without preparation: the metrics are computed on the prepared signal, and a high-pass\n"
     "# smooths away part of the defects this overview looks for.\n"
     "signal_prep_hint = widgets.HTML(\n"
-    "    '<small style=\"color:#555;\">First run: leave both unticked to see the data as recorded. A high-pass '\n"
+    "    f'<small style=\"color:{UI.MUTED_COLOR};\">First run: leave both unticked to see the data as recorded. A high-pass '\n"
     "    'attenuates or erases clipping, quantization, flat segments and DC drift (the metrics are computed on '\n"
     "    'the prepared signal). Use it in a second run, to harmonise a dataset with different acquisition '\n"
     "    'high-passes or to judge the signal as tool 7 will filter it.</small>'\n"
@@ -443,7 +436,7 @@ replace_in_cell(cell3,
     "# Curry data are DC-coupled: the high-pass is ticked by default to remove the DC offset, and the hint\n"
     "# says what it costs (the metrics are computed on the prepared signal).\n"
     "signal_prep_hint = widgets.HTML(\n"
-    "    '<small style=\"color:#555;\">Curry data are DC-coupled, so the high-pass is ticked by default (0.1 Hz) '\n"
+    "    f'<small style=\"color:{UI.MUTED_COLOR};\">Curry data are DC-coupled, so the high-pass is ticked by default (0.1 Hz) '\n"
     "    'to remove the DC offset. Untick it only to look at the raw offsets. A high-pass attenuates clipping, '\n"
     "    'quantization, flat segments and drift in the metrics (they are computed on the prepared '\n"
     "    'signal).</small>'\n"
@@ -460,8 +453,8 @@ replace_in_cell(cell3,
     "cell3 acq scan reader (Curry)")
 
 replace_in_cell(cell3,
-    "            '<small style=\"color:#555;\">Selected channels (EDF header): '\n",
-    "            '<small style=\"color:#555;\">Selected channels (Curry header): '\n",
+    "            f'<small style=\"color:{UI.MUTED_COLOR};\">Selected channels (EDF header): '\n",
+    "            f'<small style=\"color:{UI.MUTED_COLOR};\">Selected channels (Curry header): '\n",
     "cell3 acq scan label (Curry)")
 
 # 4e. Remove EDF-specific comment before selected_channels
@@ -565,21 +558,11 @@ replace_all_cells("edf_relative", "cdt_relative", "edf_relative → cdt_relative
 # Global: edf_reports_dir → cdt_reports_dir
 replace_all_cells("edf_reports_dir", "cdt_reports_dir", "edf_reports_dir → cdt_reports_dir")
 
-# Update markdown title cell
-for cell in nb["cells"]:
-    if cell["cell_type"] == "markdown":
-        src = get_src(cell)
-        if "quality" in src.lower() or "overview" in src.lower():
-            new_src = src.replace(
-                "EDF Quality Overview",
-                "Quality Overview: Curry 9 (.cdt)"
-            ).replace(
-                "quality_overview_voila",
-                "6_quality_overview_curry_voila"
-            )
-            if new_src != src:
-                set_src(cell, new_src)
-                print("  ✓ markdown title updated")
+# Update the intro: title and inputs
+replace_all_cells("# Tool 6: Signal quality overview\n", "# Tool 6: Signal quality overview (Curry 9 .cdt)\n",
+                  "markdown title")
+replace_all_cells("a study folder holding the `.edf` recordings", "a study folder holding the Curry 9 `.cdt` recordings",
+                  "markdown inputs")
 
 # ---------------------------------------------------------------------------
 # Validate and write

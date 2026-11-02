@@ -121,6 +121,10 @@ RUNNERS = {'1': run_tool1, '3': run_tool3, '3bis': run_tool3bis, '6variant': run
 
 
 if __name__ == '__main__':
+    # Not run by pytest, so conftest's keep-awake is called by hand: a laptop that sleeps mid-run leaves a cell
+    # waiting until the 30-min timeout.
+    from conftest import _keep_windows_awake  # noqa: E402
+    _keep_windows_awake(True)
     tools = sys.argv[1:] or ['3bis']
     for dataset in ('synthetic', 'real'):
         if not (CHAIN_ROOT / dataset / 'data').is_dir():

@@ -284,9 +284,23 @@ replace_in_cell(main_cell,
 # 8. chooser title
 # ---------------------------------------------------------------------------
 replace_in_cell(main_cell,
-    "Choose your study folder",
-    "Choose your study folder (containing .cdt files)",
+    "UI.picker_title('Study folder')",
+    "UI.picker_title('Study folder', '(containing .cdt files)')",
     "chooser title"
+)
+
+# ---------------------------------------------------------------------------
+# 9. Intro: title and inputs
+# ---------------------------------------------------------------------------
+replace_all_cells(
+    "# Tool 2: Select, rename and re-reference the channels\n",
+    "# Tool 2: Select, rename and re-reference the channels (Curry 9 .cdt)\n",
+    "intro title"
+)
+replace_all_cells(
+    "- **Inputs**: a study folder holding `.edf` files (searched in every subfolder)",
+    "- **Inputs**: a study folder holding Curry 9 `.cdt` recordings (searched in every subfolder)",
+    "intro inputs"
 )
 
 # ---------------------------------------------------------------------------

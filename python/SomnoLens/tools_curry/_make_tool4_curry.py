@@ -79,33 +79,27 @@ code = nb["cells"][1]
 # ===========================================================================
 print("=== Markdown cell 0 ===")
 NEW_MD = (
-    "# Harmonize scored-event labels of a Curry 9 (.cdt) EEG/PSG database\n"
+    "# Tool 4: Harmonize the scored-event labels (Curry 9 .cdt)\n"
     "\n"
-    "This notebook lets you **visualize** the scored-event configurations present in a Curry 9\n"
-    "database (events annotated during sleep scoring and exported by Curry as a text file:\n"
-    "arousals, apnea, hypopnea, limb movements, desaturations…) and **harmonize** their raw\n"
-    "labels to a single canonical vocabulary.\n"
+    "This tool lets you **visualize** the scored-event configurations present in a Curry 9 database (events\n"
+    "annotated during sleep scoring and exported by Curry as a text file: arousals, apnea, hypopnea, limb movements,\n"
+    "desaturations…) and **harmonize** their raw labels to a single canonical vocabulary.\n"
     "\n"
-    "It returns a JSON file `config_param/event_remap.json` (a flat python dict\n"
-    "`{raw_label: canonical_label}`, with `null` for labels you choose to ignore) that downstream\n"
-    "tools (epoch rejection in `7_preprocessing_curry`) can use.\n"
+    "- **Inputs**: a study folder holding Curry 9 `.cdt` recordings, each with its Curry event text export\n"
+    "  `*_ScoredEvents_Export.txt` next to it.\n"
+    "- **Outputs**: `config_param/event_remap.json` in the study folder, a flat Python dict\n"
+    "  `{raw_label: canonical_label}` (`null` for the labels you choose to ignore) that the later tools use (epoch\n"
+    "  flagging in `7_preprocessing_curry`).\n"
+    "- **Sections**: 1. Study folder (scan the events), 2. Event configurations found, 3. Harmonize the labels,\n"
+    "  4. Preview & save the JSON, 5. Verify.\n"
     "\n"
-    "---\n"
-    "**To use this notebook, interact with the widgets and read the output below. You first have to\n"
-    "select a database to make the widgets appear.**\n"
+    "<details><summary>Details</summary>\n"
     "\n"
-    "Sections:\n"
-    "1. Select your study folder and scan the events\n"
-    "2. Event configurations found\n"
-    "3. Harmonize the labels\n"
-    "4. Preview & save the JSON\n"
-    "5. Verify\n"
+    "The raw labels are the export strings (often in French, e.g. `Micro-éveil 1 ARO SPONT`). The canonical\n"
+    "suggestions recognize the common French Compumedics/Curry labels (arousals, apnea, hypopnea, desaturation,\n"
+    "snoring…), so most are pre-filled. Unusual labels still need a manual choice.\n"
     "\n"
-    "The events are read from the Curry text export `*_ScoredEvents_Export.txt` next to each `.cdt`.\n"
-    "The raw labels are the export strings (often in French, e.g. `Micro-éveil 1 ARO SPONT`). The\n"
-    "canonical suggestions below now recognize the common French Compumedics/Curry labels (arousals,\n"
-    "apnea, hypopnea, desaturation, snoring…), so most are pre-filled. Unusual labels still need a\n"
-    "manual choice.\n"
+    "</details>"
 )
 set_src(md0, NEW_MD)
 print("  ok markdown rewritten")
@@ -306,9 +300,7 @@ remove_between(code,
 print("\n=== Cell 1: Section 1 banner + widgets ===")
 # section1 banner (3-source wording -> Curry single text export)
 replace_in_cell(code,
-    'section1 = widgets.HTML("""\n'
-    '<hr style="height:4px; background-color:black; border:none;">\n'
-    '<h2>1. Select your study folder and scan the events</h2>\n'
+    'section1 = widgets.HTML(UI.section_html(1, \'Study folder\', """\n'
     '<p>Pick the folder of your .edf database. Each .edf is expected to have a Compumedics/Profusion\n'
     'event companion next to it. Three sources are supported, in priority order:\n'
     '<br>&#x2022; the <b>text export</b> <code>*_ScoredEvents_Export.txt</code> (read first; suffix in\n'
@@ -319,10 +311,8 @@ replace_in_cell(code,
     '<br>&#x2022; Click <b>Run scan</b> to read the events and list the configurations.\n'
     '<br>&#x2022; "Skip labels already mapped" hides labels already present in an existing\n'
     '<code>event_remap.json</code> (incremental harmonization when you add a new cohort).</p>\n'
-    '""")',
-    'section1 = widgets.HTML("""\n'
-    '<hr style="height:4px; background-color:black; border:none;">\n'
-    '<h2>1. Select your study folder and scan the events</h2>\n'
+    '"""))',
+    'section1 = widgets.HTML(UI.section_html(1, \'Study folder\', """\n'
     '<p>Pick the folder of your Curry (.cdt) database. Each .cdt is expected to have a Curry event\n'
     'text export next to it, whose suffix is set in the <b>Event export suffix</b> field below\n'
     '(default <code>_ScoredEvents_Export.txt</code>).\n'
@@ -330,14 +320,12 @@ replace_in_cell(code,
     '<br>&#x2022; Click <b>Run scan</b> to read the events and list the configurations.\n'
     '<br>&#x2022; "Skip labels already mapped" hides labels already present in an existing\n'
     '<code>event_remap.json</code> (incremental harmonization when you add a new cohort).</p>\n'
-    '""")',
+    '"""))',
     "section1 banner")
 
 # Remove section1bis banner
 replace_in_cell(code,
-    'section1bis = widgets.HTML("""\n'
-    '<hr style="height:4px; background-color:black; border:none;">\n'
-    '<h2>1bis. (Optional) Check text/CSV vs XML consistency</h2>\n'
+    'section1bis = widgets.HTML(UI.subsection_html(None, \'Optional: check text/CSV vs XML consistency\', """\n'
     '<p>For every file having <b>both</b> a primary source (the <code>.txt</code> text export if present,\n'
     'else the <code>*_event_xml.csv</code>) <b>and</b> the <code>&lt;ScoredEvents&gt;</code> of the\n'
     '<code>*.edf.XML</code>, checks that the two describe the same events. Labels are normalized to the\n'
@@ -350,15 +338,15 @@ replace_in_cell(code,
     'they are truly one event or two distinct events that merely fall within the tolerance</b>. Events with\n'
     'no counterpart show up as only-in-one-source (e.g. an export that omits snoring). Writes\n'
     '<code>config_param/event_source_mismatch.tsv</code>. Opt-in because it reads both files per EDF.</p>\n'
-    '""")\n\n',
+    '"""))\n\n',
     "",
     "remove section1bis banner")
 
 # Remove the EDF's extra txt_suffix widget (Curry keeps a single suffix field = csv_suffix)
 replace_in_cell(code,
     'txt_suffix = widgets.Text(value="_ScoredEvents_Export.txt", description="TXT suffix:",\n'
-    '                          style={"description_width": "initial"},\n'
-    '                          layout=widgets.Layout(width="420px"))\n'
+    '                          style=UI.LABEL_STYLE,\n'
+    '                          layout=widgets.Layout(width=UI.FIELD_WIDTH))\n'
     'txt_suffix_info = widgets.HTML(value="")\n',
     "",
     "remove txt_suffix widget")
@@ -372,7 +360,7 @@ replace_in_cell(code,
 # Remove section1bis widgets (run_check_button + tol_seconds + out_check)
 replace_in_cell(code,
     '# Section 1bis\n'
-    'run_check_button = widgets.Button(description="Run text/CSV vs XML check", button_style="info", icon="check")\n'
+    'run_check_button = UI.button("Run text/CSV vs XML check", "run", icon="check")\n'
     'tol_seconds = widgets.BoundedIntText(value=1, min=0, max=10, description="Match tolerance (s):",\n'
     '                                     style={"description_width": "initial"},\n'
     '                                     layout=widgets.Layout(width="170px"))\n'
@@ -387,7 +375,7 @@ replace_in_cell(code,
     '        folder = Path(chooser.selected_path)\n'
     '        edfs = [f for f in folder.rglob("*") if f.suffix.lower() == ".edf" and not f.name.startswith("._")]\n'
     '        if not edfs:\n'
-    '            existing_info.value = \'<small style="color:#888;">No EDF files found in selected folder.</small>\'\n'
+    '            existing_info.value = UI.msg(\'warn\', \'No EDF files found in selected folder.\')\n'
     '            csv_suffix_info.value = ""\n'
     '            txt_suffix_info.value = ""\n'
     '            return\n'
@@ -408,7 +396,7 @@ replace_in_cell(code,
     '                    txt_counts[suf] = txt_counts.get(suf, 0) + 1\n'
     '        if not txt_counts:\n'
     '            txt_suffix_info.value = (\n'
-    '                \'<small style="color:#e67e00;">No event .txt detected next to the EDFs \'\n'
+    '                f\'<small style="color:{UI.WARN_COLOR};">No event .txt detected next to the EDFs \'\n'
     '                \'— set the suffix manually or rely on CSV/XML.</small>\')\n'
     '        else:\n'
     '            best_suffix, best_count = max(\n'
@@ -416,7 +404,7 @@ replace_in_cell(code,
     '            txt_suffix.value = best_suffix\n'
     '            parts = [f\'<b>{s}</b>&nbsp;(×{c})\'\n'
     '                     for s, c in sorted(txt_counts.items(), key=lambda x: -x[1])]\n'
-    '            color = \'#2e7d32\' if best_count == len(edfs) else \'#e67e00\'\n'
+    '            color = UI.OK_COLOR if best_count == len(edfs) else UI.WARN_COLOR\n'
     '            txt_suffix_info.value = (\n'
     '                f\'<small style="color:{color};">Detected:&nbsp;\'\n'
     '                f\'{"&nbsp;·&nbsp;".join(parts)}&nbsp;— \'\n'
@@ -431,7 +419,7 @@ replace_in_cell(code,
     '                    suffix_counts[suf] = suffix_counts.get(suf, 0) + 1\n'
     '        if not suffix_counts:\n'
     '            csv_suffix_info.value = (\n'
-    '                \'<small style="color:#e67e00;">No event CSV detected next to the EDFs \'\n'
+    '                f\'<small style="color:{UI.WARN_COLOR};">No event CSV detected next to the EDFs \'\n'
     '                \'— set the suffix manually or rely on the XML fallback.</small>\')\n'
     '        else:\n'
     '            # Events have no "more specific remapped" variant (unlike hypnograms), so prefer the\n'
@@ -441,7 +429,7 @@ replace_in_cell(code,
     '            csv_suffix.value = best_suffix\n'
     '            parts = [f\'<b>{s}</b>&nbsp;(×{c})\'\n'
     '                     for s, c in sorted(suffix_counts.items(), key=lambda x: -x[1])]\n'
-    '            color = \'#2e7d32\' if best_count == len(edfs) else \'#e67e00\'\n'
+    '            color = UI.OK_COLOR if best_count == len(edfs) else UI.WARN_COLOR\n'
     '            csv_suffix_info.value = (\n'
     '                f\'<small style="color:{color};">Detected:&nbsp;\'\n'
     '                f\'{"&nbsp;·&nbsp;".join(parts)}&nbsp;— \'\n'
@@ -449,7 +437,7 @@ replace_in_cell(code,
     '        folder = Path(chooser.selected_path)\n'
     '        cdts = [f for f in folder.rglob("*") if f.suffix == ".cdt" and not f.name.startswith("._")]\n'
     '        if not cdts:\n'
-    '            existing_info.value = \'<small style="color:#888;">No .cdt files found in selected folder.</small>\'\n'
+    '            existing_info.value = UI.msg(\'warn\', \'No .cdt files found in selected folder.\')\n'
     '            csv_suffix_info.value = ""\n'
     '            return\n'
     '        existing = load_existing_mapping(folder)\n'
@@ -469,7 +457,7 @@ replace_in_cell(code,
     '                    suffix_counts[suf] = suffix_counts.get(suf, 0) + 1\n'
     '        if not suffix_counts:\n'
     '            csv_suffix_info.value = (\n'
-    '                \'<small style="color:#e67e00;">No event export detected next to the .cdt files \'\n'
+    '                f\'<small style="color:{UI.WARN_COLOR};">No event export detected next to the .cdt files \'\n'
     '                \'— set the suffix manually.</small>\')\n'
     '        else:\n'
     '            # Prefer the MOST FREQUENT suffix (shortest on ties).\n'
@@ -478,7 +466,7 @@ replace_in_cell(code,
     '            csv_suffix.value = best_suffix\n'
     '            parts = [f\'<b>{s}</b>&nbsp;(×{c})\'\n'
     '                     for s, c in sorted(suffix_counts.items(), key=lambda x: -x[1])]\n'
-    '            color = \'#2e7d32\' if best_count == len(cdts) else \'#e67e00\'\n'
+    '            color = UI.OK_COLOR if best_count == len(cdts) else UI.WARN_COLOR\n'
     '            csv_suffix_info.value = (\n'
     '                f\'<small style="color:{color};">Detected:&nbsp;\'\n'
     '                f\'{"&nbsp;·&nbsp;".join(parts)}&nbsp;— \'\n'
