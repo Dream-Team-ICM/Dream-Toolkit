@@ -379,14 +379,20 @@ def merge_onsets_for_display(onsets, manual):
 # ---------------------------------------------------------------------------
 # Spectral analysis (Welch PSD + specparam 1/f fit) — same config as tool 7
 # ---------------------------------------------------------------------------
-def compute_psds(epochs, fmax=45.0, smoothing=None):
+PSD_SMOOTH_BLOCK = 100    # epochs smoothed per block: one progress step each (same numbers as one pass)
+
+
+def compute_psds(epochs, fmax=45.0, smoothing=None, progress=None):
     """Welch PSD per epoch/channel, identical config to 7_preprocessing_voila.
     `fmax` is the 1/f fit upper bound (default 2–45 Hz range); the PSD spans up to it.
     `smoothing` is the tool-7 `psd_smoothing` sidecar block
     ({enabled, method, median_span_hz, lowess_span_hz}); when enabled the PSD is smoothed
     (median then LOWESS, same order/params as tool 7) BEFORE return, so tool 8's recomputed
     plots and per-channel 1/f attribution match what tool 7 flagged. Default None -> no smoothing
-    (byte-identical to before). Returns (freqs, psds_uV2), psds shape (n_ep, n_ch, n_freqs), µV²/Hz."""
+    (byte-identical to before). `progress(done, total)` (optional) is called after the Welch step and
+    after each block of PSD_SMOOTH_BLOCK epochs smoothed (the smoothing is the slow part): each spectrum
+    is smoothed on its own, so the blocks give exactly the numbers of one pass.
+    Returns (freqs, psds_uV2), psds shape (n_ep, n_ch, n_freqs), µV²/Hz."""
     sf = float(epochs.info['sfreq'])
     epoch_len_s = len(epochs.times) / sf                  # supports non-30 s epochs
     n_per_seg = int(min(4, epoch_len_s) * sf)              # 4 s Welch window, capped to the epoch length
@@ -396,11 +402,22 @@ def compute_psds(epochs, fmax=45.0, smoothing=None):
                                   n_fft=n_per_seg, n_overlap=n_overlap, n_per_seg=n_per_seg,
                                   window='hann', verbose=False)   # match tool 7 (MNE defaults to 'hamming')
     freqs, psds_uV2 = psds_obj.freqs, psds_obj.get_data() * 1e12
-    if smoothing and smoothing.get('enabled'):
+    do_smooth = bool(smoothing and smoothing.get('enabled'))
+    starts = list(range(0, len(psds_uV2), PSD_SMOOTH_BLOCK)) if do_smooth else []
+    if progress:
+        progress(1, 1 + len(starts))
+    if do_smooth:
         try:
-            if smoothing.get('method') == 'median+lowess' and smoothing.get('median_span_hz'):
-                psds_uV2 = smooth_psd_median(psds_uV2, freqs, span_hz=float(smoothing['median_span_hz']))
-            psds_uV2 = smooth_psd_lowess(psds_uV2, freqs, span_hz=float(smoothing.get('lowess_span_hz', 2.0)))
+            smoothed = []
+            for k, start in enumerate(starts):
+                block = psds_uV2[start:start + PSD_SMOOTH_BLOCK]
+                if smoothing.get('method') == 'median+lowess' and smoothing.get('median_span_hz'):
+                    block = smooth_psd_median(block, freqs, span_hz=float(smoothing['median_span_hz']))
+                smoothed.append(smooth_psd_lowess(block, freqs, span_hz=float(smoothing.get('lowess_span_hz', 2.0))))
+                if progress:
+                    progress(2 + k, 1 + len(starts))
+            if smoothed:
+                psds_uV2 = np.concatenate(smoothed)
         except Exception:
             pass   # non-fatal: fall back to the raw PSD if smoothing fails
     return freqs, psds_uV2
