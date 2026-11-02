@@ -262,8 +262,9 @@ l'outil 8 ; s'il ne fait qu'afficher, même traitement.
   sélecteur, dans le même style.
 - Le bouton qui liste les participants avant de lancer s'appelle **Scan** (rôle `read`) : outils 2 (« Run
   scan »), 3 (« Scan for hypnograms »), 4 (« Run scan »), 7 (« Load participants ») ; 3bis, 5, 8bis, 9 l'ont
-  déjà. Restent : « Load » (5bis, charge une table), « Load participant » (8, un participant à la fois), « Run
-  inspection » (1, son unique action) et l'outil 6 (pas d'étape de liste, il lance directement).
+  déjà ; 5bis aussi (« Load » devient « Scan », §4.6 point 3). Restent : « Load participant » (8, un
+  participant à la fois), « Run inspection » (1, son unique action, question 7) et l'outil 6 (pas d'étape de
+  liste, il lance directement).
 
 ### 4.4 Barres de progression ajoutées
 
@@ -274,6 +275,49 @@ Outils 1 (inspection), 1bis (anonymisation), 2 (scan), 3 (scan), 4 (scan) : la b
 Verbe + objet, phrase courte, majuscule seulement au début. La liste exacte des changements sera dans le
 commit ; les libellés que les tests cliquent restent (« Save remapping », « Save files », « Exclude this
 participant » / « Remove my exclusion »).
+
+### 4.6 Retours de ta vérification visuelle (2026-11-02)
+
+Ajoutés à la phase 2. Sauf les questions 8 à 10, ce sont des textes ou de l'affichage : aucune sortie ne change.
+
+| # | Outil | Ce qui change |
+|---|---|---|
+| 1 | 1 | Couleur du bouton « Run inspection » : question 7. |
+| 2 | 5, 5bis | Références au même format que les autres outils (liste à puces, taille normale). Le tableau des valeurs indicatives et son avertissement « Read with care » restent. `macrostructure_lib.references_html()` sert aussi au rapport base de données de l'outil 5 : question 8. |
+| 3 | 5bis | « Load » devient « Scan » (rôle `read` ; la variable `btn_load` reste). |
+| 4 | 6 | Section 3 : ligne grise, les seuils par défaut visent une PSG clinique typique, à adapter à la qualité du jeu de données (un jeu bruité en marque beaucoup, un jeu très propre presque aucun). |
+| 5 | 6, 7 | Rendre visible le circuit qui existe déjà (détail sous le tableau). |
+| 6 | 7 | Ligne grise sous les filtres : band-pass FIR (fenêtre de Hamming, `firwin`, longueur automatique), appliqué aller puis retour (`phase='zero-double'` : pas de déphasage, atténuation doublée) ; notch FIR aux réglages par défaut de MNE (`phase='zero'`). |
+| 7 | 7 | Section 3, éditeur : boutons « Tick all » et « Untick all » (rôle `helper`) pour le participant affiché. « Reset channels to defaults » reste (tous les participants, retour au pré-remplissage de l'outil 6). |
+| 8 | 8 | Barre « Badness » : axe fixé de 0 à 100 %, et un trait pointillé au seuil de suppression des canaux quand il est réglé. Change la figure de la section 2 et du rapport : question 9. |
+| 9 | 8 | Section 3 : les paragraphes d'aide (« Where am I », « What I did already », « Annotate an epoch », « On a dense montage ») dans un bloc repliable « Details ». |
+| 10 | 8bis | La mention « (à la PREP / FASTER) » est dans l'intro de **8bis** (pas de l'outil 8) : retirée du texte. PREP et FASTER restent dans les références, précédés de « Channel-first rejection, as in: ». |
+| 11 | 8, 8bis, et les autres | « tool 9, statistics » devient « the analysis tools that follow (tool 9 and the next ones) ». Même balayage dans les autres outils qui nomment l'outil 9 comme seul utilisateur des décisions. |
+| 12 | 8bis, et tous | 8bis : « e.g. `derivatives/preproc_epo` » et « e.g. `reports_preproc` » dans les titres de ses sélecteurs, comme l'outil 8. Tous : les titres de sélecteurs ne reviennent plus à la ligne avec un grand interligne (cause sous le tableau). |
+| 13 | 8bis | Section 2 : la même ligne grise que le point 4 sur les seuils. |
+| 14 | 8bis | Relancer avec d'autres réglages : question 10. |
+| 15 | 9 | Ligne grise sur le lissage : le spectre d'une seule époque de 30 s est bruité (peu de fenêtres moyennées) ; sans lissage, l'ajustement 1/f prend ces petites bosses aléatoires pour des pics. Les puissances de bande ne sont jamais lissées. |
+| 16 | 9 | Ligne grise sur les tiers de nuit : suivre l'évolution d'une mesure au cours de la nuit (par ex. l'activité lente qui baisse du premier au dernier tiers, à mesure que la pression de sommeil se dissipe). |
+
+**Point 5, le circuit outil 6 → outil 7 (il existe déjà)** : l'outil 6 marque les canaux suspects
+(`quality_summary.tsv`, colonnes `exclude` et `suspect_reason`) mais ne décide rien, il n'écrit pas dans le registre
+d'exclusion. L'outil 7, quand `quality_summary.tsv` est choisi en section 1, pré-remplit sa section 3 : un canal
+marqué par l'outil 6 part **décoché**. On inspecte les rapports de l'outil 6, puis dans l'éditeur de la section 3 on
+recoche un canal jugé bon, on en décoche d'autres, et on exclut au besoin le participant (registre, source
+`7_manual`, avec une raison). Un canal décoché reste dans le `.fif` (marqué bad), hors de la référence moyenne et
+du marquage ; les outils 8, 8bis et 9 le traitent comme supprimé. Ce qui manque, c'est que ça se voie :
+- dans l'éditeur, la raison de l'outil 6 à côté de chaque canal décoché (par ex. « C3: unticked by tool 6, flat
+  12 % ») ;
+- une phrase dans l'outil 6 (« these are flags: the decision is made in tool 7, Section 3 ») et une dans la
+  section 3 de l'outil 7 qui décrit le circuit ;
+- la colonne `exclude` de l'outil 6 garde son nom (la renommer changerait une sortie que l'outil 7 et les tests
+  lisent).
+
+**Point 12, la cause** : le sélecteur `FileChooser` fait 500 px de large par défaut, et son titre est un widget HTML
+dont l'interligne est fixé à 28 px (la hauteur d'un champ d'une ligne). Un détail long revient donc à la ligne, et
+la deuxième ligne flotte loin sous la première. Correction dans `ui_lib` : un interligne normal ; pour la largeur,
+d'abord laisser le titre dépasser les 500 px, sinon mettre le détail gris sur sa propre ligne sous le nom. Je
+choisis à l'écran.
 
 ---
 
@@ -330,7 +374,7 @@ participant » / « Remove my exclusion »).
 | 1 | `ui_lib.py` + `test_ui_lib.py` + une **page de démonstration** (dans le scratchpad, non versionnée) : titre Markdown et titre widget côte à côte, les cinq types de message, les cinq rôles de bouton, une barre de progression, un sélecteur + des champs | **tu l'ouvres dans Voila et valides le rendu** |
 | 2 | Phase 1, outil par outil : 1, 1bis, 2, 3, 4, puis 3bis, 5, 5bis, 6, 7, 8, 8bis, 9, 0 ; pour chacun : intro, titres, couleurs, boutons, largeurs, barres, son jumeau Curry, test rapide | commits par groupe (1 à 4 / 3bis à 5bis / 6 à 9 / 0) |
 | 3 | Fin de phase 1 : tests complets + `refactor_check compare` + ta vérification visuelle | commit |
-| 4 | Phase 2 : outils 2 et 3 d'abord (les plus gros), puis l'entrée et les barres de 1, 1bis, 4, 7, puis les libellés ; tests adaptés | tests complets + `compare` + vérification visuelle, commit |
+| 4 | Phase 2 : outils 2 et 3 d'abord (les plus gros), puis l'entrée et les barres de 1, 1bis, 4, 7, puis les libellés, puis les retours du §4.6 ; tests adaptés | tests complets + `compare` + vérification visuelle, commit |
 | 5 | Documentation (SPEC, CLAUDE.md, TESTS.md) ; suppression de ce plan | deux commits (doc, puis suppression du plan) |
 
 ---
@@ -353,6 +397,37 @@ participant » / « Remove my exclusion »).
 ==> ok avec les titres proposés
 6. **« Scan »** pour l'entrée des outils 2, 3, 4 et 7 (l'outil 7 perd « Load participants ») : d'accord ?
 ==> ok pour Scan
+
+Questions du §4.6 (vérification visuelle du 2026-11-02) :
+
+7. **Outil 1, couleur de « Run inspection »** : la règle est vert = le bouton qui écrit les sorties de l'outil,
+   bleu = il lit et affiche, n'écrit rien. « Run inspection » écrit `reports_inspection/`, d'où le vert ; le « Run
+   scan » de l'outil 2 lit seulement les en-têtes, d'où le bleu (et il devient « Scan »). Garder le vert
+   (recommandé), ou passer en bleu en faisant de l'inspection une exception ?
+  ==> garder le vert
+8. **Références des outils 5 et 5bis** : changer aussi le rapport base de données de l'outil 5, qui utilise la même
+   fonction (recommandé : un seul format ; changement de sortie voulu, déclaré dans `INTENDED_CHANGES`), ou
+   l'écran seulement ?
+   ==> changer aussi le rapport  base de données (un seul format)
+9. **Barre « Badness » de l'outil 8 sur 0 à 100 %** : dans cette phase (recommandé : petit changement de figure,
+   déclaré dans `INTENDED_CHANGES`), ou en TODO ?
+   ==> dans cette phase car petit changement
+10. **Outil 8bis et Skip** : aujourd'hui, Skip coché, un participant qui a déjà ses deux fichiers est sauté quels
+    que soient les réglages. Les nouveaux seuils ne s'appliquent donc pas, sans avertissement (il faut décocher
+    Skip). Proposition : `_autoreject_decision.tsv` garde déjà les réglages (`channel_reject_pct`,
+    `epoch_reject_pct`, `stages_of_interest`, `methods_used`, `event_types_used`). À Run, un participant dont les
+    réglages enregistrés diffèrent des réglages actuels est retraité même Skip coché, avec une ligne au journal
+    (« 3 participants reprocessed: settings changed »). Les seuils par type d'événement ne sont pas enregistrés :
+    ajout d'une colonne `event_thresholds` (additive, changement de sortie déclaré). 8bis ne relit aucun signal,
+    retraiter coûte peu. Dans cette phase (recommandé), ou en TODO ? Dans les deux cas, une TODO dans SPEC pour la
+    même règle dans les outils 6, 7 et 9 (l'outil 7 avertit seulement si le jeu de méthodes diffère, l'outil 9
+    garde ses réglages dans son `.npz` mais ne les compare qu'en ré-agrégation).
+    ==> ok pour la recommendation et pour le faire dance cette phase
+11. **TODO proposée, filtre de l'outil 7** : le band-pass est en `zero-double` (l'ancien défaut de MNE, qui élève au
+    carré la réponse du filtre conçu), le notch en `zero` (le défaut actuel). Je n'y touche pas ici (toutes les
+    sorties de l'outil 7 changeraient). L'ajouter en TODO dans SPEC (décider s'il faut passer le band-pass en
+    `zero`), ou laisser tel quel ?
+    ==> ok pour la todo
 
 ---
 
