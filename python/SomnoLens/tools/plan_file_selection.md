@@ -1,8 +1,8 @@
 # Plan : sélection automatique des fichiers (hypnogrammes, entrées, dossiers)
 
-Statut : brouillon à annoter, rien n'est implémenté (2026-11-03). Remplace, une fois fait, les deux points de SPEC
-*Planned modules* « Companion suffixes chosen from the detected ones, in the batch tools » et « File selection
-pointed at the expected files ».
+Statut : annoté et répondu le 2026-11-03, à confirmer avant l'implémentation. Remplace, une fois fait, les deux
+points de SPEC *Planned modules* « Companion suffixes chosen from the detected ones, in the batch tools » et « File
+selection pointed at the expected files ».
 
 ## 1. Objectif
 
@@ -27,13 +27,20 @@ Trois défauts à corriger :
 ## 2. Décisions prises (2026-11-03)
 
 - Un plan, trois phases, un commit par phase.
-- Une liste « Inputs found » : le dossier d'étude est le seul sélecteur, chaque entrée est trouvée et affichée, un
-  bouton « Choose another… » ouvre un sélecteur seulement si besoin.
-- **Un suivi des noms choisis par l'utilisateur** : si l'utilisateur a changé un nom par défaut dans un outil (par
-  exemple le suffixe des hypnogrammes remappés), la sélection automatique des outils suivants le suit (§4.2).
-- Runs versionnés (outils 8, 8bis, 9) : choisis d'office quand il n'y en a qu'un, un menu quand il y en a plusieurs.
-- Les champs qu'un débutant n'a pas à toucher vont dans un encadré « Advanced » replié. La liste est à redéfinir
-  ensemble (§6.4).
+- Une liste « Inputs found » : le dossier d'étude est le seul sélecteur, chaque entrée est trouvée et affichée, et
+  **chaque ligne** a un bouton « Choose another… », que l'entrée soit trouvée, absente ou optionnelle.
+- **Un suivi des noms choisis par l'utilisateur**, dans le registre `config_param/file_names.json` : si
+  l'utilisateur a changé un nom par défaut dans un outil (par exemple le suffixe des hypnogrammes remappés), la
+  sélection automatique des outils suivants le suit (§4.2).
+- Quand il n'y a **que** des hypnogrammes produits par la toolbox, rien n'est pré-choisi (§4.3).
+- Runs versionnés (outils 8, 8bis, 9) : choisis d'office quand il n'y en a qu'un, un menu quand il y en a
+  plusieurs. Outil 9 : la décision la plus récente est pré-choisie, modifiable (§6.3).
+- Entrée obligatoire ni trouvée ni choisie : le Run refuse, avec un message. Mauvais fichier choisi : le Run part, et
+  un message d'erreur clair dit ce qui ne va pas dans son contenu (§6.1).
+- Le fichier de l'outil 2 s'appellera **`config_param/channel_config.json`** pour les nouvelles études (§6.4).
+- Les champs qu'un débutant n'a pas à toucher vont dans un encadré « Advanced » replié (tableau validé, §6.5).
+- Les données de test synthétiques gardent les anciens noms. Les tutoriels ne citent pas les noms des fichiers, le
+  README est mis à jour en phase 3.
 
 ## 3. État actuel (inventaire)
 
@@ -92,6 +99,10 @@ suffixes écrits). Clés de la phase 3 : `channel_config` (outil 2), `event_rema
 
 ### 4.3 Une seule règle : `pick_hypno_suffix(counts, intent, names, own_outputs=())`
 
+Cette règle ne décide que du **pré-choix**. Un hypnogramme expert peut porter n'importe quel nom : il est pré-choisi
+dès qu'il n'est pas reconnu comme un export d'événements ou une sortie de la toolbox. Et tout hypnogramme, de la
+toolbox compris, reste choisissable à la main (le champ texte en phase 1, le menu en phase 2).
+
 Deux intentions : `scored` (outil 3 : l'export brut du logiciel de scorage) et `expert` (outils 0, 3bis, 5, 6, 7 :
 l'hypnogramme remappé par l'outil 3). Ordre :
 1. **Le nom enregistré** pour cette intention, s'il existe pour au moins un enregistrement.
@@ -105,9 +116,11 @@ l'hypnogramme remappé par l'outil 3). Ordre :
 
    Puis `expert` = le plus long parmi ceux présents pour au moins 50 % du maximum, `scored` = le plus fréquent, le
    plus court à égalité.
-3. **S'il ne reste rien** : aucun choix automatique, message orange (« no expert hypnogram detected: choose one in
-   the list »). Tous les suffixes restent affichés avec leur nombre de fichiers, l'utilisateur peut donc choisir à
-   la main un hypnogramme de la toolbox (par exemple faire tourner la chaîne sur GSSC).
+3. **S'il ne reste rien** (à côté des enregistrements, il n'y a que des hypnogrammes de la toolbox, par exemple
+   `_hypno_gssc.txt` sans scorage expert) : aucun pré-choix, message orange (« no expert hypnogram detected: choose
+   one in the list »). Tous les suffixes restent affichés avec leur nombre de fichiers : l'utilisateur qui veut
+   faire tourner la chaîne sur GSSC le choisit, et une analyse sur un scorage automatique n'est jamais lancée sans
+   qu'il le sache.
 
 La fonction rend `(suffixe, nombre, raison)`. La raison est affichée : « recorded by tool 3 » ou « detected ».
 
@@ -140,7 +153,8 @@ traitée écrirait une seconde copie remappée sous le nouveau nom. Le fichier r
 ### 4.6 Tests
 
 - Tests unitaires de la bibliothèque (quick) : participants 1, 2, 10, 20 ; sorties de 3bis et de 0 présentes (le cas
-  du 2026-11-02) ; nom personnalisé suivi grâce au registre ; ancien et nouveau nom présents ; registre illisible.
+  du 2026-11-02) ; seuls des hypnogrammes de la toolbox présents (aucun pré-choix) ; nom personnalisé suivi grâce
+  au registre ; ancien et nouveau nom présents ; registre illisible.
 - Un test de notebooks sur une copie : une étude avec `_Hypnogram_Export.txt`, `_Hypnogram_remapped.txt`,
   `_hypnogram_gssc.txt` et `_Hypnogram_remapped_rescored.txt` : l'outil 3 prend l'export, les outils 5, 6, 7
   prennent le remappé.
@@ -172,12 +186,20 @@ traitée écrirait une seconde copie remappée sous le nouveau nom. Le fichier r
 
 La section 1 = le dossier d'étude (seul sélecteur) + une liste construite dès qu'il est choisi. Une ligne par entrée :
 - ✅ trouvée : le chemin relatif à l'étude, et d'où vient le choix (« recorded by tool 2 », « default location ») ;
-- ❌ obligatoire et absente : l'outil qui la produit (« run tool 2 first »), le Run refuse avec ce message ;
+- ❌ obligatoire et absente : l'outil qui la produit (« run tool 2 first ») ;
 - ℹ️ optionnelle et absente : ce qui est désactivé sans elle (« event flagging off ») ;
-- un bouton **« Choose another… »** qui fait apparaître le sélecteur existant. Les sélecteurs gardent leurs noms
-  (`fc_config`, `fc_quality`, `fc_events`, `fc_remap`, `fc_subj`, `fc_table`, `fc_raw`, `fc_reports`,
-  `fc_decision`) : les tests qui les pilotent continuent de marcher. Un fichier choisi à la main l'emporte, la ligne
-  le dit (« chosen by hand »).
+- sur **chaque ligne**, quel que soit son état, un bouton **« Choose another… »** qui fait apparaître le sélecteur
+  existant. Les sélecteurs gardent leurs noms (`fc_config`, `fc_quality`, `fc_events`, `fc_remap`, `fc_subj`,
+  `fc_table`, `fc_raw`, `fc_reports`, `fc_decision`) : les tests qui les pilotent continuent de marcher. Un fichier
+  choisi à la main l'emporte, la ligne le dit (« chosen by hand »).
+
+**Fichier manquant ou mauvais fichier** :
+- une entrée obligatoire ni trouvée ni choisie : le Run refuse, avec le message de la ligne ;
+- un fichier choisi à la main est lu aussitôt (lecture légère, non bloquante) : la ligne dit ce qui a été lu
+  (« 42 participants ») ou ⚠ (« not a channel configuration: no 'remap' key ») ;
+- le Run part quand même, et ce que le contenu ne permet pas de traiter est signalé par un message d'erreur clair :
+  le participant concerné est noté en échec avec la raison (la règle habituelle des erreurs), ou tout le run s'arrête
+  avec le message quand le fichier entier est inutilisable.
 
 Les menus de suffixes de la phase 2 deviennent des lignes de cette liste. Les custom stages y figurent en lecture
 seule (`config_param/custom_stages.json`: N4), le champ de remplacement passe dans l'encadré « Advanced ».
@@ -187,7 +209,7 @@ seule (`config_param/custom_stages.json`: N4), le champ de remplacement passe da
 | Outil | Entrée | Où elle est cherchée | Si absente |
 |---|---|---|---|
 | 0 | tout ce qu'il trouve déjà | passe par la bibliothèque et le registre | inchangé |
-| 3bis, 6, 7 | configuration de l'outil 2 | nom enregistré par l'outil 2, sinon `config_param/remap_reref_persubject.json` | ❌ |
+| 3bis, 6, 7 | configuration de l'outil 2 | nom enregistré par l'outil 2, sinon `config_param/channel_config.json`, sinon `config_param/remap_reref_persubject.json` (études déjà traitées) | ❌ |
 | 4 | mapping existant | nom enregistré par l'outil 4, sinon `config_param/event_remap.json` | ℹ️ nouveau mapping |
 | 5, 7 | event remap | idem | ℹ️ (5 : événements non comptés, 7 : event flagging off) |
 | 5, 9 | participant info | `participants.tsv` / `.csv` / `.xlsx` à la racine de l'étude (comme l'outil 0) | ℹ️ |
@@ -195,26 +217,45 @@ seule (`config_param/custom_stages.json`: N4), le champ de remplacement passe da
 | 7 | quality summary | `reports_quality_overview/quality_summary.tsv` | ⚠️ recommandé (sans lui, aucun canal pré-désélectionné) |
 | 8, 8bis, 9 | époques, rapports, décision | §6.3 | époques ❌ ; rapports : 8 ℹ️ (flags recalculés), 8bis ❌ ; décision (9) ℹ️ |
 
-Plusieurs configurations de l'outil 2 (`remap_reref_persubject*.json`) : un menu, la dernière enregistrée par
-l'outil 2 en premier. Garder séparées les sorties des outils suivants reste hors périmètre (§7).
+Plusieurs configurations de l'outil 2 dans `config_param/` : un menu, la dernière enregistrée par l'outil 2 en
+premier. Garder séparées les sorties des outils suivants reste hors périmètre (§7).
 
 ### 6.3 Runs versionnés (outils 8, 8bis, 9)
 
+**D'où viennent plusieurs dossiers d'époques ?** L'outil 7 écrit toujours `derivatives/preproc_epo/` et
+`reports_preproc/` : ces noms sont fixes, on ne peut pas les choisir. On en a plusieurs seulement si l'utilisateur
+a renommé un dossier à la main pour garder un ancien run (`preproc_epo_v2`, le cas pour lequel les outils 8 et 8bis
+ont aujourd'hui des sélecteurs explicites), ou s'il a utilisé le dossier de sortie avancé de l'outil 7 (un autre
+dossier racine, mêmes noms dedans). Le menu sera donc rare : c'est un filet de sécurité, peu coûteux. Donner un nom
+aux runs reste le TODO *Renaming the outputs* (§7).
+
 - Le dossier d'étude devient obligatoire (aujourd'hui optionnel) : c'est l'ancre de la recherche.
-- **Dossiers d'époques** : les dossiers `derivatives/preproc_epo*` qui contiennent des `*_all-epo.fif` (et ceux sous
-  le dossier de sortie enregistré par l'outil 7). Un seul : choisi d'office. Plusieurs : un menu avec le nombre de
-  participants de chacun. Plus « Other folder… » (le sélecteur actuel) pour un run hors de l'étude, où le calcul
-  actuel du dossier d'étude depuis `derivatives/` est gardé.
+- **Dossiers d'époques** : les dossiers `derivatives/preproc_epo*` qui contiennent des `*_all-epo.fif`, et ceux sous
+  le dossier de sortie enregistré par l'outil 7. Un seul : choisi d'office. Plusieurs : un menu avec le nombre de
+  participants de chacun. « Choose another… » garde possible un run hors de l'étude, où le calcul actuel du dossier
+  d'étude depuis `derivatives/` est gardé.
 - **Rapports** : appariés par le nom (`preproc_epo_v2` → `reports_preproc_v2`). Pas de dossier apparié : ⚠ et
   « Choose another… ».
-- **Décision (outil 9)** : un menu `rejection_auto*` / `rejection_manual*` / « none: keep every epoch ». Le choix par
-  défaut quand les deux existent est un point ouvert (§8).
+- **Décision (outil 9)** : un menu `rejection_auto*` / `rejection_manual*` / « none: keep every epoch ». Quand les
+  deux existent, **la plus récente** est pré-choisie (date du `_epoch_decision.tsv` le plus récent), et la ligne
+  dit laquelle et pourquoi. On change par le menu, ou par « Choose another… » pour un dossier ailleurs.
 
-### 6.4 Encadré « Advanced » : proposition à redéfinir ensemble
+### 6.4 Le fichier de l'outil 2 : `channel_config.json`
 
-| Outil | Proposé dans « Advanced » | Reste visible |
+- Nouveau nom par défaut : `config_param/channel_config.json` (le libellé « Channel configuration » que les outils
+  affichent déjà, et la clé du registre). Le contenu ne change pas.
+- **Une étude garde son nom** : l'outil 2 écrit dans le nom enregistré, sinon dans un `remap_reref_persubject.json`
+  déjà présent, sinon dans `channel_config.json`. Les lecteurs le trouvent par la localisation du §6.2.
+- Les données de test gardent `remap_reref_persubject.json` (dont celle de `tools/test_data/`, écrite par
+  `tools/generate_test_data.py`) ; le nouveau nom est testé à part.
+- À mettre à jour : outils 0, 2, 3bis, 6, 7 ; jumeaux Curry 2, 6, 7 ; SPEC (ses nombreuses mentions) ; CLAUDE.md
+  (plusieurs rappels citent `remap_reref_persubject.json`) ; le TODO *Renaming the outputs*.
+
+### 6.5 Encadré « Advanced » (tableau validé)
+
+| Outil | Dans « Advanced » | Reste visible |
 |---|---|---|
-| 2 | nom du fichier JSON enregistré | sélection et remap des canaux |
+| 2 | nom du fichier JSON enregistré (défaut `channel_config.json`) | sélection et remap des canaux |
 | 3 | suffixe de sortie | hypnogramme brut (menu), sections suivantes |
 | 3bis | les trois suffixes de sortie | modèles, hypnogramme expert (menu) |
 | 4 | nom de `event_remap.json` | suffixes TXT / CSV (menus) |
@@ -225,12 +266,14 @@ l'outil 2 en premier. Garder séparées les sorties des outils suivants reste ho
 
 Un encadré « Advanced » ouvert et modifié s'affiche avec un petit ⚠ (« default changed ») pour ne pas l'oublier.
 
-### 6.5 Ce qui change
+### 6.6 Ce qui change
 
 - `study_files_lib` : les fonctions de localisation (une par entrée) et l'écriture des clés de la phase 3.
 - `ui_lib` : la ligne de la liste (`UI.input_row(...)`) et l'encadré (`UI.advanced_box(...)`).
 - Outils 0, 2, 3, 3bis, 4, 5, 5bis, 6, 7, 8, 8bis, 9 ; jumeaux Curry 2, 3, 4, 6, 7, 8, 8bis (générateurs relancés).
 - SPEC : *Study folder layout*, *Voila page conventions* (la liste et l'encadré), la section 1 de chaque outil.
+- README : le paragraphe *The study folder* (le dossier d'étude est la seule chose à choisir, les outils trouvent le
+  reste). Les tutoriels ne citent pas les noms des fichiers.
 - Tests : les sélections de `tests/pipeline.py` sont gardées (elles testent « Choose another… ») ; un nouveau test
   par outil avec seulement le dossier d'étude (tout trouvé) doit donner les mêmes sorties que la chaîne. Niveau
   proposé : full à la fin de la phase.
@@ -238,28 +281,29 @@ Un encadré « Advanced » ouvert et modifié s'affiche avec un petit ⚠ (« de
 
 ## 7. Hors périmètre
 
-- **Séparer les sorties** de plusieurs configurations de l'outil 2 ou de runs versionnés (TODO *Renaming the
-  outputs*). Trouvé pendant l'inventaire : l'outil 8bis écrit ses décisions dans `derivatives/rejection_auto/` quel
-  que soit le dossier d'époques, donc `preproc_epo` et `preproc_epo_v2` partagent un seul dossier de décision. À
-  ajouter à ce TODO.
+- **Séparer les sorties** de plusieurs configurations de l'outil 2 ou de runs versionnés, et donner un nom aux runs
+  (TODO *Renaming the outputs*). Trouvé pendant l'inventaire : l'outil 8bis écrit ses décisions dans
+  `derivatives/rejection_auto/` quel que soit le dossier d'époques, donc `preproc_epo` et `preproc_epo_v2`
+  partagent un seul dossier de décision. À ajouter à ce TODO.
 - L'audit de l'organisation de la base par l'outil 1 (la couverture de la phase 2 en couvre la partie « compagnon
   manquant »).
 - Le découpage des outils 1 à 4 en une cellule par section (les phases 2 et 3 modifient les outils 2, 3, 4 dans leur
   cellule unique : faisable, juste plus lent).
 - La lecture EDF des outils 2, 4, 6, 7 par `edf_io_lib` (test Curry).
 
-## 8. Points ouverts (à annoter)
+## 8. Points ouverts : réponses du 2026-11-03
 
-1. Le nom du registre : `config_param/file_names.json` ?
-2. Seuls des hypnogrammes de la toolbox présents : aucun choix automatique + message orange (recommandé), ou les
-   choisir avec un avertissement ?
-3. Outil 9, les deux dossiers de décision présents : pré-choisir le plus récent (recommandé), toujours le manuel
-   (outil 8), toujours l'automatique (8bis), ou aucun (l'utilisateur choisit) ?
-4. Entrée obligatoire absente : le Run refuse avec le message (recommandé), ou il prévient seulement ?
-5. Données de test synthétiques : garder les anciens noms (recommandé : prouve la compatibilité, goldens inchangés),
-   les nouveaux noms étant testés à part ?
-6. Le tableau « Advanced » (§6.4).
-7. Les tutoriels (`.docx`) citent-ils les noms d'hypnogrammes ? Si oui, tu les mets à jour.
+1. Nom du registre : `config_param/file_names.json`.
+2. Seuls des hypnogrammes de la toolbox présents : aucun pré-choix, message orange (§4.3). Un hypnogramme expert,
+   quel que soit son nom, est toujours pré-choisi, et tout hypnogramme reste choisissable à la main.
+3. Outil 9, les deux dossiers de décision présents : la plus récente pré-choisie, modifiable par le menu ou « Choose
+   another… » (§6.3).
+4. Aucun fichier trouvé ni choisi pour une entrée obligatoire : le Run refuse avec un message. Mauvais fichier : le
+   Run part, avec un message d'erreur clair sur son contenu (§6.1).
+5. Données de test synthétiques : anciens noms gardés, nouveaux noms testés à part.
+6. Tableau « Advanced » : validé (§6.5).
+7. Tutoriels : ne citent pas les noms. README mis à jour en phase 3 (§6.6).
+8. Nom du fichier de l'outil 2 : `channel_config.json` (§6.4).
 
 ## 9. Ordre
 
