@@ -8,7 +8,9 @@ this code is used by tools 5, 5bis, 6, 7, 8, 8bis, 9 and their Curry twins, and 
        file_id | source | decision | reason | comment | decided_at
    source   = 5bis_criteria / 5bis_manual / 7_manual / 8_manual / 8bis_auto
    decision = exclude, or include (a FORCED inclusion, written by 5bis's manual editor only)
-   Each tool rewrites only its own rows. The effective status of a participant is:
+   Each tool rewrites only its own rows. A decision of tool 5bis holds for the whole study; a decision taken from
+   tool 7 on belongs to one run of tool 7, named in its source (8bis_auto for the first run, 8bis_auto_v2 for the run
+   preproc_epo_v2), and a tool reading a run ignores the rows of the other runs. The effective status of a participant is:
        a forced inclusion exists         -> included (it overrides every exclusion)
        else at least one exclusion       -> excluded, reasons joined with their source
        else                              -> included
@@ -26,7 +28,9 @@ import pandas as pd
 
 REGISTRY_NAME = 'participant_exclusions.tsv'
 REGISTRY_COLUMNS = ['file_id', 'source', 'decision', 'reason', 'comment', 'decided_at']
-SOURCES = ('5bis_criteria', '5bis_manual', '7_manual', '8_manual', '8bis_auto')
+STUDY_SOURCES = ('5bis_criteria', '5bis_manual')       # decided on the macrostructure, before the preprocessing
+RUN_SOURCES = ('7_manual', '8_manual', '8bis_auto')    # decided from tool 7 on: + the suffix of the run
+SOURCES = STUDY_SOURCES + RUN_SOURCES
 EXCLUDE, INCLUDE = 'exclude', 'include'
 COL_EXCLUDED = 'participant_excluded'
 COL_REASON = 'participant_exclude_reason'
@@ -106,13 +110,13 @@ def _write_atomic(df, path):
 def write_registry_rows(data_folder, source, rows, replace_ids=None):
     """Replace this tool's rows in the registry and return the registry written.
 
-    source      : who decides (one of SOURCES)
+    source      : who decides (one of SOURCES, with the suffix of the run for a decision taken on a later run)
     rows        : list of dicts with file_id, decision ('exclude' / 'include'), reason, comment
     replace_ids : the participants whose `source` rows are replaced by `rows`; None = ALL the rows
                   of `source` (e.g. a new 5bis validation replaces the previous one entirely).
     Rows of the other sources are never touched. Raises when the existing registry is unreadable
     (refusing to overwrite decisions we could not read)."""
-    if source not in SOURCES:
+    if source not in STUDY_SOURCES and not source.startswith(RUN_SOURCES):
         raise ValueError(f'unknown registry source {source!r}')
     path = registry_path(data_folder)
     reg, warn = load_registry(data_folder)
@@ -133,8 +137,7 @@ def write_registry_rows(data_folder, source, rows, replace_ids=None):
         if r.decision == INCLUDE and source != '5bis_manual':
             raise ValueError('a forced inclusion can only be written by 5bis_manual')
     # Same decisions as already recorded (e.g. tool 8bis re-run with the same thresholds): leave the file
-    # untouched, so its date keeps meaning "a decision changed" (the stale-table warning relies on it) and
-    # the original decided_at survives.
+    # untouched, so the original decided_at survives.
     content = ['file_id', 'decision', 'reason', 'comment']
     old_rows = sorted(map(tuple, reg.loc[mine, content].astype(str).values.tolist()))
     new_rows = sorted(map(tuple, new[content].astype(str).values.tolist()))
@@ -154,12 +157,37 @@ def remove_registry_rows(data_folder, source, file_ids):
 # ---------------------------------------------------------------------------
 # Effective status
 # ---------------------------------------------------------------------------
-def effective_status(registry):
+def rows_of_run(registry, run=''):
+    """The rows that hold for one run of tool 7 (its suffix, '' = the first run): the study's and the run's own. The
+    decisions taken on the other runs are left out."""
+    own = {source + run for source in RUN_SOURCES}
+    return registry[[not (s.startswith(RUN_SOURCES) and s not in own) for s in registry['source']]]
+
+
+def runs_in_registry(registry):
+    """The suffixes of the later runs the registry holds decisions for: 8bis_auto_v2 -> _v2."""
+    runs = set()
+    for s in registry['source']:
+        for source in RUN_SOURCES:
+            if s.startswith(source) and s != source:
+                runs.add(s[len(source):])
+    return runs
+
+
+def manual_exclusions(registry, run=''):
+    """The participants excluded by hand on one run of tool 7 (tools 7 and 8)."""
+    rows = registry[registry['source'].isin(['7_manual' + run, '8_manual' + run])]
+    return sorted(set(rows['file_id']))
+
+
+def effective_status(registry, run=''):
     """{normcase(file_id): {'file_id', 'excluded', 'reason', 'forced_include'}} for every participant
-    that has at least one row. A participant with no row is included (use `status_of`)."""
+    that has at least one row holding for this run of tool 7 ('' = the first run, the one a tool without a choice of
+    run reads). A participant with no row is included (use `status_of`)."""
     out = {}
     if registry is None or len(registry) == 0:
         return out
+    registry = rows_of_run(registry, run)
     for key, grp in registry.groupby(registry['file_id'].map(id_key), sort=False):
         forced = grp[grp['decision'] == INCLUDE]
         excl = grp[grp['decision'] == EXCLUDE]
@@ -192,21 +220,27 @@ def add_exclusion_columns(df, status, id_col='file_id'):
     return out
 
 
-def registry_newer_than(data_folder, *tables):
-    """True when the exclusion registry was modified AFTER (the oldest of) the given database tables:
-    a decision taken since they were built is not in them yet. False when the registry or every table is
-    absent (nothing to compare: a first run builds the tables with the current registry anyway)."""
-    if data_folder is None:
-        return False
-    reg = registry_path(data_folder)
-    existing = [Path(t) for t in tables if t is not None and Path(t).is_file()]
-    if not reg.is_file() or not existing:
-        return False
-    return reg.stat().st_mtime > min(t.stat().st_mtime for t in existing)
+def tables_out_of_date(status, *tables):
+    """True when a database table does not say what the registry says about one of its participants (`status`: the
+    effective status for the run of these tables): a decision taken or lifted since it was built is not in it yet. The
+    contents are compared, not the dates: a decision on another run of tool 7 does not concern these tables. A table
+    absent, unreadable or without the exclusion columns: nothing to compare."""
+    for table in tables:
+        if table is None or not Path(table).is_file():
+            continue
+        try:
+            df = pd.read_csv(table, sep='\t', dtype=str, keep_default_na=False,
+                             usecols=['file_id', COL_EXCLUDED, COL_REASON]).drop_duplicates()
+        except Exception:
+            continue
+        for fid, excluded, reason in zip(df['file_id'], df[COL_EXCLUDED], df[COL_REASON]):
+            if status_of(status, fid) != (excluded == 'True', reason):
+                return True
+    return False
 
 
 def stale_tables_html(how_to_refresh):
-    """Orange box shown at scan / load when `registry_newer_than` is True."""
+    """Orange box shown at scan / load when `tables_out_of_date` is True."""
     import ui_lib as UI      # the look shared by the Voila pages (imported on use: screen only)
     return UI.box('warn', '<b>The exclusion registry changed after this tool\'s '
                   'database tables were built</b>: a participant excluded (or re-included) since then is not '
@@ -312,6 +346,12 @@ class ParticipantSelector:
         width = max([len(i) for i in self._ids] + [8])
         self.lst.options = [(f'{fid.ljust(width)}   {self._status_text(fid)}', fid) for fid in self._ids]
         self.lst.value = None
+
+    def add_under_skip(self, widget):
+        """A widget of the tool right under the 'Skip' tick (tool 7's New version)."""
+        children = list(self.widget.children)
+        children.insert(children.index(self.cb_skip) + 1, widget)
+        self.widget.children = children
 
     # -- selection ------------------------------------------------------------
     @property

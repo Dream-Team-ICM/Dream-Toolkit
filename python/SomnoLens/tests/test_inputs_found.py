@@ -55,6 +55,118 @@ def write_names(study, **keys):
 
 
 # ----------------------------------------------------------------------------------------------- tool 7
+def summary(nb):
+    return nb.value('participant_selector.lbl_summary.value')
+
+
+@pytest.mark.tool7
+def test_tool7_first_run_has_no_new_version(tmp_path):
+    study = make_study(tmp_path / 'study')
+    with NotebookSession(pipeline.T7) as nb:
+        nb.pick('fc_edf', study)
+        assert 'preproc_epo (first run): writes <code>derivatives/preproc_epo/</code>' in nb.value('run_line.value')
+        assert nb.value('new_version_box.layout.display') == 'none' and nb.value('run_menu.layout.display') == 'none'
+        assert nb.value('chosen_run()') == ''
+
+
+@pytest.mark.tool7
+def test_tool7_new_version_beside_skip(tmp_path):
+    study = make_study(tmp_path / 'study')
+    make_run(study)
+    (study / 'reports_preproc' / f'{IDS[0]}_preprocessing_report.html').write_text('x', encoding='utf-8')
+    with NotebookSession(pipeline.T7) as nb:
+        nb.pick('fc_edf', study)
+        assert 'preproc_epo (2 participants): continues' in nb.value('run_line.value')
+        assert nb.value('new_version_box.layout.display') == '' and nb.value('run_menu.layout.display') == 'none'
+        assert 'keep the outputs of <code>preproc_epo</code>' in nb.value('new_version_help.value')
+        assert nb.value('box_run_suffix.layout.display') == 'none'
+        nb.click('btn_load')
+        assert '1 already processed' in nb.value('load_info.value') and '<b>1</b> will run' in summary(nb)
+        children = nb.value('[type(c).__name__ for c in participant_selector.widget.children]')
+        assert children[children.index('Checkbox') + 1] == 'VBox'         # right under Skip
+        nb.run("participant_channels['s2']['C3'] = False")                # a channel unticked in the editor
+
+        # ticked: nothing is processed in the new run yet, with no new Scan, and the channels ticked stay
+        nb.set('cb_new_version', True)
+        assert nb.value('txt_run_suffix.value') == '_v2' and nb.value('chosen_run()') == '_v2'
+        assert 'preproc_epo_v2 (new version)' in nb.value('run_line.value')
+        assert 'Writes <code>derivatives/preproc_epo_v2/</code> and <code>reports_preproc_v2/</code>' in nb.value('new_version_info.value')
+        assert '0 already processed' in nb.value('load_info.value') and '<b>2</b> will run' in summary(nb)
+        assert nb.value("participant_channels['s2']['C3']") is False
+        assert 'existing preprocessing report in reports_preproc_v2' in nb.value('existing_reports_info.value')
+
+        # a suffix typed by hand
+        nb.set('txt_run_suffix', 'nonotch')
+        assert nb.value('chosen_run()') == '_nonotch'
+        assert '<code>reports_preproc_nonotch/</code>' in nb.value('new_version_info.value')
+        # refused: not a folder name, or a run that exists; nothing is written
+        for typed, why in (('no notch', 'letters, digits'), ('', 'letters, digits')):
+            nb.set('txt_run_suffix', typed)
+            assert why in nb.value('new_version_info.value') and nb.value('run_line.value') == ''
+        nb.click('btn_run')
+        assert 'letters, digits' in nb.widget_text() and not (study / 'reports_preproc_').exists()
+        make_run(study, 'preproc_epo_v7')
+        nb.set('txt_run_suffix', '_v7')
+        assert 'preproc_epo_v7 already exists' in nb.value('new_version_info.value')
+        nb.click('btn_run')
+        assert 'preproc_epo_v7 already exists' in nb.widget_text()
+        assert not (study / 'derivatives' / 'preproc_epo_v7' / f'{IDS[0]}_preprocessing_params.json').exists()
+        (study / 'reports_preproc_v8').mkdir()                            # interrupted before its first epochs: in no
+        nb.set('txt_run_suffix', '_v8')                                   # menu, so its suffix can be typed again
+        assert nb.value('run_problem()') == '' and 'Writes' in nb.value('new_version_info.value')
+
+        # unticked: back to the run chosen
+        nb.set('cb_new_version', False)
+        assert nb.value('chosen_run()') == '' and '1 already processed' in nb.value('load_info.value')
+
+
+@pytest.mark.tool7
+def test_tool7_exclusions_belong_to_the_run(tmp_path):
+    study = make_study(tmp_path / 'study')
+    make_run(study)
+    registry = study / 'config_param' / 'participant_exclusions.tsv'
+    registry.write_text('file_id\tsource\tdecision\treason\tcomment\tdecided_at\n'
+                        's1\t7_manual\texclude\tfirst run\t\t2026-11-04 10:00:00\n'
+                        's2\t8bis_auto_v2\texclude\tformer second run\t\t2026-11-04 10:00:00\n', encoding='utf-8')
+    with NotebookSession(pipeline.T7) as nb:
+        nb.pick('fc_edf', study)
+        nb.click('btn_load')
+        assert '<b>1</b> excluded' in summary(nb)
+        nb.set('cb_new_version', True)
+        assert nb.value('txt_run_suffix.value') == '_v3'                  # _v2 is still named in the registry
+        assert 'Not carried over: the manual exclusions of <code>preproc_epo</code> (s1)' in nb.value('new_version_info.value')
+        assert 'excluded' not in summary(nb)                              # nobody excluded in the new run
+        nb.set('dd_edit', 's2')
+        nb.set('cb_edit_exclude', True)
+        nb.set('txt_edit_reason', 'new run')
+        nb.click('btn_edit_save')
+        assert '<b>1</b> excluded' in summary(nb)
+        nb.set('cb_new_version', False)
+        assert 's1' in nb.value('participant_selector._excluded') and 's2' not in nb.value('participant_selector._excluded')
+    assert 's2\t7_manual_v3\texclude\tnew run' in registry.read_text(encoding='utf-8')
+
+
+@pytest.mark.tool7
+def test_tool7_several_runs_a_menu_the_most_recent_first(tmp_path):
+    study = make_study(tmp_path / 'study')
+    first = make_run(study, date=1000)
+    second = make_run(study, 'preproc_epo_v2', date=2000)
+    (study / 'reports_preproc_v2' / f'{IDS[0]}_preprocessing_report.html').write_text('x', encoding='utf-8')
+    with NotebookSession(pipeline.T7) as nb:
+        nb.pick('fc_edf', study)
+        assert nb.value('run_menu.layout.display') == '' and nb.value('run_menu.value') == str(second)
+        assert nb.value('chosen_run()') == '_v2' and 'The most recent run is pre-chosen' in nb.value('run_line.value')
+        assert nb.value('txt_run_suffix.value') == '_v3'
+        nb.click('btn_load')
+        assert '1 already processed' in nb.value('load_info.value')
+        nb.set('run_menu', str(first))
+        assert nb.value('chosen_run()') == '' and '0 already processed' in nb.value('load_info.value')
+        assert 'pre-chosen' not in nb.value('run_line.value')
+        assert 'keep the outputs of <code>preproc_epo</code>' in nb.value('new_version_help.value')
+        nb.set('cb_new_version', True)
+        assert nb.value('run_menu.layout.display') == 'none'              # the menu has no effect on a new version
+
+
 @pytest.mark.tool7
 def test_tool7_finds_its_inputs_and_follows_a_file_chosen_by_hand(tmp_path):
     study = make_study(tmp_path / 'study')
@@ -303,12 +415,14 @@ def test_tool0_finds_the_new_name_like_the_other_tools(tmp_path):
 
 
 # --------------------------------------------------------------------------------- tools 8, 8bis and 9
-def make_run(study, run='preproc_epo', reports=True):
-    """A run of tool 7, as these tools find it: only the file names matter until the scan."""
+def make_run(study, run='preproc_epo', reports=True, date=None):
+    """A run of tool 7, as these tools find it: only the file names (and their date) matter until the scan."""
     folder = study / 'derivatives' / run
     folder.mkdir(parents=True)
     for fid in IDS:
         (folder / f'{fid}_all-epo.fif').write_bytes(b'')
+        if date is not None:
+            os.utime(folder / f'{fid}_all-epo.fif', (date, date))
     if reports:
         rep = study / run.replace('preproc_epo', 'reports_preproc')
         rep.mkdir()
@@ -344,16 +458,18 @@ def test_tool8bis_finds_the_run_and_its_reports(tmp_path):
         assert '(the only run found)' in line(nb, 'raw_row') and '2 participants' in line(nb, 'raw_row')
         assert '(paired with the epochs folder)' in line(nb, 'reports_row')
         assert nb.value('run_menu.layout.display') == 'none'
-    second = make_run(study, 'preproc_epo_v2')
-    third = make_run(study, 'preproc_epo_v3', reports=False)
+    second = make_run(study, 'preproc_epo_v2', date=2000)
+    third = make_run(study, 'preproc_epo_v3', reports=False, date=1000)
     with NotebookSession(pipeline.T8BIS) as nb:
         nb.pick('fc_data', study)
         assert nb.value('run_menu.layout.display') == ''
-        assert Path(nb.value('fc_raw.selected_path')) == first
+        assert Path(nb.value('fc_raw.selected_path')) == first and '(the most recent run)' in line(nb, 'raw_row')
         assert 'derivatives/preproc_epo_v2  (2 participants)' in [o[0] for o in nb.value('list(run_menu.options)')]
         nb.set('run_menu', str(second))
         assert Path(nb.value('fc_raw.selected_path')) == second and '(chosen in the menu)' in line(nb, 'raw_row')
         assert Path(nb.value('fc_reports.selected_path')) == study / 'reports_preproc_v2'
+        nb.click('btn_scan')                                              # the outputs carry the suffix of the run
+        assert 'rejection_auto_v2' in nb.value('lbl_scan.value') and 'reports_rejection_auto_v2' in nb.value('lbl_scan.value')
         nb.set('run_menu', str(third))                                    # never another run's reports
         assert nb.value('fc_reports.selected_path') is None and 'not found' in line(nb, 'reports_row')
         nb.click('btn_scan')
@@ -377,6 +493,8 @@ def test_tool8_finds_the_run_and_lists_its_participants(tmp_path):
         nb.set('run_menu', str(second))
         assert nb.value('list(dd_part.options)') == [IDS[1]]              # the participants follow the run
         assert Path(nb.value('fc_reports.selected_path')) == study / 'reports_preproc_v2'
+        assert 'rejection_manual_v2' in nb.value('lbl_scan.value')        # the outputs carry the suffix of the run
+        assert 'reports_rejection_manual_v2' in nb.value('lbl_scan.value')
 
 
 @pytest.mark.tool9
@@ -411,6 +529,25 @@ def test_tool9_preselects_the_most_recent_decision(tmp_path):
     with NotebookSession(pipeline.T9) as nb:                              # no study folder: both picked by hand
         nb.pick('fc_raw', raw)
         assert nb.value('fc_decision.selected_path') is None
+
+
+@pytest.mark.tool9
+def test_tool9_lists_the_decisions_of_the_run_chosen(tmp_path):
+    study = make_study(tmp_path / 'study')
+    first, second = make_run(study, date=1000), make_run(study, 'preproc_epo_v2', date=2000)
+    auto = make_decision(study, 'rejection_auto', 3000)
+    with NotebookSession(pipeline.T9) as nb:
+        nb.pick('fc_data', study)
+        assert Path(nb.value('fc_raw.selected_path')) == second and '(the most recent run)' in line(nb, 'raw_row')
+        assert nb.value('fc_decision.selected_path') is None              # never the decisions of another run
+        nb.set('run_menu', str(first))
+        assert Path(nb.value('fc_decision.selected_path')) == auto
+    auto_v2 = make_decision(study, 'rejection_auto_v2', 500)
+    with NotebookSession(pipeline.T9) as nb:
+        nb.pick('fc_data', study)
+        assert Path(nb.value('fc_decision.selected_path')) == auto_v2     # older than the other run's: still this one
+        nb.pick('fc_decision', auto)                                      # 'Choose another…' stays possible
+        assert Path(nb.value('fc_decision.selected_path')) == auto
 
 
 # ------------------------------------------------------------------------- the chain's study folder

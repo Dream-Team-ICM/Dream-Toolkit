@@ -180,12 +180,17 @@ def test_the_runs_of_tool_7_are_found_from_the_study_folder(tmp_path):
     (study / 'derivatives' / 'rejection_auto').mkdir()
     assert SF.epoch_folders(study) == [(first, 2)]
     second = _run(study, 'preproc_epo_v2', 3)
+    for f in first.iterdir():
+        os.utime(f, (1000, 1000))
+    assert SF.epoch_folders(study) == [(second, 3), (first, 2)]           # the most recent first
+    for f in second.iterdir():
+        os.utime(f, (500, 500))
     assert SF.epoch_folders(study) == [(first, 2), (second, 3)]
     assert SF.epoch_folder_options(study, [(second, 3)]) == [
         ('derivatives/preproc_epo_v2  (3 participants)', str(second))]
     outside = _run(tmp_path / 'out', 'preproc_epo', 1)                    # tool 7's output folder, as it noted it
     names = {'preproc_output': {'value': str((tmp_path / 'out').resolve()), 'tool': '7'}}
-    assert SF.epoch_folders(study, names)[-1] == (outside, 1)
+    assert (outside, 1) in SF.epoch_folders(study, names)
     names = {'preproc_output': {'value': '.', 'tool': '7'}}               # noted, then back to the study folder
     assert SF.epoch_folders(study, names) == [(first, 2), (second, 3)]
 
@@ -200,6 +205,43 @@ def test_the_reports_of_a_run_are_paired_by_name(tmp_path):
     (study / 'reports_preproc_v2').mkdir()
     assert SF.paired_reports_folder(second) == study / 'reports_preproc_v2'
     assert SF.paired_reports_folder(study / 'derivatives' / 'other') is None
+
+
+def test_the_suffix_of_a_run(tmp_path):
+    assert SF.run_suffix(tmp_path / 'derivatives' / 'preproc_epo') == ''
+    assert SF.run_suffix(str(tmp_path / 'derivatives' / 'preproc_epo_v2')) == '_v2'
+    assert SF.run_suffix(tmp_path / 'derivatives' / 'my_epochs') == ''      # chosen by hand
+
+
+def test_the_next_run_suffix_is_the_first_free_one(tmp_path):
+    root = tmp_path / 'study'
+    (root / 'derivatives' / 'preproc_epo').mkdir(parents=True)
+    assert not SF.run_exists(root, '_v2') and SF.run_exists(root, '')
+    assert SF.next_run_suffix(root) == '_v2'
+    (root / 'derivatives' / 'preproc_epo_v2').mkdir()
+    assert SF.run_exists(root, '_v2') and SF.next_run_suffix(root) == '_v3'
+    (root / 'reports_preproc_v3').mkdir()                                 # a run may hold only its reports
+    assert SF.next_run_suffix(root) == '_v4'
+    assert SF.next_run_suffix(root, used={'_v4', '_nonotch'}) == '_v5'    # a run deleted by hand, still in the registry
+
+
+def test_a_typed_suffix_must_fit_a_folder_name():
+    assert SF.run_suffix_from_text('_v2') == '_v2'
+    assert SF.run_suffix_from_text(' nonotch ') == '_nonotch'
+    assert SF.run_suffix_from_text('-a_1') == '-a_1'
+    for bad in ('', '   ', '_', 'a b', 'a/b', 'é', 'a.b', 'x' * 21, None):
+        assert SF.run_suffix_from_text(bad) == '', bad
+
+
+def test_a_run_lists_only_its_own_decisions(tmp_path):
+    study = tmp_path / 'study'
+    first, second = _run(study, 'preproc_epo'), _run(study, 'preproc_epo_v2')
+    for name in ('rejection_auto', 'rejection_auto_v2', 'rejection_manual_v2', 'rejection_auto_v22'):
+        folder = study / 'derivatives' / name
+        folder.mkdir()
+        (folder / 's0_epoch_decision.tsv').write_text('x', encoding='utf-8')
+    assert [f.name for f, _, _ in SF.decision_folders(first)] == ['rejection_auto']
+    assert sorted(f.name for f, _, _ in SF.decision_folders(second)) == ['rejection_auto_v2', 'rejection_manual_v2']
 
 
 def test_the_most_recent_decision_comes_first(tmp_path):

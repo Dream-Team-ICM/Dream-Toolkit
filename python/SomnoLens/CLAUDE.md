@@ -61,9 +61,10 @@ The "what to do / what not to break" reminders, grouped by theme. Each points to
   figures) use the kept data. Participant exclusions live in **one registry**
   (`config_param/participant_exclusions.tsv`, `tools/participant_selection_lib.py`, shared module): each tool
   rewrites **only its own `source` rows**, a forced inclusion (5bis manual) overrides every exclusion, an
-  unreadable registry is never overwritten, identical rows are never rewritten (its date = "a decision
-  changed"). A registry change reaches a tool's tables at its next run (Skip ticked = rebuild only); tools
-  6/7/8bis/9 warn at scan when the registry is newer than their tables (`registry_newer_than`). Epoch / channel decisions are **tables** (`derivatives/rejection_auto|manual/`
+  unreadable registry is never overwritten, identical rows are never rewritten. A decision of 5bis holds for the
+  study, one taken from tool 7 on belongs to its run (*Runs of tool 7* below). A registry change reaches a tool's tables
+  at its next run (Skip ticked = rebuild only); tools 6/7/8bis/9 warn at scan when their tables do not say what the
+  registry says (`tables_out_of_date`: the contents are compared, not the dates). Epoch / channel decisions are **tables** (`derivatives/rejection_auto|manual/`
   `_epoch_decision.tsv` + `_channel_decision.tsv`): **no `clean-epo.fif` any more**, tool 9 joins them to
   tool 7's `_all-epo.fif`. Tools 5/6/7/8bis/9 use the shared **`ParticipantSelector`** (all / subset;
   Skip applies to a subset too, with an orange warning box), never one checkbox per participant.
@@ -74,6 +75,12 @@ The "what to do / what not to break" reminders, grouped by theme. Each points to
   optional, default = study folder, ⚠ when different (tool 7 `out_root_path()`). Tool 1bis is the exception
   (original EDF folder, outside the study). Tool 1 writes `reports_inspection/`. Variable names (`fc_data`,
   `data_root`, `find_data_folder`) stay: the tests drive widgets by name.
+- **Runs of tool 7 (→ SPEC *Cross-cutting → Runs of tool 7*)**: a run = `derivatives/preproc_epo<suffix>/` +
+  `reports_preproc<suffix>/`, the first one without a suffix, so **a study with one run stays byte-identical**. Tool 7's
+  *New version* (a box under Skip, never an *Overwrite*: reprocessing = Skip unticked) writes `_v2`; tools 8, 8bis, 9
+  put the suffix (`SF.run_suffix`) on every output and on their registry sources (`8bis_auto_v2`), and read
+  `PSL.effective_status(reg, run)` (5bis rows + the run's own). A new output folder or a new registry source of these
+  tools carries the suffix too.
 - **Companion suffixes + names registry = `tools/study_files_lib.py`** (no EDF reading, imported next to `ui_lib`):
   the hypnogram pre-choice of tools 0, 3, 3bis, 5, 6, 7 is **one function**, `pick_hypno_suffix` (intent `scored`
   for tool 3, `expert` elsewhere): never re-implement it in a notebook. Each tool notes the names it **wrote** in
@@ -249,8 +256,8 @@ The "what to do / what not to break" reminders, grouped by theme. Each points to
   consistently across tool 7 → context companion → sidecar → tools 8/8bis/`qc_rejected_epochs_lib` (re-run the
   Curry generator). → SPEC §7 *Epoching (configurable epoch length)*.
   **Output location**: tool 7 writes its `.fif`/sidecar/context under **`derivatives/preproc_epo/<subtree>/`**
-  (sibling of tool 8's `rejection_manual/` and 8bis's `rejection_auto/`), and deletes stale same-id copies at
-  the old `derivatives/<subtree>/` location on reprocess. A former `derivatives/raw_epo/` is renamed once
+  (+ the suffix of a later run; sibling of tool 8's `rejection_manual/` and 8bis's `rejection_auto/`), and deletes stale
+  same-id copies at the old `derivatives/<subtree>/` location on reprocess (first run only). A former `derivatives/raw_epo/` is renamed once
   at Run (the former `reports_preprocessing/` is not migrated): the remaining `'raw_epo'` strings in tool 7 are
   that migration, keep them. → SPEC §7 *Migration notes*.
   **Deselected channels are kept as `bads`** (→ SPEC §7): in the `.fif` and the sidecar (`bad_channels`),

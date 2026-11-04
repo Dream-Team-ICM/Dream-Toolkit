@@ -199,6 +199,9 @@ my_study/                               <- pick this folder in every tool
 - **The study folder is the only thing to pick** (phase 3 of the file selection, 2026-11-04; every tool but 1 and 1bis):
   each tool finds its inputs in it and lists them (*Cross-cutting → Voila page conventions → Inputs found*). Tool 2's file is now called `config_param/channel_config.json`; a study already processed keeps
   `remap_reref_persubject.json`, and every reader finds either (`study_files_lib.find_input`).
+- **Several runs of tool 7**: tool 7's *New version* keeps what exists and writes `derivatives/preproc_epo_v2/` +
+  `reports_preproc_v2/`, then tools 8, 8bis and 9 write `rejection_manual_v2`, `rejection_auto_v2`, `features_spectral_v2`
+  and their reports (*Cross-cutting → Runs of tool 7*). A study with one run sees none of this.
 - **Exact names**: `config_param` and `derivatives`. Tools 8 / 8bis / 9 find the registry through
   `find_data_folder` (first ancestor holding `config_param/`, else the parent of `derivatives/` or
   `reports_*`).
@@ -610,6 +613,12 @@ instead of restating them. Only tool-specific deltas are kept inline.
   editor), `8_manual` (tool 8 button), `8bis_auto` (event-count threshold, every channel dropped, or every
   reference-stage epoch rejected; a re-run replaces the participant's rows, so it can lift an exclusion).
   **Each tool rewrites only its own rows** (`write_registry_rows(folder, source, rows, replace_ids)`).
+  **A decision belongs to the study or to a run of tool 7** (2026-11-04): `STUDY_SOURCES` (5bis: decided on the
+  macrostructure, before the preprocessing) hold for the whole study, forced inclusions included; `RUN_SOURCES` (`7_manual`,
+  `8_manual`, `8bis_auto`: decided from tool 7 on) carry the suffix of their run (`8bis_auto_v2`, no suffix for the
+  first run, so a study with one run reads and writes what it always did). `effective_status(registry, run='')` keeps the
+  study's rows and the run's own (`rows_of_run`): a tool on a run ignores the others, the tools with no choice of run
+  (0, 5bis, 6) read the first run. One file, so the decisions of the runs can be compared side by side.
   `decision` is `exclude`, or `include` = a **forced inclusion**, written only by 5bis's manual editor
   (comment required): it overrides every exclusion. **Effective status** (`effective_status`): forced
   inclusion → included, else any exclusion → excluded with the reasons joined as `source: reason | …`,
@@ -622,14 +631,39 @@ instead of restating them. Only tool-specific deltas are kept inline.
   layout*). **A decision taken after a tool ran reaches its tables at its next run**: run it again
   with *Skip already processed* ticked (nobody is reprocessed, the database tables are rebuilt with the
   current registry, tool 7 included when it has nobody to process), or tool 9's *Re-aggregate only*.
-  **Stale-table warning** (tools 6, 7, 8bis, 9): at scan / load, `registry_newer_than(data_folder, *tables)`
-  compares the registry's modification date with the tool's database tables (6 `quality_summary.tsv`, 7
-  `global_epoch_rejection.tsv` + `global_rejection_by_stage.tsv`, 8bis `global_autoreject_summary.tsv`, 9
-  `global_spectral_stage.tsv`) and, when the registry is newer, shows an orange box
-  (`stale_tables_html`) saying how to refresh (Run with Skip ticked, or Re-aggregate only for tool 9). For the
-  date to mean "a decision changed", `write_registry_rows` **leaves the file untouched when the rows it would
-  write equal those recorded** (same `file_id, decision, reason, comment`; the original `decided_at` is kept):
-  a tool 8bis re-run with the same thresholds never makes the other tools' tables look stale.
+  **Stale-table warning** (tools 6, 7, 8bis, 9): at scan / load, `tables_out_of_date(status, *tables)` compares what
+  the tool's database table says (`participant_excluded`, `participant_exclude_reason` of each `file_id`; 6
+  `quality_summary.tsv`, 7 `global_epoch_rejection.tsv`, 8bis `global_autoreject_summary.tsv`, 9
+  `global_spectral_stage.tsv`) with the effective status for its run and, when they differ, shows an orange box
+  (`stale_tables_html`) saying how to refresh (Run with Skip ticked, or Re-aggregate only for tool 9). The **contents**
+  are compared, not the dates (2026-11-04): a decision on another run does not concern these tables, a decision of 5bis
+  concerns every run, a decision lifted since then gives no alert. A table absent, unreadable or without the columns:
+  nothing to compare. Not shown while the registry is unreadable (its own warning is). `write_registry_rows` **leaves the
+  file untouched when the rows it would write equal those recorded** (same `file_id, decision, reason, comment`; the
+  original `decided_at` is kept).
+- **Runs of tool 7 (`study_files_lib`, 2026-11-04)**: a run = `derivatives/preproc_epo<suffix>/` +
+  `reports_preproc<suffix>/`, the first one without a suffix. To run the analyses with other parameters (or another channel
+  configuration, chosen with *Choose another…*) and keep what exists: tool 7's *New version*, nothing to rename by hand.
+  **The suffix** is read from the epochs folder (`run_suffix`: `preproc_epo_v2` → `_v2`, `''` for a folder named otherwise);
+  the next one is proposed by `next_run_suffix` (the first `_vN` from `_v2` with no folder and not named in the registry,
+  `runs_in_registry`: a run deleted by hand must not hand its exclusions to a new one); a typed one goes through
+  `run_suffix_from_text` (letters, digits, `-`, `_`, `MAX_RUN_SUFFIX` = 20 characters: it goes into folder names).
+  **The next tools follow**: every output carries the suffix.
+
+  | Tool | First run | Run `_v2` |
+  |---|---|---|
+  | 7 | `derivatives/preproc_epo/`, `reports_preproc/` | `derivatives/preproc_epo_v2/`, `reports_preproc_v2/` |
+  | 8bis | `derivatives/rejection_auto/`, `reports_rejection_auto/` | `derivatives/rejection_auto_v2/`, `reports_rejection_auto_v2/` |
+  | 8 | `derivatives/rejection_manual/`, `reports_rejection_manual/` | `derivatives/rejection_manual_v2/`, `reports_rejection_manual_v2/` |
+  | 9 | `derivatives/features_spectral/`, `reports_features_spectral/` | `derivatives/features_spectral_v2/`, `reports_features_spectral_v2/` |
+
+  `epoch_folders` lists the runs **the most recent first** (the date of their latest `*_all-epo.fif`), the menu of tools 7,
+  8, 8bis and 9 pre-chooses it. `decision_folders` lists **only the decisions of the run** (exact name, suffix included:
+  decisions made on other epochs must never be pre-chosen), *Choose another…* stays possible. Tools 5, 5bis, 6 and 0 know
+  no runs (their outputs do not depend on the preprocessing; tool 0 computes its own chain). **Folders renamed by hand**
+  (`preproc_epo_v2` with its decisions in `rejection_auto`): the run is recognised, its new decisions go to
+  `rejection_auto_v2`, the former ones stay reachable with *Choose another…*, their registry rows stay the first run's.
+  Nothing is migrated.
 - **Participant selector (`ParticipantSelector`, tools 5, 6, 7, 8bis, 9)**: replaces the one-checkbox-per-
   participant lists (unreadable on a large database). Mode **All participants** / **Subset only**; in
   subset mode an **add box** (`Combobox`, autocompletion offering only the participants not selected yet,
@@ -2307,6 +2341,20 @@ below the widget container's own strut. Layout-only: no effect on any numeric ou
 
 **Per-participant pipeline progress bar**: below the participants bar (`i/N` + the current phase from `set_phase`, e.g. `loading EDF…`, `resampling…`, `epoching…`, `flagging epochs…`, `building report…`) a second `IntProgress` (`progress_step`) spans the *current participant's whole pipeline* in arbitrary "time-cost" units (`COST_LOAD` + optional `COST_RESAMPLE`/`COST_NOTCH`/`COST_FILTER` for the *Load* group, then `COST_EPOCH`, `COST_REJECT`, `COST_SAVE`, `COST_REPORT`). It is sized per participant (the optional steps only count when enabled) and advanced **cumulatively** at each phase (`_reject_base` marks where the *Flag* segment begins), with a **4-segment legend** (`build_step_legend` → **Load / Epoch / Flag / Report**, Report = save+report) glued directly under the bar (`VBox([progress_step, step_legend])`, no top border, square top corners) whose widths are proportional to those costs. Mirrors tool 6's pipeline bar. UI-only, so all outputs stay byte-identical. Its *Reject* segment is **animated** by the per-channel/per-epoch `compute_rejection_masks` callback (`_rej_progress` → `progress_step`, per channel for the time-domain pass then per epoch for the 1/f fit, filling `[_reject_base, _reject_base + COST_REJECT]`), so a slow high-density participant is not mistaken for a crash: **identical in EDF and the Curry twin**, since both now run the rejection per channel (see *Curry 9 support → Per-channel rejection*). **Sync constraint**: this bar and the callback live in the EDF original and pass through / are string-matched by `tools_curry/_make_tool7_curry.py`, re-run that generator after editing the widgets / display / reject call site.
 
+**The run (Section 3, 2026-11-04, *Cross-cutting → Runs of tool 7*)**: a line under the Scan button (`run_line`): `preproc_epo
+(first run)`, `preproc_epo (11 participants): continues…`, or a menu (`run_menu`, `UI.choice_menu`) with several runs, the
+most recent pre-chosen. Under *Skip already processed* (`ParticipantSelector.add_under_skip`), the box **New version
+(another run)** (`cb_new_version`, shown once a run exists; its help says what it is for): ticked, the field `txt_run_suffix`
+proposes the next free suffix and the line under it says what will be written, and which manual exclusions are not carried
+over. **Reprocessing an existing run stays *Skip* unticked**: no *Overwrite* choice (decided on 2026-11-04). A suffix that
+is not a folder name, or a run with epochs: a ⚠ under the field, Run and the manual exclusion refuse (a new version
+interrupted before its first epochs is in no menu: its suffix can be typed again). `chosen_run()` is read
+wherever the tool reads or writes the run's folders; `run_preprocessing` fixes it at its start. **Changing the run needs no
+new Scan** (`_on_run_changed` → `show_run_counts`): who is already processed or excluded follows, the channels ticked in
+the editor stay. After a run, the run written becomes the run chosen and the next suffix is proposed (`refresh_runs`). The
+`raw_epo` migration and the removal of stale copies of former layouts are for the first run only. A manual exclusion
+(`7_manual` + suffix) belongs to the run: one that holds for every run goes in tool 5bis.
+
 **Outputs per participant**: the `.fif` + its params sidecar + the optional context companion under `<output_folder>/derivatives/preproc_epo/<edf_subtree>/` (a **sibling of the `rejection_manual/`** decision tables written by tool 8 and **`rejection_auto/`** written by tool 8bis, so the epochs and their decisions sit side by side under `derivatives/`). The per-file TSV/HTML reports under `<output_folder>/reports_preproc/<edf_subtree>/`, **both mirror the EDF subfolder tree** (as `6_quality_overview` does for `reports_quality_overview/<edf_subtree>/`, an EDF sitting in the data-folder root has `<edf_subtree> == '.'` so its reports collapse back to the flat root, keeping subfolder-less datasets byte-identical to the pre-mirror tool). The skip-checks and the global-table rebuild therefore search **recursively** (`reports_dir.rglob(...)`), so a report written in a subfolder is still found. When a file previously processed by the old **flat** layout is reprocessed into its subfolder, tool 7 first deletes any stale **root-level** copies of that file_id's three report files (only when `<edf_subtree> != '.'`) so the globbed globals never double-count it:
 - `{file_id}_all-epo.fif`, all epochs **and every montage channel** (the deselected ones included, listed in `info['bads']`, never flagged) with `epochs.metadata` DataFrame (columns: `epoch_idx`, `stage`, `reject_flag`, `reject_method`, `flag_amplitude`, `flag_flat`, `flag_gradient`, `flag_1f_error`, `flag_1f_r2`, plus `flag_event` **when event flagging ran**, and one `evt_<canonical>` bool per canonical event type **when event flagging ran**, a per-epoch flag naming *which* event type flagged the epoch, since `flag_event` is only the OR, read by **tool 8**'s per-epoch inspector to show the culprit event(s)). The `flag_<method>` columns are **per-epoch "any channel" booleans** (the naive epoch-level decision, read by tool 8). The full per-(epoch, channel) mask **is** now persisted separately, in `{file_id}_epoch_channel_rejection.tsv` (below). The per-epoch/per-stage TSVs and `global_rejection_by_stage.tsv` gain the matching `flag_event` / `event` entries the same way: additively, so event-free runs stay byte-compatible with earlier outputs.
 - `{file_id}_preprocessing_params.json`: `channels` (the flagged ones) + the additive `bad_channels` (deselected: in the `.fif` marked bad, never flagged) + the resampling / notch / bandpass filter settings (the notch as an additive `notch: {applied, freq_hz}` key, provenance only) + the additive `epoch_length_s` (the selected epoch length, **30 assumed when absent**, so older sidecars stay compatible) + the per-stage rejection thresholds actually used (amplitude p-p per stage, flat, gradient, 1/f MAE/R²) + `methods_run` + the optional additive `psd_smoothing` block (see above, omitted-safe on older sidecars). Read back by **tool 8** (QC of rejected epochs) to draw threshold reference lines, recompute per-channel margins, label the epoch length (`qc_rejected_epochs_lib.load_params → info['epoch_length_s']`), and honour the PSD smoothing when recomputing PSDs (`info['psd_smoothing']`). Written non-fatally.
@@ -2403,6 +2451,8 @@ annotations are listed in `{file_id}_manualreject_report.html`.
 - **Detail panel** (one row): **PSD** (left) in **semilogy (the same units and scale as the Section-2 overlay**, so a non-expert reads both the same way) with the **median + IQR of the clean epochs of the current stage** drawn behind as a reference, the channels whose 1/f fit breaches a threshold drawn in their **method colour** with their **aperiodic fit dashed** (and their exponent in the legend) while unflagged channels stay grey and labelled once (*"this epoch, channels not flagged"*). There is deliberately **no "worst channel" emphasis** anymore: what matters is which channels actually breach a threshold. The **per-channel metric table** sits **right beside the PSD** (right), each value shown with its threshold and printed **red + bold when it breaches it**. The two topomaps take the remaining columns on a dense montage. The former **bottom row, mean band power (δ/θ/α/σ/β) + the 50 Hz / 40–47 Hz ratio, and the epoch spectrogram, is COMMENTED OUT** (with its channel selector in the navigator): neither drove the call on a single epoch, the band bars restating what the PSD above already shows and the spectrogram needing its own selector to say what the montage says faster. The code is kept verbatim in `plot_epoch_detail` behind a restore note (put back the 2-row gridspec, uncomment `ax_band`/`ax_spec` and blocks (c)/(d), and the selector row in the notebook). `spectro_ch_idx` stays in the signature, unused, so every caller keeps working. The figure is 13×3.3 in (18×3.3 with topomaps), height `DETAIL_FIG_HEIGHT_IN` in the lib (4.8 before 2026-10-05), low enough that the montage, the PSD and the table fit on one screen; the metric-table rows have a fixed height in points, so up to the 12-channel threshold the table still fits, and above it `Table rows` (default 8) keeps it short.
 
 **Section 4: Manual override, save & decision report**: a review strip (hypnogram + final keep/reject for **every** epoch, overridden epochs marked; `plot_review_strip(in_scope=None)`, the parameter only greys something for callers that still pass a mask) and counts (every epoch, the review focus, kept / rejected / rescued / newly-rejected). **Save** follows the toolkit's **`derivatives/` (data) vs `reports_*` (reports) split**, both output folders are precomputed once at participant load (`S['out_folder']` / `S['reports_folder']`), and writes **data before reports**:
+- These folders and the source of the exclusion button (`8_manual`) carry the suffix of the run under review (`_run()`,
+  *Cross-cutting → Runs of tool 7*).
 - **DATA** → **`derivatives/rejection_manual/<edf_subtree>/`** (sibling of tool 8bis's `rejection_auto/`, mirrors the tool-7 subtree, stripping a leading `preproc_epo/`): `{file_id}_epoch_decision.tsv` (every epoch: `in_scope` = always True, `rejected` = final decision, `reject_reason` = the recomputed method(s) / `manual_added` / `manual_rescued`, `manual_override`, `seen`) and `{file_id}_channel_decision.tsv` (every channel: `dropped` = unticked in the Section-1 triage (`unticked in tool 8`) or deselected in tool 7 (`tool7_deselected`), `badness_pct`). The former `clean_epo_manual/*_clean-epo.fif` is no longer written.
 - **REPORTS** → **`reports_rejection_manual/<edf_subtree>/`** (beside `reports_preproc/`, sibling of 8bis's `reports_rejection_auto/`): `{file_id}_epoch_rejection_reviewed.tsv` (per-epoch metadata + the decision columns, `in_scope` always True, + the additive `review_focus` / `seen` / `epoch_number` / `onset_s` / `clock_time`), `{file_id}_qc2b_review_log.tsv` (one row per overridden epoch: `epoch_idx`, `stage`, `orig_reject`, `final_reject`, `action` ∈ rescued/added), the Section-2 `{file_id}_qc2b_report.html`, and (mirroring 8bis's decision record) **`{file_id}_manualreject_decision.tsv`** + **`{file_id}_manualreject_report.html`**.
 - **Decision record** (`build_manual_decision_row`): one durable row per participant, `n_epochs`, `n_in_scope` / `n_out_of_scope` (kept for schema continuity: = `n_epochs` / 0), `n_rejected`, `n_kept`, `pct_rejected` (of **every** epoch), `n_flagged_by_selection` (every epoch), the additive focus counts `n_epochs_ref` / `n_rejected_ref` / `pct_rejected_ref` / `n_flagged_ref` (the review set), `n_overrides` / `n_rescued` / `n_added`, the additive `n_seen` / `pct_seen` / `n_manual_annotations` / `epoch_number_offset` (how thorough the review was and how it was numbered, 5 % rejected after opening every flagged epoch is not the same result as 5 % rejected without opening one), `stages_used` (= the focus stages) / `methods_used` / `event_types_used`, channels, sfreq, `epoch_length_s`, the thresholds used, `reviewed_at`, plus `n_<stage>` / `n_rejected_<stage>` for the selected stages then every other stage present. Written **before** the report, exactly like 8bis's `_autoreject_decision.tsv`, and it is what the "already processed" badge looks for.
@@ -2446,13 +2496,13 @@ copy, imports the library through the same probe as `qc_rejected_epochs_lib`. Pr
 `tests/refactor_check.py` on the whole chain. Edit the library, never a copy.
 
 **Inputs (Section 1 finds two folders from the study folder, then a `Scan` button)** (deliberately *not* one root
-scanned recursively, tool 7 is often re-run with different parameters and its outputs renamed/versioned side
+scanned recursively, tool 7 is often re-run with different parameters (*New version*) and its outputs kept side
 by side, e.g. `preproc_epo`, `preproc_epo_v2`, `reports_preproc_v2`, a recursive `rglob` on `derivatives/`
 would mix every version, duplicating `file_id`s):
 - **Study folder** (`fc_data`, first picker, holds `derivatives/` + `reports_preproc/` as in tool 7): the tool finds
   tool 7's run in it and lists it under *Inputs found* (`study_files_lib.epoch_folders`, the `derivatives/preproc_epo*`
   of the study and of the output folder tool 7 noted). Several runs: a menu (`run_menu`) with their number of
-  participants. Without a study folder the two pickers still work by hand (the tests).
+  participants, the most recent pre-chosen. Without a study folder the two pickers still work by hand (the tests).
 - **Preprocessed-epochs folder** (`fc_raw`): holds the tool-7 `{file_id}_all-epo.fif` (e.g. `derivatives/preproc_epo`).
   Participants are `qc_rejected_epochs_lib.find_participants(raw_root)` and each participant's subtree is
   `fif.parent.relative_to(raw_root)`.
@@ -2526,7 +2576,8 @@ summary) and the participant is excluded in the registry (above). (On sparse 3-c
 flagging the 20 % channel threshold can drop every channel: expected, the thresholds are editable.)
 
 **Outputs, the toolkit's `derivatives/` (data) vs `reports_*` (reports) split** (`<subtree>` = the
-participant path relative to the chosen raw folder):
+participant path relative to the chosen raw folder; these folders and the source `8bis_auto` of the registry carry the
+suffix of the run, *Cross-cutting → Runs of tool 7*):
 - **DATA**: `<raw_root.parent>/rejection_auto/<subtree>/`: `{file_id}_epoch_decision.tsv` (every epoch:
   `in_scope` = always True, `rejected`, `reject_reason` = `k/n good channels flagged`) and
   `{file_id}_channel_decision.tsv` (every channel incl. the tool-7 bads: `dropped`, `drop_reason`,
@@ -2726,7 +2777,8 @@ rebuilt by **globbing the per-file tables from disk**. The workbook and the data
 **non-fatal** (a locked file or an over-long path leaves every per-participant output intact and still
 prints the run summary).
 
-**Outputs (data → `derivatives/features_spectral/<subtree>/`)**: `{file_id}_bandpower_epoch.tsv` (one row
+**Outputs (data → `derivatives/features_spectral/<subtree>/`; this folder and the reports folder carry the suffix of the
+run, *Cross-cutting → Runs of tool 7*)**: `{file_id}_bandpower_epoch.tsv` (one row
 per epoch × channel × band, **every** epoch and channel), `{file_id}_aperiodic_epoch.tsv` (offset, knee,
 exponent, R², MAE, `fit_ok`, `n_peaks`), `{file_id}_periodic_peaks.tsv` (one row per specparam peak: centre
 frequency, power, bandwidth), the three with `in_scope`, `rejected`, `channel_dropped`;
@@ -2998,15 +3050,6 @@ companion files present per recording, and the files that break the convention. 
 code assumes and where it fails on real databases; the inferred structure could then pre-fill a participant table
 for the later tools.
 this part could also checks the companion files (hypno, events etc), and gives warning if some are missing
-
-### Renaming the outputs, several channel configurations of tool 2 (TODO, follows the display harmonization)
-
-A way to name / rename a tool's outputs, the same in every tool. Use case: several channel configuration files
-from tool 2, to run the later tools on different channel configurations. Open question: how to keep apart the
-outputs of the later tools when they are run on different configurations. Two things seen during the file selection work
-(2026-11-04): the later tools pre-choose the channel configuration tool 2 saved last, the others are reached with
-*Choose another…* (enough, no menu: decided on 2026-11-04); tool 8bis writes its decisions to
-`derivatives/rejection_auto/` whatever the epochs folder, so `preproc_epo` and `preproc_epo_v2` share one decision folder.
 
 ### Skip only what was made with the current settings: tools 6, 7 and 9 (TODO)
 

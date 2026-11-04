@@ -92,6 +92,9 @@ my_study/                      <- pick this folder in every tool
 
 Keep the study path short: Windows limits paths to 260 characters.
 
+To run the analyses with other parameters and keep what exists, tick **New version** in tool 7: it writes
+`preproc_epo_v2`, and tools 8, 8bis and 9 follow with their own `_v2` outputs. Nothing to rename by hand.
+
 ### Before the export: tutorials
 
 The other guides in `tutorials/` cover the export from Compumedics Profusion: creating an EEG montage

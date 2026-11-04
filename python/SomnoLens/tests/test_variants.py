@@ -2,7 +2,7 @@
 light copy of the database (one participant where possible) and is checked for what its option must do.
 
     tool 7   10 s epochs (then 8bis and 9 on them), resampling to 128 Hz, notch off, custom stage N4, an output
-             folder noted and found by tool 9
+             folder noted and found by tool 9, a new version (then 8bis, 8 and 9 on it, the first run untouched)
     tool 6   resampling + high-pass: the dead channel stays flagged, no healthy channel gets flagged; the
              preparation is recorded, and a second run without it warns on each skipped participant
     tool 9   multitaper PSD (same order as Welch), 'knee' aperiodic mode
@@ -103,6 +103,77 @@ def test_tool7_notes_its_output_folder_and_tool9_finds_the_run(src, tmp_path):
         nb.pick('fc_data', data)
         assert Path(nb.value('fc_raw.selected_path')) == out / 'derivatives' / 'preproc_epo'
         assert '(the only run found)' in nb.value('raw_row.children[0].children[0].value')
+
+
+def tree_state(*folders):
+    """Every file of these folders with its date: nothing was rewritten when it stays the same."""
+    return {str(f): f.stat().st_mtime_ns for folder in folders for f in Path(folder).rglob('*') if f.is_file()}
+
+
+@pytest.mark.tool7
+@pytest.mark.tool8
+@pytest.mark.tool8bis
+@pytest.mark.tool9
+def test_tool7_new_version_then_8bis_8_and_9(src, tmp_path):
+    """A new version keeps the first run: the next tools follow it, with their own outputs and their own decisions."""
+    data = inputs_copy(src, tmp_path / 'data', ['reports_quality_overview'])
+    deriv = data / 'derivatives'
+    run_tool7(data, SIM_LINE)
+    pipeline.run_tool8bis(data)
+    first_run = (deriv / 'preproc_epo', data / 'reports_preproc', deriv / 'rejection_auto', data / 'reports_rejection_auto')
+    before = tree_state(*first_run)
+    assert before
+
+    def new_version(nb):
+        assert nb.value('chosen_run()') == ''
+        nb.set('cb_new_version', True)
+        assert nb.value('txt_run_suffix.value') == '_v2'
+        nb.set('cb_notch', False)                                     # other parameters
+    run_tool7(data, SIM_LINE, new_version)
+    assert (deriv / 'preproc_epo_v2' / f'{SIM_LINE}_all-epo.fif').exists()
+    assert (data / 'reports_preproc_v2' / f'{SIM_LINE}_preprocessing_report.html').exists()
+    assert json.loads((deriv / 'preproc_epo_v2' / f'{SIM_LINE}_preprocessing_params.json').read_text(encoding='utf-8'))
+    assert tree_state(*first_run) == before
+
+    # tool 8bis finds the most recent run from the study folder alone
+    with NotebookSession(pipeline.T8BIS) as nb:
+        nb.pick('fc_data', data)
+        assert Path(nb.value('fc_raw.selected_path')) == deriv / 'preproc_epo_v2'
+        assert Path(nb.value('fc_reports.selected_path')) == data / 'reports_preproc_v2'
+        nb.click('btn_scan')
+        nb.click('btn_run')
+    assert (deriv / 'rejection_auto_v2' / f'{SIM_LINE}_epoch_decision.tsv').exists()
+    assert tsv(data / 'reports_rejection_auto_v2' / 'global_autoreject_summary.tsv')['file_id'].tolist() == [SIM_LINE]
+    assert tree_state(*first_run) == before
+
+    # tool 8 on the same run, its exclusion written for this run
+    with NotebookSession(pipeline.T8) as nb:
+        nb.pick('fc_data', data)
+        assert Path(nb.value('fc_raw.selected_path')) == deriv / 'preproc_epo_v2'
+        nb.set('dd_part', SIM_LINE)
+        nb.set('txt_excl_reason', 'bad on this run')
+        nb.click('btn_excl')
+        nb.click('btn_load')
+        nb.click('btn_save')
+    assert (deriv / 'rejection_manual_v2' / f'{SIM_LINE}_epoch_decision.tsv').exists()
+    assert tsv(data / 'reports_rejection_manual_v2' / 'global_manualreject_summary.tsv')['participant_excluded'].all()
+    registry = pd.read_csv(data / 'config_param' / 'participant_exclusions.tsv', sep='\t', dtype=str)
+    assert '8_manual_v2' in set(registry['source']) and '8_manual' not in set(registry['source'])
+
+    # tool 9 on this run: the most recent decision of the run, its own outputs, the exclusion of the run
+    pipeline.run_tool9(data, deriv / 'preproc_epo_v2', deriv / 'rejection_auto_v2')
+    assert (deriv / 'features_spectral_v2' / f'{SIM_LINE}_bandpower_epoch.tsv').exists()
+    assert tsv(data / 'reports_features_spectral_v2' / 'global_spectral_stage.tsv')['participant_excluded'].all()
+    assert not (deriv / 'features_spectral').exists()
+
+    # the first run knows nothing of this exclusion: no stale box, and its tables rebuilt do not flag the participant
+    with NotebookSession(pipeline.T8BIS) as nb:
+        nb.pick('fc_data', data)
+        nb.set('run_menu', str(deriv / 'preproc_epo'))
+        nb.click('btn_scan')
+        assert 'registry changed after' not in nb.value('lbl_scan.value')
+        nb.click('btn_run')
+    assert not tsv(data / 'reports_rejection_auto' / 'global_autoreject_summary.tsv')['participant_excluded'].any()
 
 
 @pytest.mark.tool7

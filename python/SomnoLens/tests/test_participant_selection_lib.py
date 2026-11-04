@@ -193,19 +193,65 @@ def test_empty_registry_header_only_means_everyone_included(data):
     assert P.excluded_ids(P.effective_status(P.load_registry(data)[0])) == ['a']
 
 
-def test_registry_newer_than_its_tables(data, tmp_path):
-    import os, time
+def build_table(path, status, ids=('a', 'b')):
+    """A database table as a tool writes it: its exclusion columns say what the registry says."""
+    df = pd.DataFrame({'file_id': [i for i in ids for _ in range(2)], 'value': 1.0})
+    P.add_exclusion_columns(df, status).to_csv(path, sep='\t', index=False)
+
+
+def status_for(data, run=''):
+    return P.effective_status(P.load_registry(data)[0], run)
+
+
+def test_tables_out_of_date_compare_the_contents(data, tmp_path):
     table = tmp_path / 'global.tsv'
-    assert not P.registry_newer_than(data, table)                  # nothing to compare yet
+    assert not P.tables_out_of_date(status_for(data), table)       # nothing to compare yet
     table.write_text('x\n', encoding='utf-8')
-    assert not P.registry_newer_than(data, table)                  # no registry
+    assert not P.tables_out_of_date(status_for(data), table)       # a table without the exclusion columns
+    build_table(table, status_for(data))
+    assert not P.tables_out_of_date(status_for(data), table)       # no decision, none in the table
     P.write_registry_rows(data, '7_manual', [{'file_id': 'a', 'reason': 'r'}])
-    later = time.time() + 5
-    os.utime(P.registry_path(data), (later, later))
-    assert P.registry_newer_than(data, table)                      # decision taken after the table
-    os.utime(table, (later + 5, later + 5))
-    assert not P.registry_newer_than(data, table)                  # table rebuilt since
+    assert P.tables_out_of_date(status_for(data), table)           # decision taken after the table
+    build_table(table, status_for(data))
+    assert not P.tables_out_of_date(status_for(data), table)       # table rebuilt since
+    P.write_registry_rows(data, '7_manual', [{'file_id': 'a', 'reason': 'another reason'}], replace_ids=['a'])
+    assert P.tables_out_of_date(status_for(data), table)           # the reason changed
+    P.write_registry_rows(data, '7_manual', [{'file_id': 'a', 'reason': 'r'}], replace_ids=['a'])
+    assert not P.tables_out_of_date(status_for(data), table)       # changed back: nothing to refresh
+    P.write_registry_rows(data, '7_manual', [{'file_id': 'c', 'reason': 'r'}], replace_ids=['c'])
+    assert not P.tables_out_of_date(status_for(data), table)       # not in these tables
+    P.remove_registry_rows(data, '7_manual', ['a'])
+    assert P.tables_out_of_date(status_for(data), table)           # a decision lifted
     assert 'registry changed after' in P.stale_tables_html(P.STALE_RERUN)
+
+
+def test_each_run_of_tool_7_reads_its_own_decisions(data, tmp_path):
+    P.write_registry_rows(data, '5bis_criteria', [{'file_id': 'study', 'reason': 'short night'}])
+    P.write_registry_rows(data, '8bis_auto', [{'file_id': 'a', 'reason': 'first run'}])
+    P.write_registry_rows(data, '8bis_auto_v2', [{'file_id': 'b', 'reason': 'second run'}])
+    P.write_registry_rows(data, '7_manual_v2', [{'file_id': 'c', 'reason': 'by hand'}])
+    assert P.excluded_ids(status_for(data)) == ['a', 'study']
+    assert P.excluded_ids(status_for(data, '_v2')) == ['b', 'c', 'study']
+    assert P.status_of(status_for(data, '_v2'), 'b') == (True, '8bis_auto_v2: second run')
+    assert P.excluded_ids(status_for(data, '_v3')) == ['study']    # a new run starts from the study's decisions
+    reg = P.load_registry(data)[0]
+    assert P.runs_in_registry(reg) == {'_v2'}
+    assert P.manual_exclusions(reg, '_v2') == ['c'] and P.manual_exclusions(reg) == []
+
+    # a decision on one run leaves the other's rows and tables alone
+    table = tmp_path / 'global.tsv'
+    build_table(table, status_for(data), ids=('a', 'b', 'c'))
+    P.write_registry_rows(data, '8bis_auto_v2', [], replace_ids=['b'])
+    P.write_registry_rows(data, '8bis_auto_v2', [{'file_id': 'a', 'reason': 'second run'}], replace_ids=['a'])
+    assert not P.tables_out_of_date(status_for(data), table)
+    assert P.status_of(status_for(data), 'a') == (True, '8bis_auto: first run')
+    assert not P.status_of(status_for(data, '_v2'), 'b')[0]
+    # tool 5bis's decision holds for every run, and its forced inclusion too
+    P.write_registry_rows(data, '5bis_manual', [{'file_id': 'a', 'decision': 'include', 'comment': 'kept'}])
+    assert not P.status_of(status_for(data), 'a')[0] and not P.status_of(status_for(data, '_v2'), 'a')[0]
+    assert P.tables_out_of_date(status_for(data), table)
+    with pytest.raises(ValueError):
+        P.write_registry_rows(data, '9_manual', [{'file_id': 'a', 'reason': 'r'}])
 
 
 def test_rewriting_the_same_decisions_leaves_the_registry_untouched(data):

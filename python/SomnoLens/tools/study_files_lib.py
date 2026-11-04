@@ -333,13 +333,50 @@ def check_sleep_metrics_table(path):
 # The runs of tool 7 and the decisions made on them (tools 8, 8bis, 9)
 # ---------------------------------------------------------------------------------------------------------
 NO_DECISION = ''                 # the value of the 'none' option of a decision menu
+# A run of tool 7 = derivatives/preproc_epo<suffix>/ + reports_preproc<suffix>/, the first one without a suffix. The
+# outputs of the tools that read a run carry its suffix (rejection_auto_v2, features_spectral_v2...).
+EPOCHS_DIRNAME = 'preproc_epo'
+REPORTS_DIRNAME = 'reports_preproc'
+MAX_RUN_SUFFIX = 20              # it goes into folder names: Windows limits a path to 260 characters
+
+
+def run_suffix(epoch_folder):
+    """The suffix of a run of tool 7, read from its epochs folder: preproc_epo -> '', preproc_epo_v2 -> '_v2'. '' for a
+    folder named otherwise (chosen by hand)."""
+    name = Path(epoch_folder).name
+    return name[len(EPOCHS_DIRNAME):] if name.lower().startswith(EPOCHS_DIRNAME) else ''
+
+
+def run_exists(root, suffix):
+    """True when an output folder already holds this run: its epochs folder or its reports folder."""
+    return ((Path(root) / 'derivatives' / (EPOCHS_DIRNAME + suffix)).exists()
+            or (Path(root) / (REPORTS_DIRNAME + suffix)).exists())
+
+
+def next_run_suffix(root, used=()):
+    """The suffix to propose for a new run of an output folder: the first _vN (from _v2, the first run has none) with no
+    folder and not in `used`, the runs the exclusion registry still names: a new run must not inherit their decisions."""
+    taken = {_norm(u) for u in used}
+    n = 2
+    while run_exists(root, f'_v{n}') or _norm(f'_v{n}') in taken:
+        n += 1
+    return f'_v{n}'
+
+
+def run_suffix_from_text(text):
+    """The suffix a typed text gives: 'nonotch' or '_nonotch' -> '_nonotch'. '' when it cannot go into a folder name:
+    empty, anything but letters, digits, - and _, or longer than MAX_RUN_SUFFIX."""
+    text = (text or '').strip()
+    if not re.fullmatch(r'[A-Za-z0-9_-]+', text) or not re.search(r'[A-Za-z0-9]', text):
+        return ''
+    suffix = text if text.startswith(('_', '-')) else '_' + text
+    return suffix if len(suffix) <= MAX_RUN_SUFFIX else ''
 
 
 def epoch_folders(study, names=None):
-    """The folders of preprocessed epochs of the study, as [(folder, number of participants)]: the
-    derivatives/preproc_epo* holding *_all-epo.fif, in the study folder then in the output folder tool 7 noted.
-    Tool 7 always writes preproc_epo: there are several only when a folder was renamed by hand to keep a former run
-    (preproc_epo_v2), or with tool 7's output folder."""
+    """The runs of tool 7 of the study, the most recent first (the date of their latest *_all-epo.fif), as [(folder,
+    number of participants)]: the derivatives/preproc_epo* holding *_all-epo.fif, in the study folder and in the
+    output folder tool 7 noted."""
     study = Path(study)
     roots = [study]
     rec = recorded(names, 'preproc_output')
@@ -353,11 +390,11 @@ def epoch_folders(study, names=None):
         if not derivatives.is_dir():
             continue
         for folder in sorted(derivatives.iterdir()):
-            if folder.is_dir() and folder.name.lower().startswith('preproc_epo'):
-                n = sum(1 for _ in folder.rglob('*_all-epo.fif'))
-                if n:
-                    found.append((folder, n))
-    return found
+            if folder.is_dir() and folder.name.lower().startswith(EPOCHS_DIRNAME):
+                epochs = list(folder.rglob('*_all-epo.fif'))
+                if epochs:
+                    found.append((folder, len(epochs), max(f.stat().st_mtime for f in epochs)))
+    return [(folder, n) for folder, n, _ in sorted(found, key=lambda x: -x[2])]
 
 
 def epoch_folder_options(study, folders):
@@ -369,18 +406,20 @@ def paired_reports_folder(epoch_folder):
     """The reports folder of a run of tool 7, by its name beside derivatives/: preproc_epo_v2 -> reports_preproc_v2.
     None when there is none."""
     epoch_folder = Path(epoch_folder)
-    if not epoch_folder.name.lower().startswith('preproc_epo'):
+    if not epoch_folder.name.lower().startswith(EPOCHS_DIRNAME):
         return None
-    candidate = epoch_folder.parent.parent / ('reports_preproc' + epoch_folder.name[len('preproc_epo'):])
+    candidate = epoch_folder.parent.parent / (REPORTS_DIRNAME + run_suffix(epoch_folder))
     return candidate if candidate.is_dir() else None
 
 
 def decision_folders(epoch_folder):
-    """The decision folders beside an epochs folder (rejection_auto* of tool 8bis, rejection_manual* of tool 8), the
-    most recent first, as [(folder, date of its latest *_epoch_decision.tsv, number of participants)]."""
+    """The decision folders of a run of tool 7, beside its epochs folder (rejection_auto<suffix> of tool 8bis,
+    rejection_manual<suffix> of tool 8), the most recent first, as [(folder, date of its latest *_epoch_decision.tsv,
+    number of participants)]. Never another run's: its decisions were made on other epochs."""
+    suffix = run_suffix(epoch_folder).lower()
     found = []
     for folder in sorted(Path(epoch_folder).parent.iterdir()):
-        if folder.is_dir() and folder.name.lower().startswith(('rejection_auto', 'rejection_manual')):
+        if folder.is_dir() and folder.name.lower() in (f'rejection_auto{suffix}', f'rejection_manual{suffix}'):
             tables = list(folder.rglob('*_epoch_decision.tsv'))
             if tables:
                 found.append((folder, max(t.stat().st_mtime for t in tables), len(tables)))
