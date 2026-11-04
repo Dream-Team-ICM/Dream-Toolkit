@@ -27,6 +27,7 @@ SomnoLens/
 ├── tools/
 │   ├── 0_live_explore_1file_voila.ipynb         # One participant through the whole pipeline (Voila GUI, being rebuilt)
 │   ├── edf_io_lib.py                            # Shared EDF reading (header, channel types, hypnogram, events, context) + custom stages: tools 0, 1, 1bis, 3 and the libraries
+│   ├── study_files_lib.py                       # Names registry (config_param/file_names.json) + choice of the companion suffixes: tools 0, 3, 3bis, 5, 6, 7 (no EDF reading)
 │   ├── autoscoring_lib.py                       # Tool 3bis step 1 (GSSC, YASA, SleepFM scoring + figures), shared with tool 0
 │   ├── sleepfm_lib.py                           # SleepFM-Clinical for tool 3bis: model download/locate, montage, inference
 │   ├── autoscoring_compare_lib.py               # Tool 3bis step 2: comparison of the models (Score_EDF's computation)
@@ -165,10 +166,10 @@ scan, so they can sit in a subfolder:
 my_study/                               <- pick this folder in every tool
 ├── data/                               <- recordings + their companions (any sub-folder tree)
 │   ├── sub1.edf, sub1_hypno.txt, *_ScoredEvents_Export.txt / *_event_xml.csv / *.edf.XML
-│   ├── sub1_Hypnogram_remapped.txt     (tool 3)
-│   ├── sub1_Hypnogram_gssc.txt         (tool 3bis)
+│   ├── sub1_hypno_remapped.txt         (tool 3; _Hypnogram_remapped.txt in a study begun before 2026-11-03)
+│   ├── sub1_hypno_gssc.txt             (tool 3bis; formerly _hypnogram_gssc.txt)
 │   └── sub1_manual_events.tsv          (tool 8)
-├── config_param/                       <- tools 2, 3, 4 (JSON) + the exclusion registry
+├── config_param/                       <- tools 2, 3, 4 (JSON), the exclusion registry, the names registry
 ├── derivatives/
 │   ├── autoscoring_gssc/data/          (tool 3bis)
 │   ├── features_macrostructure/data/   (tool 5)
@@ -191,7 +192,10 @@ my_study/                               <- pick this folder in every tool
   and recursive globs), and useful with group sub-folders (`data/group1/`, `data/group2/`).
 - **Companions stay beside the recording** by design: the hypnograms are found by suffix next to the EDF,
   and an annotation belongs to the recording. `derivatives/autoscoring_gssc/` holds only the
-  hypnodensity + parameters.
+  hypnodensity + parameters. (Tools 5, 6 and 7 also find a hypnogram elsewhere in the study, by its file name.)
+- **The names a tool chose are recorded** in `config_param/file_names.json` (*Cross-cutting → Names registry*),
+  so the later tools follow a suffix the user changed. A study keeps its names: the short defaults of 2026-11-03
+  (`_hypno_remapped.txt`, `_hypno_<algo>.txt`) apply to a new study only.
 - **Exact names**: `config_param` and `derivatives`. Tools 8 / 8bis / 9 find the registry through
   `find_data_folder` (first ancestor holding `config_param/`, else the parent of `derivatives/` or
   `reports_*`).
@@ -325,7 +329,8 @@ test must point it at a copied `preproc_epo`.
   hand"); step 2 flags sim01's ±50 µV Fp1 (tool 1's known answer) and splits its channel table by detected
   type; the explorer writes only its documented files (rescored hypnogram + log, `manual_events.tsv` with
   `source = manual_tool0`, read back by `load_manual_events` and by the TXT/CSV/XML chain with
-  `include_manual`, inspection log + report) and modifies nothing else; the context traces equal tool 7's
+  `include_manual`, inspection log + report, the rescored suffix in `config_param/file_names.json`) and modifies
+  nothing else; the context traces equal tool 7's
   `_context-epo.fif` (tool 7 run on a copy whose JSON declares Fp1 / O1 as EOG-L / EMG, the test montage
   having no EOG / EMG; float32 tolerance); step 3 counts every scored event under its tool-4 label; step 3's
   automatic scoring equals tool 3bis's (marker `tool3bis`, synthetic, skipped without gssc: tool 3bis run on a
@@ -345,8 +350,13 @@ test must point it at a copied `preproc_epo`.
   sections, linked from the database report, and part of the skip gate (a recording whose report was deleted
   is the only one reprocessed). `test_edf_io_lib.py`
   (quick): the rules lifted into `edf_io_lib`
-  (tool 7's hypnogram length and suffix choices, tool 3's mid-night `?`, tool 2's context guess, tool 1's
-  header table). `test_quality_lib.py` (quick): tool 6's signal-preparation label and the rule that warns on a
+  (tool 7's hypnogram length rule, tool 3's mid-night `?`, tool 2's context guess, tool 1's
+  header table). `test_study_files_lib.py` (quick): the names registry (other tools' keys and dates kept, an
+  unreadable file never overwritten), the counting of the companion suffixes (participants 1, 2, 10, 20: no false
+  `0_…` suffix) and the hypnogram pre-choice (the toolkit's own hypnograms never win, a recorded name is followed,
+  a study keeps its output names). `test_hypno_prechoice.py` (standard, markers `tool3`, `tool3bis`, `tool5` to
+  `tool7`): the same pre-choice in the five notebooks, on empty `.edf` files beside the raw export, the remapped
+  hypnogram, tool 3bis's and tool 0's outputs. `test_quality_lib.py` (quick): tool 6's signal-preparation label and the rule that warns on a
   skipped participant prepared differently.
 - `outside_chain.py` (a script): what the chain does not run, on a fresh copy of a chain dataset's inputs in
   `%TEMP%/dtk_outside_chain/<dataset>/data`, so `refactor_check.py` can compare its outputs before / after a
@@ -477,7 +487,8 @@ instead of restating them. Only tool-specific deltas are kept inline.
 
   | Library | Computation of | Imported by |
   |---|---|---|
-  | `edf_io_lib` | EDF reading (header parser, channel types, hypnogram + companion suffixes, scored-event chain, context channels) and the custom stages (*Study configuration*) | 0, 1, 1bis, 3, 5, 5bis, and every library below |
+  | `edf_io_lib` | EDF reading (header parser, channel types, hypnogram length rule, scored-event chain, context channels) and the custom stages (*Study configuration*) | 0, 1, 1bis, 3, 5, 5bis, and every library below |
+  | `study_files_lib` | no EDF reading: the names registry `config_param/file_names.json` and the choice of the companion suffixes (*Hypnogram-suffix auto-detection* below) | 0, 3, 3bis, 5, 6, 7 (+ the Curry twins of 3, 6, 7) |
   | `autoscoring_lib` | tool 3bis step 1 (GSSC, YASA, SleepFM scoring, EEG reference, agreement, figures) | 0, 3bis |
   | `sleepfm_lib` | SleepFM-Clinical (model download / location, input montage, inference) | `autoscoring_lib` (3bis) |
   | `autoscoring_compare_lib` | tool 3bis step 2 (Score_EDF's alignment, recalibrations, agreement, figures) | 3bis |
@@ -607,32 +618,58 @@ instead of restating them. Only tool-specific deltas are kept inline.
 - **Lenient JSON loader**: every read of a config JSON parses strictly first and, on failure, repairs a
   single trailing comma before a closing `}`/`]` (a common hand-edit mistake) before retrying. Shared by
   the config readers of tools 2 and 4.
-- **Hypnogram-suffix auto-detection**: on folder selection, the `.txt` files next to each EDF are scanned,
-  candidate suffixes counted (all files per EDF matched), and the suffix widget auto-filled, with a
-  colour-coded info label (green = all EDFs matched, orange = partial/none). **Selection rule differs by
-  intent**: tool 3 prefers the **shortest** suffix on ties (target = raw, unremapped hypnogram). Tools 6
-  and 7 prefer the **longest** suffix among candidates appearing for ≥ 50% of the maximum count
-  (target = the more specific remapped/processed version).
-  **Event `.txt` exclusion + display/selection split** (tools 3, 6, 7): the auto-*selection* skips
-  candidate suffixes containing `event` (case-insensitive, `sel_counts`), while the *displayed* candidate
-  list keeps **every** `.txt` suffix found, with `← selected` marking the one auto-filled into the widget.
-  Curry exports scored events as `*_ScoredEvents_Export.txt`, a `.txt` living next to the hypnograms whose
-  suffix (24 chars) is **longer** than `_Hypnogram_remapped.txt` (23), so the "prefer the longest" rule of
-  tools 6/7 would otherwise auto-select the event export and read event lines as sleep stages (`np.loadtxt`
-  then fails with a *column count changed* error whose numbers vary per file, since it splits event labels
-  on whitespace). Excluding `event` rather than requiring `hypno` leaves hypnogram naming unconstrained.
-  Displaying all candidates keeps a mis-detection visible and hand-correctable. The ≥ 50% threshold is
-  computed **within** the selectable (non-event) set, so a numerous event export cannot raise the bar high
-  enough to disqualify a partially-remapped hypnogram. When *only* event suffixes exist the selection falls
-  back to them rather than failing. Same `event` convention, opposite polarity, in tool 4 (`"event" in name`:
-   it *wants* the export). **Live in the EDF `4_remap_events`** (auto-detects the `*_ScoredEvents_Export.txt`
-  export, see below) as well as the Curry twins. Tool 0 applies tool 7's rules study-wide through
-  `edf_io_lib.select_hypno_suffix` / `select_event_suffix` (lifted verbatim from tool 7's
-  `_detect_hypno_suffixes`). Tool 3 was already immune via
-  "shortest wins", the exclusion only makes it explicit. **Tool 5** applies the tools-6/7 rule and additionally
-  excludes `summary` and `studylog` from the selection (Profusion also exports `*_Summary_Export.txt` and
-  `*_StudyLog_Export.txt` next to the hypnograms). It auto-detects the `*_Summary_Export.txt` suffix on its
-  own (the `.txt` whose name contains `summary`) for the lights-off/on column (see §5).
+- **Names registry (`config_param/file_names.json`, `study_files_lib`, 2026-11-03)**: each tool notes the
+  names it wrote (or read), so the later tools follow a name the user changed. One JSON object, one key per
+  name: `{"value": …, "tool": "3", "saved_at": "YYYY-MM-DD HH:MM:SS"}`. Keys today: `hypnogram_scored` (the
+  raw export tool 3 read) and `hypnogram_remapped` (the suffix tool 3 wrote), written at *Save files*;
+  `hypnogram_gssc` / `hypnogram_yasa` / `hypnogram_sleepfm` (tool 3bis, each model that wrote at least one
+  hypnogram in the run); `hypnogram_rescored` (tool 0, the list of the rescored suffixes saved). Written only
+  when a tool really writes its files, never at a scan. The rules of the exclusion registry: each tool rewrites
+  only its own keys (`write_names(study, tool, values)`), an unchanged value keeps its date and the file is not
+  rewritten, absent / empty = nothing recorded and no warning, unreadable = a ⚠ under the suffix, the detection
+  rules below, and the file is **never overwritten**; atomic write. Read by `load_names(study)` /
+  `recorded(names, key)`.
+- **Hypnogram-suffix auto-detection** (one rule, `study_files_lib`, since 2026-11-03; tools 0, 3, 3bis, 5, 6,
+  7 and the Curry twins of 3, 6, 7): on folder selection, the `.txt` files of the study are scanned, the
+  candidate suffixes counted by `companion_suffix_counts(recordings, files)`, and the suffix widget pre-filled,
+  with a colour-coded info label (green = all recordings matched, orange = partial/none). A file counts for the
+  recording with the **longest** name it starts with (`10_hypno.txt` belongs to `10`, never to `1`: the former
+  per-recording prefix test gave recording `1` a false suffix `0_hypno.txt`, which could win on a small study
+  with ids 1, 2, 10, 20). The folder is not compared, since tools 5, 6 and 7 find a hypnogram anywhere in the
+  study by its file name. The pre-choice is `pick_hypno_suffix(counts, intent, names, own_outputs)`:
+  1. **the name recorded** for the intent in the names registry, when files with it exist;
+  2. else the detection rule on the candidates left after setting aside: the `event` / `summary` / `studylog`
+     exports; the **hypnograms the toolkit writes** (the names recorded by tools 3bis and 0, the default names of
+     tool 3bis, current `_hypno_<algo>.txt` and former `_hypnogram_<algo>.txt`, and any suffix ending in
+     `_rescored.txt`, tool 0's); the tool's own outputs (`own_outputs`: tool 3bis's three output suffixes, tool
+     3's output suffix); for intent `scored`, the remapped hypnograms (recorded, `_hypno_remapped.txt`,
+     `_Hypnogram_remapped.txt`); for intent `expert`, the raw export recorded by tool 3. Intent **`expert`**
+     (tools 0, 3bis, 5, 6, 7: the hypnogram remapped by tool 3) = the **longest** among the candidates found for
+     ≥ 50 % of the most frequent one (the more specific version; the threshold is computed within the candidates
+     left, so a numerous export cannot disqualify a partially remapped hypnogram), count breaking ties. Intent
+     **`scored`** (tool 3: the raw export of the scoring software) = the most frequent, the shortest on ties;
+  3. nothing left (only exports, or only automatic hypnograms beside the recordings): **no pre-choice**, an
+     orange note (`choice_notes`). Tools 5, 6, 7 and 3bis leave the field empty (3bis then scores without
+     comparison), tool 3 puts back its default `_Hypnogram_Export.txt` (an empty field would read every `.txt`).
+     Running the chain on an automatic hypnogram stays possible, by choosing its suffix by hand.
+
+  Set aside from the **pre-choice only**: the displayed list keeps every `.txt` suffix found with its count and
+  `← selected`, so a mis-detection stays visible and correctable by hand. A recorded name is noted under the
+  field (*Pre-chosen: the name recorded in config_param/file_names.json*). Why the exports: Curry and Profusion
+  write `*_ScoredEvents_Export.txt` (24 characters, longer than `_Hypnogram_remapped.txt`), `*_Summary_Export.txt`
+  and `*_StudyLog_Export.txt` beside the hypnograms; read as a hypnogram, an event export makes `np.loadtxt` fail
+  with a *column count changed* error. Excluding these words rather than requiring `hypno` leaves the hypnogram
+  naming free. Why the toolkit's hypnograms (user report, 2026-11-02): tool 3 took `_hypnogram_gssc.txt` (19
+  characters) over `_Hypnogram_Export.txt` (21), the other tools `_Hypnogram_remapped_rescored.txt` over
+  `_Hypnogram_remapped.txt`. The same `event` convention, opposite polarity, in tool 4 (`"event" in name`: it
+  *wants* the export). The event TXT / CSV suffixes (tools 0, 5, 7) use `select_event_suffix` (the most frequent,
+  the shortest on ties), and tool 5 detects its `*_Summary_Export.txt` suffix the same way among the `.txt`
+  whose name contains `summary` (lights off / on, §5).
+  **Output names: a study keeps its names** (`output_suffix(names, key, counts, new, former)`). The short
+  defaults of 2026-11-03 (tool 3 `_hypno_remapped.txt`, tool 3bis `_hypno_<algo>.txt`, instead of
+  `_Hypnogram_remapped.txt` / `_hypnogram_<algo>.txt`) apply to a new study only: tools 3 and 3bis propose the
+  recorded output suffix, else the former default when files with it exist, else the new one (otherwise a rerun of
+  tool 3 on a study already processed would write a second remapped copy under the new name).
 - **Event sourcing (TXT-first / CSV / XML-fallback)**: scored events are read via a shared `load_events()`.
   **Tool 4 (`4_remap_events_edf*`)** reads three Compumedics companions in priority order: the
   `*_ScoredEvents_Export.txt` **text export** (the "classic" Profusion/Curry French export: UTF-16-or-UTF-8
@@ -982,7 +1019,7 @@ of every participant (see *Tests*). What tool 0 adds is display and navigation o
 recursively, `derivatives/` and `reports_*` skipped, a file name present twice is kept once with a ⚠),
 **Participant** dropdown (`dd_part`, the EDF stems), the participant's **exclusion status** read from the
 registry (`PSL.effective_status`, read-only), and **Keep an inspection report** (`cb_report`, on). The study
-scan applies tool 7's companion rules study-wide (`edf_io_lib.select_hypno_suffix` /
+scan applies tool 7's companion rules study-wide (`study_files_lib.pick_hypno_suffix` with the names registry,
 `select_event_suffix`) and reads `config_param/remap_reref_persubject.json` (tool 2),
 `event_remap.json` (tool 4) and `custom_stages.json` (tool 3).
 
@@ -1011,8 +1048,9 @@ editable checkboxes (names kept). **As recorded**: no re-reference, no filter (s
 channels (EOG left / right, EMG, ECG dropdowns) = tool 2's `context_channels`, else
 `detect_context_channels` (editable, never saved), read by `edf_io_lib.read_context_raw` = tool 7's `[H]`
 block (role labels, resample to the EEG rate, per-role display filters) and epoched like tool 7's companion.
-Hypnogram: one of the `.txt` named after the recording (tool 7's suffix pre-selected; pick tool 3bis's to look
-at the automatic scoring), or **"Other file…"** (`OTHER_FILE`): a file chooser (`fc_hypno`, opened in the
+Hypnogram: one of the `.txt` named after the recording (tool 7's suffix pre-selected, else the recording's first
+`.txt` that is neither an export nor a toolkit hypnogram; pick tool 3bis's to look at the automatic scoring), or
+**"Other file…"** (`OTHER_FILE`): a file chooser (`fc_hypno`, opened in the
 recording's folder) for a hypnogram the detection missed (another name, another folder), with an orange note
 that the batch tools will not find it (they read `<recording><suffix>.txt` beside the recording); nothing
 chosen = loading refused with a message; the summary and the log say "chosen by hand", step 3's crosstab still
@@ -1063,7 +1101,8 @@ slider, next stage change, keyboard (`ipyevents`, optional: ←/→, w/0, 1, 2, 
 figures only so the comment field stays typable. **Rescoring**: stage buttons / keys change the working
 hypnogram (auto-advance optional); **Save** writes `<hypnogram stem>_rescored.txt` + `_rescore_log.tsv`
 beside the hypnogram (beside the EDF when there is none), never overwriting the original, an existing
-`_rescored.txt` only with *Overwrite* ticked. **Annotations**: tool 8's dialog, written at once with
+`_rescored.txt` only with *Overwrite* ticked; its suffix is added to `hypnogram_rescored` in the names registry
+(when the file name starts with the recording's), so the batch tools never pre-choose it. **Annotations**: tool 8's dialog, written at once with
 `L.save_manual_events` beside the recording, `source = manual_tool0`, so tool 7 (`cb_manual_events`) and tool 8
 read them like tool 8's own. Unsaved rescoring is guarded (`guard_unsaved`): the first reload / participant
 change is refused with a warning, the same action repeated discards it. **GSSC layer** (once step 3 has a
@@ -1237,7 +1276,7 @@ button that reloads the written files. Until then a section shows *Complete sect
 
 **Declared custom stages are first-class, not errors** (UX): a label listed in the Section 1 `Custom stages` field is no longer treated as suspect/unexpected. **Section 1** reports it on its own info line (`'M' : N file(s), K epoch(s), ids…`) and excludes it from the **Section 2** review widget and the `mid_uncertain_epochs_to_verify.tsv`. **Section 3** suggests the *raw* custom label as its own target (identity, "keep": the user may still rename it), shown in blue with a "rename if needed" note rather than suspect-red, and offers it in the combobox options. **All post-remap reporting keys off the labels actually present in the OUTPUT, not the raw field**, so renaming e.g. `M→SD` reports and saves only `SD` (never the now-unused `M`): Section 3's save splits output non-AASM targets into *registered* (already in the field → green "kept" line) vs *unregistered* (→ the ➕ Register warning). **Section 4** shows declared custom stages as a green **info box** and only **genuine** non-AASM, non-custom labels block saving / require the confirm-checkbox (MT is treated as acceptable). The **conclusion** notes that tools 0/6/7/8 will recognise the kept stages. **Section 5**'s success line lists the custom stages actually present in the reloaded files. The Section 1 field is never auto-pruned of renamed-away labels (they may still be in use by another configuration), and `save_custom_stages` filters to output-present stages, so `custom_stages.json` stays correct regardless.
 
-**Hypnogram suffix auto-detection** (see *Cross-cutting procedures*): tool 3 auto-fills the `Hypnogram suffix:` widget with the **shortest** candidate suffix on ties, the goal is the raw (unremapped) hypnogram, not an already-processed one (the reverse of tools 6/7, which prefer the longest).
+**Hypnogram suffix auto-detection** (see *Cross-cutting procedures*): tool 3 pre-fills the `Hypnogram suffix:` widget with intent `scored`: the raw export it recorded as its input in `config_param/file_names.json`, else the **most frequent** candidate, the **shortest** on ties, the remapped hypnograms (its own output suffix included) and the toolkit's hypnograms set aside (the reverse of tools 6/7, which prefer the longest). Nothing left: the field goes back to `_Hypnogram_Export.txt` with an orange note (an empty field would read every `.txt`). The output suffix field (`output_suffix_box`) is pre-filled with the recorded output suffix, else `_Hypnogram_remapped.txt` when the study already has it, else `_hypno_remapped.txt`. *Save files* records `hypnogram_scored` (the input suffix, when one is set) and `hypnogram_remapped` in the names registry.
 
 **Key constants:**
 - `DEFAULT_MAPPING`: `0→W`, `1→N1`, `2→N2`, `3→N3`, `4→N3`, `5→R`, `?→W`, `S1→N1`…
@@ -1245,7 +1284,8 @@ button that reloads the written files. Until then a section shows *Complete sect
 - `ACCEPTABLE_LABELS`: `STANDARD_LABELS | {MT}`, used for AASM compliance warnings (MT = movement time is tolerated)
 
 **Outputs**:
-- One `.txt` file per participant with the output suffix (e.g. `_Hypnogram_remapped.txt`), one label per line
+- One `.txt` file per participant with the output suffix (`_hypno_remapped.txt` in a new study, `_Hypnogram_remapped.txt` in a study begun before 2026-11-03), one label per line
+- `config_param/file_names.json` (names registry): the suffixes read and written
 - `mid_uncertain_epochs_to_verify.tsv`, written to `<study_folder>/` at scan time when mid-recording `?` epochs or unexpected labels are found. Columns: `participant_id`, `epoch_index`, `epoch_time_sec`, `total_epochs`, `original_label` (`?` for mid-recording unscored epochs, or the raw unexpected label e.g. `U`, `M`), `context` (±5 epochs), `corrected_label`. Updated with all corrections after *Save corrections and continue* is clicked. If the file already exists at scan time it is loaded and applied in memory instead of being overwritten. The pre-loaded corrections are shown in a summary panel (as `ep.N: old→new`) and also appear **pre-filled** in the Section 2 review widget (flags are computed on the original labels, so they are not hidden). Corrections whose `original_label` no longer matches the current hypnogram value (re-scored since the TSV was written) are flagged as conflicts and shown in a warning panel in Section 2.
 
 - `config_param/custom_stages.json`: written/merged when the user keeps non-AASM labels as custom stages (see *Custom (non-AASM) stages* above). A flat `{"custom_stages": [...]}` list consumed by tools 0/6/7/8.
@@ -1311,8 +1351,9 @@ probabilities are averaged over each 30-s epoch from t = 0 (overlap weights) for
 
 **Outputs per model** (`<algo>` = `gssc`, `yasa`, `sleepfm`; GSSC's below, unchanged except the added
 `eeg_reference` field and report row): `{id}{output suffix}` beside the EDF (suffix widgets `out_suffix`,
-`out_suffix_yasa`, `out_suffix_sleepfm`: `_hypnogram_<algo>.txt`; the run refuses two equal suffixes or one equal
-to the expert's), `derivatives/autoscoring_<algo>/` and `reports_autoscoring_<algo>/` with the same files and
+`out_suffix_yasa`, `out_suffix_sleepfm`: `_hypno_<algo>.txt` in a new study, the former `_hypnogram_<algo>.txt` or
+the recorded one kept in a study that has it; the run refuses two equal suffixes or one equal to the expert's; the
+suffix of each model that wrote at least one hypnogram is recorded in `config_param/file_names.json`), `derivatives/autoscoring_<algo>/` and `reports_autoscoring_<algo>/` with the same files and
 columns as GSSC's (`stage_<algo>`, `n_epochs_<algo>`, the long confusion's `<algo>` column, `pct_<algo>_*`; no
 `winning_combination`), their own database report and `failed_autoscoring.tsv`. YASA's / SleepFM's
 `_scoring_params.json` record the channels used, the reference, the versions (SleepFM: commit, folder, tail
@@ -1399,8 +1440,9 @@ reading helpers (`drop_suffix_duplicates`, `adapt_remap_dict_to_suffixes`, `read
 
 **Inputs**: the EDF files (recursive scan of the study folder), tool 2's
 `<study>/config_param/remap_reref_persubject.json` (required: an EDF absent from it is listed and not
-scored) and, optionally, the expert hypnogram (tool 3 format). The expert suffix is auto-detected with the
-tools 6/7 rule (longest among ≥ 50 %), skipping `event` / `summary` / `studylog` and the output suffix;
+scored) and, optionally, the expert hypnogram (tool 3 format). The expert suffix is pre-chosen like tools 6/7
+(`pick_hypno_suffix`, intent `expert`: the name tool 3 recorded, else the longest among ≥ 50 %), the exports, the
+toolkit's hypnograms and the three output suffixes set aside (the output suffixes are pre-filled first);
 empty or missing file = scored without comparison (non-fatal).
 
 **Signals**: EEG = tool 2's harmonized names minus the reference channels and EOG-like names
@@ -1475,7 +1517,7 @@ out; the nights with an unknown start go to a separate figure on the relative ax
 rescore; database tables rebuilt by globbing the per-file tables, **excluding the `global_*` files**, which
 share the `_confusion.tsv` / `_custom_stages.tsv` suffixes and would otherwise be counted again; the run
 refuses an output suffix equal to the expert one):
-- beside the EDF: `{id}{output suffix}` (default `_Hypnogram_gssc.txt`), one label per line, tool-3
+- beside the EDF: `{id}{output suffix}` (default `_hypno_gssc.txt`, formerly `_hypnogram_gssc.txt`), one label per line, tool-3
   format, so tools 5–9 can use it through their hypnogram suffix.
 - `derivatives/autoscoring_gssc/<subtree>/{id}_hypnodensity.tsv`: `file_id, epoch_idx, onset_s,
   stage_gssc, p_W, p_N1, p_N2, p_N3, p_R, confidence` (max probability), `winning_combination`,
@@ -1555,9 +1597,9 @@ reports. The output folder names (`DATA_DIRNAME`, `REPORTS_DIRNAME`) stay in the
 output-neutral (`refactor_check`, whole chain, both datasets). Edit the library for any metric or policy.
 
 **Inputs and what is never read.** Per EDF (recursive scan of the study folder, `file_id` = EDF stem):
-the remapped hypnogram `{file_id}<hypno suffix>` (one label per line, suffix auto-detected with the
-tool-7 rule (longest suffix among those present for ≥ 50 % of the max count) additionally excluding
-`summary` and `studylog` exports from the selection), the scored events through **tool 7's `load_events`
+the remapped hypnogram `{file_id}<hypno suffix>` (one label per line, suffix pre-chosen with tool 7's rule,
+`study_files_lib.pick_hypno_suffix`: the name tool 3 recorded, else the longest suffix among those present for
+≥ 50 % of the max count, the exports and the toolkit's hypnograms set aside), the scored events through **tool 7's `load_events`
 chain** (`edf_io_lib`, TXT → CSV → `.edf.XML`, the `.txt` clock times converted with
 `read_edf_start_datetime`), and the **EDF header only**: `read_edf_header_info()` is a hand-written
 binary read of the fixed header (offsets 168/176 start date-time with the 2-digit-year rule, 184 header
@@ -1896,7 +1938,7 @@ raw run and a prepared run side by side (an output-folder suffix) is a planned f
 
 **EDF scan**: recursive (`rglob('*.edf')`), so datasets organized in subfolders (e.g. `group1/`, `group2/`) are fully covered without needing to run the tool per subfolder.
 
-**Hypnogram suffix auto-detection** (see *Cross-cutting procedures*): tools 6 and 7 prefer the **longest** suffix among candidates appearing for ≥ 50% of the maximum count (more specific = remapped/processed version, count breaks ties on equal length). The 50% threshold prevents a rare accidental long suffix from winning when remapping is far from complete.
+**Hypnogram suffix auto-detection** (see *Cross-cutting procedures*): tools 6 and 7 pre-choose the name tool 3 recorded in `config_param/file_names.json`, else the **longest** suffix among candidates appearing for ≥ 50% of the maximum count (more specific = remapped/processed version, count breaks ties on equal length), the exports and the toolkit's hypnograms set aside. The 50% threshold prevents a rare accidental long suffix from winning when remapping is far from complete. Nothing left: the field stays empty with an orange note.
 
 **Live output warnings**: if a hypnogram is not found, fails to load, has a length mismatch with the EDF, or contains unrecognised stage labels, a plain-text `⚠` warning is printed in the notebook output area immediately after the per-participant result line (in addition to the yellow banner already shown in the HTML report's Overview section).
 
@@ -1997,7 +2039,7 @@ only if a notebook block it matches changed.
   from `<study>/config_param/`, the registry goes to `<output>/config_param/`.
 - `quality_summary.tsv` from Phase 1: **optional** (strongly encouraged). Its `exclude` column pre-fills the per-channel drop selection. Its `FileChooser` shows only `quality_summary.tsv` (`filter_pattern`), not the per-file `*_quality_metrics.tsv` that quality_overview also writes in that folder.
 - `remap_reref_persubject.json` from `2_select&remap_channels_edf`: drives channel remapping and re-referencing per participant, **and is the fallback channel source** for participants absent from `quality_summary.tsv` (see *Section 3 discovery* below)
-- Raw EDF files and remapped hypnograms (default suffix `_Hypnogram_remapped.txt`)
+- Raw EDF files and remapped hypnograms (suffix pre-chosen, see above: `_hypno_remapped.txt` or `_Hypnogram_remapped.txt`)
 
 **Section 3 participant discovery (EDF folder = ground truth)**: the participant list is built from the **EDF files on disk** (`fc_edf` folder, recursive), *not* from `quality_summary.tsv`, so a recording present on disk with a config entry is never hidden just because it is missing from the QC file. Per participant, the channel list + `exclude` pre-selection comes from `quality_summary.tsv` if present, else from the config **`remap` values** (remapped names, nothing pre-excluded), else empty (shown, flagged *not found in JSON config*, unchecked). `quality_summary.tsv` is optional (removed from the Run guard). When absent or partial, `load_info` surfaces `⚠` warnings for every discrepancy: EDF-count vs quality-count, EDFs missing from quality (loaded from config), EDFs missing from config (unprocessable), and stale quality entries with no EDF on disk. All cross-source id matching is `os.path.normcase`-wrapped at the comparison only.
 
@@ -2884,24 +2926,9 @@ The selected value must stay the one the run reads (the tests drive `hypno_suffi
 keep those names or adapt the tests). Touches the six notebooks, the Curry twins / generators of tools 3, 4, 6, 7
 and the tests that set these widgets.
 
-**The toolkit's own hypnograms must not win the auto-selection** (user report, 2026-11-02). Tool 3bis writes
-`{id}_hypnogram_<algo>.txt` (gssc / yasa / sleepfm, or the suffixes set in its Section 1) and tool 0 writes
-`<hypnogram>_rescored.txt` next to the recordings. Both are candidate `.txt` suffixes, so "shortest" (tool 3) or
-"longest" (tools 3bis, 5, 6, 7) picks them instead of the expected file: tool 3 takes `_hypnogram_gssc.txt` (19
-characters) over `_Hypnogram_Export.txt` (21), the others take `_Hypnogram_remapped_rescored.txt` over
-`_Hypnogram_remapped.txt`. Same split as the event `.txt` exclusion (*Hypnogram-suffix auto-detection*): they
-stay in the displayed list (and can be chosen, e.g. to run the chain on an automatic or rescored hypnogram) but
-are left out of the automatic choice, and the choice states its intent: tool 3 wants the raw export, tools 3bis
-(expert hypnogram), 5, 6, 7 and 0 want the remapped one. One shared helper (e.g. `pick_hypno_suffix(counts,
-intent)` in `edf_io_lib`) instead of six copies of the rule, and a test with these files present.
-
-**Shorter default names, at the same time** (user request, 2026-11-02): tool 3bis's default output suffixes become
-`{id}_hypno_<algo>.txt` (instead of `{id}_hypnogram_<algo>.txt`), and tool 3's default output suffix
-`{id}_hypno_remapped.txt` (instead of `{id}_Hypnogram_remapped.txt`), so the read side defaults of tools 3bis, 5,
-6, 7, 0 follow. Defaults only: the suffix fields stay editable and the auto-detection keeps finding the existing
-`_Hypnogram_remapped.txt` / `_hypnogram_<algo>.txt` files of the studies already processed (the helper above must
-recognise both spellings). Also to update: the synthetic test data and the goldens that carry these names, the
-test runners that set the suffixes, SPEC (§3, §3bis and every tool that cites them) and the tutorials.
+Phase 2 of `tools/plan_file_selection.md`. Its phase 1 is done (2026-11-03): the toolkit's own hypnograms no
+longer win the pre-choice, the names registry `config_param/file_names.json` and the short default names
+(*Cross-cutting → Names registry* and *Hypnogram-suffix auto-detection*).
 
 ### Database organisation inferred by tool 1 (TODO, audit first)
 

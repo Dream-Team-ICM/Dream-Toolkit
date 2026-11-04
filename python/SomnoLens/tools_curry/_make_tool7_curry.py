@@ -199,57 +199,14 @@ replace_in_cell(ui_paths,
     "curry_files = [f for f in sorted(curry_folder.rglob('*')) if f.suffix == '.cdt' and not f.name.startswith('._')]",
     "cell4 discovery #2")
 
-# 4c. Event detection: the EDF source now has TWO passthrough blocks (TXT export + CSV) plus two
-# suffix widgets, both suitable for Curry as-is (TXT default _ScoredEvents_Export.txt, CSV default
-# _event_xml.csv — some Curry datasets also ship a CSV). Only the outer loop variable is migrated
-# (edf -> cdt) so each block scans the .cdt stems; the file scans (edf_folder.rglob) and file
-# lists (edf_files) are handled by the global renames below.
-replace_in_cell(ui_paths,
-    "        for edf in edf_files:\n"
-    "            for t in all_txt_evt:\n"
-    "                if os.path.normcase(t.name).startswith(os.path.normcase(edf.stem)):\n"
-    "                    suf = t.name[len(edf.stem):]\n",
-    "        for cdt in curry_files:\n"
-    "            for t in all_txt_evt:\n"
-    "                if os.path.normcase(t.name).startswith(os.path.normcase(cdt.stem)):\n"
-    "                    suf = t.name[len(cdt.stem):]\n",
-    "cell4 TXT detection loop var")
-replace_in_cell(ui_paths,
-    "        for edf in edf_files:\n"
-    "            for c in all_csv:\n"
-    "                if os.path.normcase(c.name).startswith(os.path.normcase(edf.stem)):\n"
-    "                    suf = c.name[len(edf.stem):]\n",
-    "        for cdt in curry_files:\n"
-    "            for c in all_csv:\n"
-    "                if os.path.normcase(c.name).startswith(os.path.normcase(cdt.stem)):\n"
-    "                    suf = c.name[len(cdt.stem):]\n",
-    "cell4 CSV detection loop var")
+# 4c. Event and hypnogram suffix detection: format-agnostic, passes through. The EDF source counts the
+# companions with study_files_lib.companion_suffix_counts (file names only, a .cdt stem works the same) and
+# pre-chooses the hypnogram with study_files_lib.pick_hypno_suffix (the event / summary / study-log exports are
+# set aside from the PRE-CHOICE only, every .txt stays listed: see SPEC, Hypnogram-suffix auto-detection). The
+# file scans (edf_folder.rglob) and file lists (edf_files) are handled by the global renames below.
 # Both event-detection else branches say "next to the EDF files" -> ".cdt files".
 replace_all_cells("next to the EDF files", "next to the .cdt files",
                   "event detection EDF-files text", required=False)
-
-# 4d. Hypno suffix detection: migrate loop var names only.
-# The event-export exclusion is NOT done here any more: the EDF source now excludes 'event'
-# suffixes from the AUTO-SELECTION itself (and keeps every .txt in the displayed list), so it
-# passes through to the twin. Filtering all_txt here would additionally hide the event export
-# from the displayed candidate list, which we want visible. See SPEC, Hypnogram-suffix
-# auto-detection.
-replace_in_cell(ui_paths,
-    "        all_txt = [f for f in edf_folder.rglob('*') if f.suffix.lower() == '.txt']\n"
-    "        suffix_counts = {}\n"
-    "        for edf in edf_files:\n"
-    "            for txt in all_txt:\n"
-    "                if os.path.normcase(txt.name).startswith(os.path.normcase(edf.stem)):\n"
-    "                    suffix = txt.name[len(edf.stem):]\n"
-    "                    suffix_counts[suffix] = suffix_counts.get(suffix, 0) + 1\n",
-    "        all_txt = [f for f in curry_folder.rglob('*') if f.suffix.lower() == '.txt']\n"
-    "        suffix_counts = {}\n"
-    "        for cdt in curry_files:\n"
-    "            for txt in all_txt:\n"
-    "                if os.path.normcase(txt.name).startswith(os.path.normcase(cdt.stem)):\n"
-    "                    suffix = txt.name[len(cdt.stem):]\n"
-    "                    suffix_counts[suffix] = suffix_counts.get(suffix, 0) + 1\n",
-    "cell4 hypno detection")
 
 # 4d2. Docstring mentioning "EDF folder"
 replace_in_cell(ui_paths,

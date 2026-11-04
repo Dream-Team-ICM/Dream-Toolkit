@@ -1,6 +1,6 @@
 # Plan : sélection automatique des fichiers (hypnogrammes, entrées, dossiers)
 
-Statut : annoté et répondu le 2026-11-03, à confirmer avant l'implémentation. Remplace, une fois fait, les deux
+Statut : phase 1 faite le 2026-11-03 (§4) ; phases 2 et 3 à faire. Remplace, une fois fait, les deux
 points de SPEC *Planned modules* « Companion suffixes chosen from the detected ones, in the batch tools » et « File
 selection pointed at the expected files ».
 
@@ -67,10 +67,11 @@ La règle de choix de l'hypnogramme est recopiée dans six outils (0, 3, 3bis, 5
 
 ### 4.1 Comptage corrigé
 
-`companion_suffix_counts(recordings, files)` : un fichier n'est compté que **dans le dossier de son enregistrement**
-(les outils lisent `<dossier de l'enregistrement>/<nom><suffixe>`), et pour l'enregistrement **au nom le plus long**
-qui le préfixe (`10_Hypnogram_remapped.txt` va à `10`, jamais à `1`). Seul le nom compte, donc la fonction sert
-aussi aux jumeaux Curry (`.cdt`).
+`companion_suffix_counts(recordings, files)` : un fichier est compté pour l'enregistrement **au nom le plus long**
+qui le préfixe (`10_Hypnogram_remapped.txt` va à `10`, jamais à `1`). Le dossier n'est pas comparé (correction du
+2026-11-03, pendant l'implémentation) : les outils 5, 6 et 7 retrouvent un hypnogramme n'importe où dans l'étude
+par son nom de fichier, donc une étude qui range ses hypnogrammes dans un autre dossier doit rester détectée. Seul
+le nom compte, donc la fonction sert aussi aux jumeaux Curry (`.cdt`).
 
 ### 4.2 Le registre des noms : `config_param/file_names.json`
 

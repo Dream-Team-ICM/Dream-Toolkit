@@ -1,5 +1,6 @@
 """The rules of tools/edf_io_lib.py, lifted from the batch tools (tool-0 redesign): the hypnogram length
-rule and the companion-suffix choices of tool 7, the context-channel guess of tool 2, tool 1's header table."""
+rule of tool 7, the context-channel guess of tool 2, tool 1's header table. (The companion-suffix choices moved
+to study_files_lib: tests/test_study_files_lib.py.)"""
 import sys
 from pathlib import Path
 
@@ -22,18 +23,6 @@ def test_hypnogram_length_rule_of_tool7():
 def test_mid_recording_question_marks_of_tool3():
     hyp = ['?'] * 3 + ['W'] * 20 + ['?'] + ['N2'] * 20 + ['?'] * 2
     assert EIO.mid_recording_unscored(hyp) == [23]         # the ones near both ends are lights off / on
-
-
-def test_hypnogram_suffix_prefers_the_most_specific_and_never_an_event_export():
-    edfs = [Path(f'p{i}.edf') for i in range(4)]
-    txt = ([Path(f'p{i}_Hypnogram_Export.txt') for i in range(4)]
-           + [Path(f'p{i}_Hypnogram_remapped.txt') for i in range(3)]
-           + [Path(f'p{i}_ScoredEvents_Export.txt') for i in range(4)])
-    counts = EIO.companion_suffix_counts(edfs, txt)
-    assert EIO.select_hypno_suffix(counts) == ('_Hypnogram_remapped.txt', 3)   # >= 50 % of 4, longest
-    assert EIO.select_hypno_suffix({'_ScoredEvents_Export.txt': 4}) == ('_ScoredEvents_Export.txt', 4)
-    assert EIO.select_hypno_suffix({}) == (None, 0)
-    assert EIO.select_event_suffix({'_event_xml.csv': 4, '_ev.csv': 4, '_x.csv': 1}) == ('_ev.csv', 4)
 
 
 def test_context_channels_guess_of_tool2():

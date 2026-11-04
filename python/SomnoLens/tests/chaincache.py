@@ -36,11 +36,13 @@ LIB_MACRO, LIB_EIO = TOOLS / 'macrostructure_lib.py', TOOLS / 'edf_io_lib.py'
 LIB_QUAL, LIB_PREP = TOOLS / 'quality_lib.py', TOOLS / 'preprocessing_lib.py'
 LIB_AR, LIB_SPEC = TOOLS / 'autoreject_lib.py', TOOLS / 'spectral_lib.py'
 LIB_UI = TOOLS / 'ui_lib.py'                 # the look of the Voila pages (every tool imports it)
+LIB_SF = TOOLS / 'study_files_lib.py'        # the names registry and the choice of the companion files
 TOOL_DEPS = {
-    '5': [TOOLS / '5_compute_sleep_macrostructure_voila.ipynb', LIB_PSL, LIB_MACRO, LIB_EIO, LIB_QUAL, LIB_UI],
+    '5': [TOOLS / '5_compute_sleep_macrostructure_voila.ipynb', LIB_PSL, LIB_MACRO, LIB_EIO, LIB_QUAL, LIB_UI,
+          LIB_SF],
     '5bis': [TOOLS / '5bis_exclude_sleep_macrostructure_voila.ipynb', LIB_PSL, LIB_MACRO, LIB_EIO, LIB_UI],
-    '6': [TOOLS / '6_quality_overview_voila.ipynb', LIB_PSL, LIB_QUAL, LIB_UI],
-    '7': [TOOLS / '7_preprocessing_voila.ipynb', LIB_PSL, LIB_PREP, LIB_EIO, LIB_UI],       # the libraries import edf_io_lib
+    '6': [TOOLS / '6_quality_overview_voila.ipynb', LIB_PSL, LIB_QUAL, LIB_UI, LIB_SF],
+    '7': [TOOLS / '7_preprocessing_voila.ipynb', LIB_PSL, LIB_PREP, LIB_EIO, LIB_UI, LIB_SF],   # the libraries import edf_io_lib
     '8bis': [TOOLS / '8bis_reject_automatically_voila.ipynb', LIB_PSL, LIB_QC, LIB_PREP, LIB_AR, LIB_EIO, LIB_UI],
     '8': [TOOLS / '8_reject_manually_voila.ipynb', LIB_PSL, LIB_QC, LIB_PREP, LIB_EIO, LIB_UI],
     '9': [TOOLS / '9_spectral_features_voila.ipynb', LIB_PSL, LIB_SPEC, LIB_EIO, LIB_UI],

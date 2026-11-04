@@ -72,6 +72,14 @@ The "what to do / what not to break" reminders, grouped by theme. Each points to
   optional, default = study folder, ⚠ when different (tool 7 `out_root_path()`). Tool 1bis is the exception
   (original EDF folder, outside the study). Tool 1 writes `reports_inspection/`. Variable names (`fc_data`,
   `data_root`, `find_data_folder`) stay: the tests drive widgets by name.
+- **Companion suffixes + names registry = `tools/study_files_lib.py`** (no EDF reading, imported next to `ui_lib`):
+  the hypnogram pre-choice of tools 0, 3, 3bis, 5, 6, 7 is **one function**, `pick_hypno_suffix` (intent `scored`
+  for tool 3, `expert` elsewhere): never re-implement it in a notebook. Each tool notes the names it **wrote** in
+  `config_param/file_names.json` (only its own keys, never at a scan, an unreadable file never overwritten); the
+  pre-choice follows them first, and never pre-chooses a hypnogram the toolkit wrote (3bis, tool 0's `_rescored`).
+  A study keeps its names (`output_suffix`): the short defaults `_hypno_remapped.txt` / `_hypno_<algo>.txt` are for
+  new studies, the test data keep the former ones. → SPEC *Cross-cutting → Names registry* + *Hypnogram-suffix
+  auto-detection*.
 - **Scored events (`load_events`)**: tool 4 reads three Compumedics companions **TXT-first**: the
   `*_ScoredEvents_Export.txt` text export (French, UTF-16-or-UTF-8, no header, clock-time, parsed inline like
   `curry_io._parse_events_txt`), then `*_event_xml.csv`, then the `<ScoredEvents>` of `*.edf.XML`. The scan
