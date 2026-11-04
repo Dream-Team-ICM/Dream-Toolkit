@@ -285,12 +285,15 @@ def fit_settings_diff(cfg, side):
 
 
 def load_subject_info(path):
-    """Read the optional participant-info table (.csv/.tsv). Returns (DataFrame, error)."""
+    """Read the optional participant-info table (.csv/.tsv/.xlsx). Returns (DataFrame, error)."""
     if not path:
         return None, ''
     try:
-        sep = '\t' if norm(path).endswith('.tsv') else None
-        df = pd.read_csv(path, sep=sep, engine='python')
+        if norm(path).endswith(('.xlsx', '.xls')):
+            df = pd.read_excel(path)
+        else:
+            sep = '\t' if norm(path).endswith('.tsv') else None
+            df = pd.read_csv(path, sep=sep, engine='python')
         return df, ''
     except Exception as exc:
         return None, str(exc)

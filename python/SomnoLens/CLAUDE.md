@@ -33,7 +33,8 @@ The "what to do / what not to break" reminders, grouped by theme. Each points to
   the header scan, **not** the raw-based `detect_channel_types`). It **must tolerate a missing `transducer_type`
   column** so the generated Curry twin still works (name-only there). Auto-detected into editable dropdowns
   (`(none)` if absent), fanned out to participants like `remap`/`ref_channels`, and saved in an **additive,
-  optional** `context_channels` block of `remap_reref_persubject.json` (**omitted when empty** → JSONs
+  optional** `context_channels` block of the channel configuration (`channel_config.json`; a study keeps
+  `remap_reref_persubject.json`, **`study_files_lib.find_input`** finds either) (**omitted when empty** → JSONs
   without context stay byte-identical). Analysis tools 6/7 ignore it. Only tools that explicitly ask (e.g.
   tool 8's per-epoch inspector) load these channels on demand. The Curry
   twin is **regenerated** via `tools_curry/_make_tool2_curry.py` (new code passes through, no generator
@@ -60,18 +61,34 @@ The "what to do / what not to break" reminders, grouped by theme. Each points to
   figures) use the kept data. Participant exclusions live in **one registry**
   (`config_param/participant_exclusions.tsv`, `tools/participant_selection_lib.py`, shared module): each tool
   rewrites **only its own `source` rows**, a forced inclusion (5bis manual) overrides every exclusion, an
-  unreadable registry is never overwritten, identical rows are never rewritten (its date = "a decision
-  changed"). A registry change reaches a tool's tables at its next run (Skip ticked = rebuild only); tools
-  6/7/8bis/9 warn at scan when the registry is newer than their tables (`registry_newer_than`). Epoch / channel decisions are **tables** (`derivatives/rejection_auto|manual/`
+  unreadable registry is never overwritten, identical rows are never rewritten. A decision of 5bis holds for the
+  study, one taken from tool 7 on belongs to its run (*Runs of tool 7* below). A registry change reaches a tool's tables
+  at its next run (Skip ticked = rebuild only); tools 6/7/8bis/9 warn at scan when their tables do not say what the
+  registry says (`tables_out_of_date`: the contents are compared, not the dates). Epoch / channel decisions are **tables** (`derivatives/rejection_auto|manual/`
   `_epoch_decision.tsv` + `_channel_decision.tsv`): **no `clean-epo.fif` any more**, tool 9 joins them to
   tool 7's `_all-epo.fif`. Tools 5/6/7/8bis/9 use the shared **`ParticipantSelector`** (all / subset;
   Skip applies to a subset too, with an orange warning box), never one checkbox per participant.
 - **Study folder = the root picker** (→ SPEC *How to run → Study folder layout*): every tool's first
   picker says **Study folder** (never "data folder": `data/` is where the recordings sit), the root holding
-  `config_param/`, `derivatives/`, `reports_*/`; recordings are scanned recursively. Tools 5/7: output folder
+  `config_param/`, `derivatives/`, `reports_*/`; recordings are scanned recursively. It is the only picker to use: each
+  tool finds the rest (`study_files_lib`, *Inputs found*; a test that drives a picker still wins, *Choose another…*). Tools 5/7: output folder
   optional, default = study folder, ⚠ when different (tool 7 `out_root_path()`). Tool 1bis is the exception
   (original EDF folder, outside the study). Tool 1 writes `reports_inspection/`. Variable names (`fc_data`,
   `data_root`, `find_data_folder`) stay: the tests drive widgets by name.
+- **Runs of tool 7 (→ SPEC *Cross-cutting → Runs of tool 7*)**: a run = `derivatives/preproc_epo<suffix>/` +
+  `reports_preproc<suffix>/`, the first one without a suffix, so **a study with one run stays byte-identical**. Tool 7's
+  *New version* (a box under Skip, never an *Overwrite*: reprocessing = Skip unticked) writes `_v2`; tools 8, 8bis, 9
+  put the suffix (`SF.run_suffix`) on every output and on their registry sources (`8bis_auto_v2`), and read
+  `PSL.effective_status(reg, run)` (5bis rows + the run's own). A new output folder or a new registry source of these
+  tools carries the suffix too.
+- **Companion suffixes + names registry = `tools/study_files_lib.py`** (no EDF reading, imported next to `ui_lib`):
+  the hypnogram pre-choice of tools 0, 3, 3bis, 5, 6, 7 is **one function**, `pick_hypno_suffix` (intent `scored`
+  for tool 3, `expert` elsewhere): never re-implement it in a notebook. Each tool notes the names it **wrote** in
+  `config_param/file_names.json` (only its own keys, never at a scan, an unreadable file never overwritten); the
+  pre-choice follows them first, and never pre-chooses a hypnogram the toolkit wrote (3bis, tool 0's `_rescored`).
+  A study keeps its names (`output_suffix`): the short defaults `_hypno_remapped.txt` / `_hypno_<algo>.txt` are for
+  new studies, the test data keep the former ones. → SPEC *Cross-cutting → Names registry* + *Hypnogram-suffix
+  auto-detection*.
 - **Scored events (`load_events`)**: tool 4 reads three Compumedics companions **TXT-first**: the
   `*_ScoredEvents_Export.txt` text export (French, UTF-16-or-UTF-8, no header, clock-time, parsed inline like
   `curry_io._parse_events_txt`), then `*_event_xml.csv`, then the `<ScoredEvents>` of `*.edf.XML`. The scan
@@ -168,7 +185,9 @@ The "what to do / what not to break" reminders, grouped by theme. Each points to
   + References, `section_html` / `subsection_html` (continuous numbering), message colours, buttons by role
   (`run` / `save` green, `read` blue = **Scan** as the entry button, `caution`, `helper`), widths, `picker_title`
   / `help_html` / `text_block` (a long widget text needs one: a widget HTML spaces wrapped lines by 28 px),
-  progress bars. **No button that only reveals widgets**: a section builds itself after the step it
+  progress bars, suffix menus (`suffix_menu`: the field stays what the tool reads), the **Inputs found** list
+  (`input_row`: the study folder is the only picker to use, the tool finds the rest, **the picker stays what the run
+  reads**), the **Advanced** box (`advanced_box`). **No button that only reveals widgets**: a section builds itself after the step it
   needs (`waiting_html` until then). A new page or widget follows it; `tests/test_ui_lib.py` guards the pages.
   → SPEC *Cross-cutting → Voila page conventions*.
 
@@ -237,8 +256,8 @@ The "what to do / what not to break" reminders, grouped by theme. Each points to
   consistently across tool 7 → context companion → sidecar → tools 8/8bis/`qc_rejected_epochs_lib` (re-run the
   Curry generator). → SPEC §7 *Epoching (configurable epoch length)*.
   **Output location**: tool 7 writes its `.fif`/sidecar/context under **`derivatives/preproc_epo/<subtree>/`**
-  (sibling of tool 8's `rejection_manual/` and 8bis's `rejection_auto/`), and deletes stale same-id copies at
-  the old `derivatives/<subtree>/` location on reprocess. A former `derivatives/raw_epo/` is renamed once
+  (+ the suffix of a later run; sibling of tool 8's `rejection_manual/` and 8bis's `rejection_auto/`), and deletes stale
+  same-id copies at the old `derivatives/<subtree>/` location on reprocess (first run only). A former `derivatives/raw_epo/` is renamed once
   at Run (the former `reports_preprocessing/` is not migrated): the remaining `'raw_epo'` strings in tool 7 are
   that migration, keep them. → SPEC §7 *Migration notes*.
   **Deselected channels are kept as `bads`** (→ SPEC §7): in the `.fif` and the sidecar (`bad_channels`),
@@ -258,8 +277,8 @@ The "what to do / what not to break" reminders, grouped by theme. Each points to
   editing the `[H]` block.
 - **Manually reject flagged epochs (`8_reject_manually*`)**: reads tool-7 `{file_id}_all-epo.fif`
   (+ optional params JSON), **never reloads the raw EDF**, **never modifies tool-7 outputs**. **Section 1 =
-  optional study folder + Preprocessed-epochs folder** (like 8bis **minus** the reports picker: tool 8 never reads
-  `reports_preproc/`). `find_participants` runs on the chosen epochs folder so versioned tool-7 runs stay
+  the study folder; the run of tool 7 is found from it** (like 8bis, the reports folder paired by name is optional here).
+  `find_participants` runs on the chosen epochs folder so versioned tool-7 runs stay
   apart on the participant dropdown. `data_root` = the selected study folder, else the `derivatives/`
   ancestor's parent. An **"already processed" badge** (`_epoch_decision.tsv` **and** a review/decision TSV on
   disk) is informative only: it blocks nothing. The **Exclude this participant** button writes `8_manual`.
@@ -316,8 +335,8 @@ The "what to do / what not to break" reminders, grouped by theme. Each points to
   `methods_used`/`event_types_used`/`excluded`/`exclude_reason`. Run tally gains `excluded`. Still format-agnostic → **Curry twin stays a
   verbatim copy** (re-run `_make_tool8bis_curry.py`). **The decision rule, its tables and figures =
   `tools/autoreject_lib.py`** (shared with tool 0's step 7; the twin imports it through the qc-lib probe): edit the
-  library, never the notebook. → SPEC §8bis *Shared library*. **Section 1 = two explicit folder pickers (preprocessed-epochs + reports) + a Scan button**
-  (+ an optional data-folder chooser that pre-points them): *not* one root scanned recursively, so
+  library, never the notebook. → SPEC §8bis *Shared library*. **Section 1 = the study folder, the run of tool 7 found from it (preprocessed-epochs + reports paired by name, a menu with several runs) + a Scan button**:
+  *not* one root scanned recursively, so
   renamed/versioned tool-7 runs (`preproc_epo_v2`, `reports_preproc_v2`) stay apart. **Data/reports split**:
   `_epoch_decision.tsv` + `_channel_decision.tsv` → **`rejection_auto/`** (`raw_root.parent/…`, beside the raw
   folder; 8bis no longer reads the `.fif`). `_autoreject_decision.tsv` (durable record + global-summary source, written **before**
@@ -327,7 +346,7 @@ The "what to do / what not to break" reminders, grouped by theme. Each points to
   All-channels-/all-epochs-rejected → still get tables + row + report (100 % in the summary). See SPEC §8bis.
 
 - **Spectral features (`9_spectral_features_voila`)**: first **feature tool**: it reads tool 7's `_all-epo.fif`
-  + a tool 8/8bis decision folder, never the raw, and computes **every** epoch and channel (aggregates over the
+  + a tool 8/8bis decision folder (the most recent pre-chosen from the study folder, `none` in its menu), never the raw, and computes **every** epoch and channel (aggregates over the
   kept epochs). It saves `_psd_epoch.npz` so **Re-aggregate only** rebuilds everything after a decision change
   without PSD / fit; `finish_participant` is shared by both paths. Night thirds span the whole night. Tool 7's params sidecar is **provenance only** (auto-located, absence
   non-fatal). Three invariants: the **PSD smoothing feeds the specparam fit only** (band powers always use

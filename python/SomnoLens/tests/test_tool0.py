@@ -132,7 +132,8 @@ def test_step1_hypnogram_chosen_by_hand(chain, tmp_path):
 def test_explorer_writes_only_its_own_files(chain, tmp_path):
     """Rescoring and annotations are written beside the recording in the documented files (the annotation in
     tool 8's format, readable by tool 7's event chain); the inspection log + report go to
-    reports_live_explore/; nothing else in the study is created or modified."""
+    reports_live_explore/; the rescored suffix is noted in config_param/file_names.json (so the batch tools never
+    pre-choose it); nothing else in the study is created or modified."""
     study = study_copy(chain, tmp_path / 'study')
     fid = minidb.PARTICIPANTS[chain['dataset']][0]
     before = {p: (p.stat().st_size, p.stat().st_mtime_ns) for p in study.rglob('*') if p.is_file()}
@@ -157,7 +158,7 @@ def test_explorer_writes_only_its_own_files(chain, tmp_path):
     after = {p for p in study.rglob('*') if p.is_file()}
     hyp = study / f'{fid}_Hypnogram_remapped.txt'
     expected = {hyp.with_name(f'{hyp.stem}_rescored.txt'), hyp.with_name(f'{hyp.stem}_rescore_log.tsv'),
-                study / f'{fid}_manual_events.tsv',
+                study / f'{fid}_manual_events.tsv', study / 'config_param' / 'file_names.json',
                 study / 'reports_live_explore' / f'{fid}_inspection_log.tsv',
                 study / 'reports_live_explore' / f'{fid}_inspection_report.html'}
     assert after - set(before) == expected
@@ -168,6 +169,8 @@ def test_explorer_writes_only_its_own_files(chain, tmp_path):
     assert rescored[10] == new and (rescored != original).sum() == 1
     log = pd.read_csv(hyp.with_name(f'{hyp.stem}_rescore_log.tsv'), sep='\t')
     assert log[['epoch_idx', 'original_label', 'new_label']].values.tolist() == [[10, old, new]]
+    names = json.loads((study / 'config_param' / 'file_names.json').read_text(encoding='utf-8'))
+    assert names['hypnogram_rescored']['value'] == ['_Hypnogram_remapped_rescored.txt']
     # the annotation: tool 8's table, read back by the shared loader and by tool 7's event chain
     man = L.load_manual_events(study, fid)
     assert man[['type', 'onset_s', 'epoch_idx', 'source']].values.tolist() == \

@@ -93,7 +93,7 @@ NEW_MD = (
     "- **Sections**: 1. Study folder (scan the events), 2. Event configurations found, 3. Harmonize the labels,\n"
     "  4. Preview & save the JSON, 5. Verify.\n"
     "\n"
-    "<details><summary>Details</summary>\n"
+    "<details style=\"border:1px solid #bbb; border-radius:4px; background:#f7f7f7; padding:8px 12px; margin:10px 0;\"><summary style=\"cursor:pointer; font-weight:bold;\">Details <span style=\"font-size:85%; font-weight:normal; color:#666;\">(click to open)</span></summary>\n"
     "\n"
     "The raw labels are the export strings (often in French, e.g. `Micro-éveil 1 ARO SPONT`). The canonical\n"
     "suggestions recognize the common French Compumedics/Curry labels (arousals, apnea, hypopnea, desaturation,\n"
@@ -307,7 +307,9 @@ replace_in_cell(code,
     'the <b>TXT suffix</b> field: default <code>_ScoredEvents_Export.txt</code>);\n'
     '<br>&#x2022; then the <b>CSV</b> <code>*_event_xml.csv</code> (suffix in the <b>CSV suffix</b> field);\n'
     '<br>&#x2022; then, as a fallback, the <code>&lt;ScoredEvents&gt;</code> of the <code>*.edf.XML</code>.\n'
-    '<br>&#x2022; Selecting the folder auto-detects both suffixes and refreshes the info lines below.\n'
+    '<br>&#x2022; Selecting the folder auto-detects both suffixes, finds the existing mapping (<b>Inputs found</b>;\n'
+    '<i>Choose another…</i> starts from another file, e.g. another cohort\'s) and refreshes the info lines below. The\n'
+    '<b>Advanced</b> box holds the name of the file Section 4 saves.\n'
     '<br>&#x2022; Click <b>Scan</b> to read the events and list the configurations.\n'
     '<br>&#x2022; "Skip labels already mapped" hides labels already present in an existing\n'
     '<code>event_remap.json</code> (incremental harmonization when you add a new cohort).</p>\n'
@@ -316,7 +318,9 @@ replace_in_cell(code,
     '<p>Pick the folder of your Curry (.cdt) database. Each .cdt is expected to have a Curry event\n'
     'text export next to it, whose suffix is set in the <b>Event export suffix</b> field below\n'
     '(default <code>_ScoredEvents_Export.txt</code>).\n'
-    '<br>&#x2022; Selecting the folder auto-detects the suffix and refreshes the info line below.\n'
+    '<br>&#x2022; Selecting the folder auto-detects the suffix, finds the existing mapping (<b>Inputs found</b>;\n'
+    '<i>Choose another…</i> starts from another file, e.g. another cohort\'s) and refreshes the info line below. The\n'
+    '<b>Advanced</b> box holds the name of the file Section 4 saves.\n'
     '<br>&#x2022; Click <b>Scan</b> to read the events and list the configurations.\n'
     '<br>&#x2022; "Skip labels already mapped" hides labels already present in an existing\n'
     '<code>event_remap.json</code> (incremental harmonization when you add a new cohort).</p>\n'
@@ -375,103 +379,75 @@ replace_in_cell(code,
     '        folder = Path(chooser.selected_path)\n'
     '        edfs = [f for f in folder.rglob("*") if f.suffix.lower() == ".edf" and not f.name.startswith("._")]\n'
     '        if not edfs:\n'
-    '            existing_info.value = UI.msg(\'warn\', \'No EDF files found in selected folder.\')\n'
+    "            existing_info.value = UI.msg('warn', 'No EDF files found in selected folder.')\n"
     '            csv_suffix_info.value = ""\n'
     '            txt_suffix_info.value = ""\n'
     '            return\n'
-    '        existing = load_existing_mapping(folder)\n'
+    '        existing = load_existing_mapping()\n'
     '        msg = f"<small>{len(edfs)} EDF file(s) found. "\n'
-    '        msg += (f"{len(existing)} label(s) already mapped in event_remap.json."\n'
-    '                if existing else "No existing event_remap.json yet.")\n'
-    '        existing_info.value = msg + "</small>"\n'
+    '        msg += (f"{len(existing)} label(s) already mapped."\n'
+    '                if existing else "No existing mapping yet.")\n'
+    '        existing_info.value = msg + "</small>" + mapping_note\n'
+    '        stems = [f.stem for f in edfs]\n'
     '        # --- Event TXT-export suffix auto-detection (Compumedics/Curry *_ScoredEvents_Export.txt) ---\n'
-    '        # Scan .txt files whose name contains \'event\' so hypnogram .txt files are not counted.\n'
+    "        # Scan .txt files whose name contains 'event' so hypnogram .txt files are not counted.\n"
     '        all_txt = [f for f in folder.rglob("*")\n'
     '                   if f.suffix.lower() == ".txt" and "event" in f.name.lower()]\n'
-    '        txt_counts = {}\n'
-    '        for edf in edfs:\n'
-    '            for tf in all_txt:\n'
-    '                if os.path.normcase(tf.name).startswith(os.path.normcase(edf.stem)):\n'
-    '                    suf = tf.name[len(edf.stem):]\n'
-    '                    txt_counts[suf] = txt_counts.get(suf, 0) + 1\n'
-    '        if not txt_counts:\n'
+    '        txt_owners = SF.companion_suffix_owners(edfs, all_txt)\n'
+    '        if not txt_owners:\n'
     '            txt_suffix_info.value = (\n'
     '                f\'<small style="color:{UI.WARN_COLOR};">No event .txt detected next to the EDFs \'\n'
-    '                \'— set the suffix manually or rely on CSV/XML.</small>\')\n'
+    "                '— set the suffix manually or rely on CSV/XML.</small>')\n"
     '        else:\n'
-    '            best_suffix, best_count = max(\n'
-    '                txt_counts.items(), key=lambda x: (x[1], -len(x[0])))\n'
-    '            txt_suffix.value = best_suffix\n'
-    '            parts = [f\'<b>{s}</b>&nbsp;(×{c})\'\n'
-    '                     for s, c in sorted(txt_counts.items(), key=lambda x: -x[1])]\n'
-    '            color = UI.OK_COLOR if best_count == len(edfs) else UI.WARN_COLOR\n'
-    '            txt_suffix_info.value = (\n'
-    '                f\'<small style="color:{color};">Detected:&nbsp;\'\n'
-    '                f\'{"&nbsp;·&nbsp;".join(parts)}&nbsp;— \'\n'
-    '                f\'{best_count}/{len(edfs)} EDF file(s) matched</small>\')\n'
-    '        # --- Event-CSV suffix auto-detection (mirrors 6_quality_overview hypno-suffix block) ---\n'
+    '            # the most frequent suffix, shortest on ties\n'
+    '            txt_suffix.value, _ = SF.select_event_suffix({s: len(r) for s, r in txt_owners.items()})\n'
+    '            fill_txt_menu(txt_owners, stems)\n'
+    '        # --- Event-CSV suffix auto-detection ---\n'
     '        all_csv = [f for f in folder.rglob("*") if f.suffix.lower() == ".csv"]\n'
-    '        suffix_counts = {}\n'
-    '        for edf in edfs:\n'
-    '            for csvf in all_csv:\n'
-    '                if os.path.normcase(csvf.name).startswith(os.path.normcase(edf.stem)):\n'
-    '                    suf = csvf.name[len(edf.stem):]\n'
-    '                    suffix_counts[suf] = suffix_counts.get(suf, 0) + 1\n'
-    '        if not suffix_counts:\n'
+    '        csv_owners = SF.companion_suffix_owners(edfs, all_csv)\n'
+    '        if not csv_owners:\n'
     '            csv_suffix_info.value = (\n'
     '                f\'<small style="color:{UI.WARN_COLOR};">No event CSV detected next to the EDFs \'\n'
-    '                \'— set the suffix manually or rely on the XML fallback.</small>\')\n'
+    "                '— set the suffix manually or rely on the XML fallback.</small>')\n"
     '        else:\n'
     '            # Events have no "more specific remapped" variant (unlike hypnograms), so prefer the\n'
     '            # MOST FREQUENT suffix (shortest on ties).\n'
-    '            best_suffix, best_count = max(\n'
-    '                suffix_counts.items(), key=lambda x: (x[1], -len(x[0])))\n'
-    '            csv_suffix.value = best_suffix\n'
-    '            parts = [f\'<b>{s}</b>&nbsp;(×{c})\'\n'
-    '                     for s, c in sorted(suffix_counts.items(), key=lambda x: -x[1])]\n'
-    '            color = UI.OK_COLOR if best_count == len(edfs) else UI.WARN_COLOR\n'
-    '            csv_suffix_info.value = (\n'
-    '                f\'<small style="color:{color};">Detected:&nbsp;\'\n'
-    '                f\'{"&nbsp;·&nbsp;".join(parts)}&nbsp;— \'\n'
-    '                f\'{best_count}/{len(edfs)} EDF file(s) matched</small>\')\n',
+    '            csv_suffix.value, _ = SF.select_event_suffix({s: len(r) for s, r in csv_owners.items()})\n'
+    '            fill_csv_menu(csv_owners, stems)\n',
     '        folder = Path(chooser.selected_path)\n'
     '        cdts = [f for f in folder.rglob("*") if f.suffix == ".cdt" and not f.name.startswith("._")]\n'
     '        if not cdts:\n'
-    '            existing_info.value = UI.msg(\'warn\', \'No .cdt files found in selected folder.\')\n'
+    "            existing_info.value = UI.msg('warn', 'No .cdt files found in selected folder.')\n"
     '            csv_suffix_info.value = ""\n'
     '            return\n'
-    '        existing = load_existing_mapping(folder)\n'
+    '        existing = load_existing_mapping()\n'
     '        msg = f"<small>{len(cdts)} .cdt file(s) found. "\n'
-    '        msg += (f"{len(existing)} label(s) already mapped in event_remap.json."\n'
-    '                if existing else "No existing event_remap.json yet.")\n'
-    '        existing_info.value = msg + "</small>"\n'
+    '        msg += (f"{len(existing)} label(s) already mapped."\n'
+    '                if existing else "No existing mapping yet.")\n'
+    '        existing_info.value = msg + "</small>" + mapping_note\n'
     '        # --- Event-export suffix auto-detection (Curry: *_ScoredEvents_Export.txt) ---\n'
-    '        # Scan .txt files whose name contains \'event\' so hypnogram .txt files are not counted.\n'
+    "        # Scan .txt files whose name contains 'event' so hypnogram .txt files are not counted.\n"
     '        all_evt = [f for f in folder.rglob("*")\n'
     '                   if f.suffix.lower() == ".txt" and "event" in f.name.lower()]\n'
-    '        suffix_counts = {}\n'
-    '        for cdt in cdts:\n'
-    '            for evtf in all_evt:\n'
-    '                if os.path.normcase(evtf.name).startswith(os.path.normcase(cdt.stem)):\n'
-    '                    suf = evtf.name[len(cdt.stem):]\n'
-    '                    suffix_counts[suf] = suffix_counts.get(suf, 0) + 1\n'
-    '        if not suffix_counts:\n'
+    '        evt_owners = SF.companion_suffix_owners(cdts, all_evt)\n'
+    '        if not evt_owners:\n'
     '            csv_suffix_info.value = (\n'
     '                f\'<small style="color:{UI.WARN_COLOR};">No event export detected next to the .cdt files \'\n'
-    '                \'— set the suffix manually.</small>\')\n'
+    "                '— set the suffix manually.</small>')\n"
     '        else:\n'
     '            # Prefer the MOST FREQUENT suffix (shortest on ties).\n'
-    '            best_suffix, best_count = max(\n'
-    '                suffix_counts.items(), key=lambda x: (x[1], -len(x[0])))\n'
-    '            csv_suffix.value = best_suffix\n'
-    '            parts = [f\'<b>{s}</b>&nbsp;(×{c})\'\n'
-    '                     for s, c in sorted(suffix_counts.items(), key=lambda x: -x[1])]\n'
-    '            color = UI.OK_COLOR if best_count == len(cdts) else UI.WARN_COLOR\n'
-    '            csv_suffix_info.value = (\n'
-    '                f\'<small style="color:{color};">Detected:&nbsp;\'\n'
-    '                f\'{"&nbsp;·&nbsp;".join(parts)}&nbsp;— \'\n'
-    '                f\'{best_count}/{len(cdts)} .cdt file(s) matched</small>\')\n',
+    '            csv_suffix.value, _ = SF.select_event_suffix({s: len(r) for s, r in evt_owners.items()})\n'
+    '            fill_csv_menu(evt_owners, [f.stem for f in cdts])\n',
     "_update_info block")
+# the twin has a single suffix field: no TXT menu
+replace_in_cell(code,
+    'txt_menu, fill_txt_menu = UI.suffix_menu(txt_suffix, txt_suffix_info)\n',
+    '',
+    "remove the TXT menu")
+replace_in_cell(code,
+    '    fill_txt_menu({}, [])   # emptied until the detection below\n    fill_csv_menu({}, [])\n',
+    '    fill_csv_menu({}, [])   # emptied until the detection below\n',
+    "reset of the TXT menu")
 
 # run_scan discovery
 replace_in_cell(code,
@@ -553,8 +529,8 @@ replace_in_cell(code,
 
 # Remove the EDF's txt_suffix + txt_suffix_info from the layout row
 replace_in_cell(code,
-    "    section1, chooser, txt_suffix, txt_suffix_info, csv_suffix, csv_suffix_info, existing_info, skip_existing, run_scan_button, scan_progress_row, out_scan,",
-    "    section1, chooser, csv_suffix, csv_suffix_info, existing_info, skip_existing, run_scan_button, scan_progress_row, out_scan,",
+    '    section1, chooser, inputs_list, txt_menu, txt_suffix, txt_suffix_info, csv_menu, csv_suffix, csv_suffix_info,\n    existing_info, skip_existing, advanced, run_scan_button, scan_progress_row, out_scan,',
+    '    section1, chooser, inputs_list, csv_menu, csv_suffix, csv_suffix_info,\n    existing_info, skip_existing, advanced, run_scan_button, scan_progress_row, out_scan,',
     "remove txt_suffix from layout")
 
 replace_in_cell(code,

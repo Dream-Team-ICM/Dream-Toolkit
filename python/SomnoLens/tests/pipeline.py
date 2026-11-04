@@ -108,14 +108,16 @@ def run_tool8(data, file_id):
 
 
 def run_tool9(data, raw_dir, decision_dir=None, subset=None, skip=True, reaggregate=False):
-    """decision_dir: a tool 8 / 8bis rejection_* folder (None = no decision). reaggregate: click
-    'Re-aggregate only' instead of Run."""
+    """decision_dir: a tool 8 / 8bis rejection_* folder (None = no decision: the menu's 'none', since the tool
+    pre-chooses the most recent decision of the study). reaggregate: click 'Re-aggregate only' instead of Run."""
     data = Path(data)
     with NotebookSession(T9) as nb:
         nb.pick('fc_data', data)
         nb.pick('fc_raw', raw_dir)
         if decision_dir is not None:
             nb.pick('fc_decision', decision_dir)
+        else:
+            nb.set('decision_menu', '')
         nb.pick('fc_subj', data / 'participants.tsv')
         nb.set('dd_join_col', 'participant_id')
         nb.click('btn_scan')

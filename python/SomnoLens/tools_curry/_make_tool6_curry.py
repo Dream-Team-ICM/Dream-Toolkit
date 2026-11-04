@@ -274,27 +274,11 @@ replace_in_cell(cell3,
 # also checks the per-file _quality_metrics.tsv; the global edf_files → cdt_files rename below
 # translates it, so no targeted replacement is needed here.
 
-# 3c. Hypno suffix detection loop
-replace_in_cell(cell3,
-    "    for edf in edf_files:\n"
-    "        for txt in all_txt:\n"
-    "            if os.path.normcase(txt.name).startswith(os.path.normcase(edf.stem)):\n"
-    "                suffix = txt.name[len(edf.stem):]\n"
-    "                suffix_counts[suffix] = suffix_counts.get(suffix, 0) + 1",
-    "    for cdt in cdt_files:\n"
-    "        for txt in all_txt:\n"
-    "            if os.path.normcase(txt.name).startswith(os.path.normcase(cdt.stem)):\n"
-    "                suffix = txt.name[len(cdt.stem):]\n"
-    "                suffix_counts[suffix] = suffix_counts.get(suffix, 0) + 1",
-    "cell3 hypno suffix loop",
-)
+# 3c. (removed) Hypno suffix detection: study_files_lib counts the companions by file name (a .cdt stem works
+# the same), the global edf_files → cdt_files rename below translates its argument.
 
-# 3d. EDF files matched text
-replace_in_cell(cell3,
-    "f'&nbsp;— {best_count}/{n_total} EDF files matched</small>'",
-    "f'&nbsp;— {best_count}/{n_total} .cdt files matched</small>'",
-    "cell3 EDF files matched text",
-)
+# 3d. (removed) The coverage line under the suffix menu (ui_lib.suffix_menu) speaks of recordings: valid for both
+# formats.
 
 # 3f. Remove thresh_bounds widget (between thresh_flat and thresh_peaks)
 replace_in_cell(cell3,

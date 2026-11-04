@@ -346,44 +346,11 @@ def read_eeg_raw(edf_path, remap):
 
 
 # ---------------------------------------------------------------------------------------------------------
-# Recordings and companions (detection rules of 7_preprocessing_voila, lifted from _detect_hypno_suffixes)
+# Recordings (the companion suffixes are counted and chosen by study_files_lib)
 # ---------------------------------------------------------------------------------------------------------
 def list_edf_files(folder):
     """Every .edf under `folder` (recursive), macOS '._' shadow files excluded, sorted."""
     return [f for f in sorted(Path(folder).rglob('*')) if f.suffix.lower() == '.edf' and not f.name.startswith('._')]
-
-
-def companion_suffix_counts(edf_files, files):
-    """{suffix: number of recordings having a file named <recording stem><suffix>} (normcase prefix)."""
-    counts = {}
-    for edf in edf_files:
-        for f in files:
-            if os.path.normcase(f.name).startswith(os.path.normcase(edf.stem)):
-                suf = f.name[len(edf.stem):]
-                counts[suf] = counts.get(suf, 0) + 1
-    return counts
-
-
-def select_hypno_suffix(suffix_counts):
-    """Tool 7's hypnogram rule: among the .txt suffixes found for >= 50 % of the maximum count, prefer the
-    LONGEST (the more specific remapped/processed version), ties broken by count. Suffixes containing
-    'event' are skipped (Curry/Profusion write *_ScoredEvents_Export.txt next to the hypnograms; its
-    longer suffix would otherwise win) unless nothing else exists. Returns (suffix, count) or (None, 0)."""
-    if not suffix_counts:
-        return None, 0
-    sel_counts = {s: c for s, c in suffix_counts.items() if 'event' not in s.lower()}
-    if not sel_counts:
-        sel_counts = suffix_counts  # only event exports found: fall back rather than fail
-    max_count = max(sel_counts.values())
-    candidates = {s: c for s, c in sel_counts.items() if c >= max_count * 0.5}
-    return max(candidates.items(), key=lambda x: (len(x[0]), x[1]))
-
-
-def select_event_suffix(suffix_counts):
-    """Tool 7's event TXT / CSV rule: the most frequent suffix, the shortest on ties. (None, 0) if none."""
-    if not suffix_counts:
-        return None, 0
-    return min(suffix_counts.items(), key=lambda x: (-x[1], len(x[0])))
 
 
 # ---------------------------------------------------------------------------------------------------------
