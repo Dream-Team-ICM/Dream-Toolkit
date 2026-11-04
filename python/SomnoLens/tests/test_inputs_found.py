@@ -1,4 +1,4 @@
-"""Section 1 of the tools (phase 3 of tools/plan_file_selection.md): the study folder is the only thing to pick. Each tool
+"""Section 1 of the tools: the study folder is the only thing to pick. Each tool
 finds its input files in it (the 'Inputs found' list), each line says where its file comes from, and 'Choose another…'
 picks another one by hand. The Advanced box (output folder, custom stages, output names) says when a default was changed.
 
