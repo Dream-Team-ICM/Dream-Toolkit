@@ -69,7 +69,8 @@ The "what to do / what not to break" reminders, grouped by theme. Each points to
   Skip applies to a subset too, with an orange warning box), never one checkbox per participant.
 - **Study folder = the root picker** (→ SPEC *How to run → Study folder layout*): every tool's first
   picker says **Study folder** (never "data folder": `data/` is where the recordings sit), the root holding
-  `config_param/`, `derivatives/`, `reports_*/`; recordings are scanned recursively. Tools 5/7: output folder
+  `config_param/`, `derivatives/`, `reports_*/`; recordings are scanned recursively. It is the only picker to use: each
+  tool finds the rest (`study_files_lib`, *Inputs found*; a test that drives a picker still wins, *Choose another…*). Tools 5/7: output folder
   optional, default = study folder, ⚠ when different (tool 7 `out_root_path()`). Tool 1bis is the exception
   (original EDF folder, outside the study). Tool 1 writes `reports_inspection/`. Variable names (`fc_data`,
   `data_root`, `find_data_folder`) stay: the tests drive widgets by name.
@@ -269,8 +270,8 @@ The "what to do / what not to break" reminders, grouped by theme. Each points to
   editing the `[H]` block.
 - **Manually reject flagged epochs (`8_reject_manually*`)**: reads tool-7 `{file_id}_all-epo.fif`
   (+ optional params JSON), **never reloads the raw EDF**, **never modifies tool-7 outputs**. **Section 1 =
-  optional study folder + Preprocessed-epochs folder** (like 8bis **minus** the reports picker: tool 8 never reads
-  `reports_preproc/`). `find_participants` runs on the chosen epochs folder so versioned tool-7 runs stay
+  the study folder; the run of tool 7 is found from it** (like 8bis, the reports folder paired by name is optional here).
+  `find_participants` runs on the chosen epochs folder so versioned tool-7 runs stay
   apart on the participant dropdown. `data_root` = the selected study folder, else the `derivatives/`
   ancestor's parent. An **"already processed" badge** (`_epoch_decision.tsv` **and** a review/decision TSV on
   disk) is informative only: it blocks nothing. The **Exclude this participant** button writes `8_manual`.
@@ -327,8 +328,8 @@ The "what to do / what not to break" reminders, grouped by theme. Each points to
   `methods_used`/`event_types_used`/`excluded`/`exclude_reason`. Run tally gains `excluded`. Still format-agnostic → **Curry twin stays a
   verbatim copy** (re-run `_make_tool8bis_curry.py`). **The decision rule, its tables and figures =
   `tools/autoreject_lib.py`** (shared with tool 0's step 7; the twin imports it through the qc-lib probe): edit the
-  library, never the notebook. → SPEC §8bis *Shared library*. **Section 1 = two explicit folder pickers (preprocessed-epochs + reports) + a Scan button**
-  (+ an optional data-folder chooser that pre-points them): *not* one root scanned recursively, so
+  library, never the notebook. → SPEC §8bis *Shared library*. **Section 1 = the study folder, the run of tool 7 found from it (preprocessed-epochs + reports paired by name, a menu with several runs) + a Scan button**:
+  *not* one root scanned recursively, so
   renamed/versioned tool-7 runs (`preproc_epo_v2`, `reports_preproc_v2`) stay apart. **Data/reports split**:
   `_epoch_decision.tsv` + `_channel_decision.tsv` → **`rejection_auto/`** (`raw_root.parent/…`, beside the raw
   folder; 8bis no longer reads the `.fif`). `_autoreject_decision.tsv` (durable record + global-summary source, written **before**
@@ -338,7 +339,7 @@ The "what to do / what not to break" reminders, grouped by theme. Each points to
   All-channels-/all-epochs-rejected → still get tables + row + report (100 % in the summary). See SPEC §8bis.
 
 - **Spectral features (`9_spectral_features_voila`)**: first **feature tool**: it reads tool 7's `_all-epo.fif`
-  + a tool 8/8bis decision folder, never the raw, and computes **every** epoch and channel (aggregates over the
+  + a tool 8/8bis decision folder (the most recent pre-chosen from the study folder, `none` in its menu), never the raw, and computes **every** epoch and channel (aggregates over the
   kept epochs). It saves `_psd_epoch.npz` so **Re-aggregate only** rebuilds everything after a decision change
   without PSD / fit; `finish_participant` is shared by both paths. Night thirds span the whole night. Tool 7's params sidecar is **provenance only** (auto-located, absence
   non-fatal). Three invariants: the **PSD smoothing feeds the specparam fit only** (band powers always use

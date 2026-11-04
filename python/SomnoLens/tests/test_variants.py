@@ -1,7 +1,8 @@
 """Full level: parameter variants on the synthetic database. No frozen reference: each variant runs on a
 light copy of the database (one participant where possible) and is checked for what its option must do.
 
-    tool 7   10 s epochs (then 8bis and 9 on them), resampling to 128 Hz, notch off, custom stage N4
+    tool 7   10 s epochs (then 8bis and 9 on them), resampling to 128 Hz, notch off, custom stage N4, an output
+             folder noted and found by tool 9
     tool 6   resampling + high-pass: the dead channel stays flagged, no healthy channel gets flagged; the
              preparation is recorded, and a second run without it warns on each skipped participant
     tool 9   multitaper PSD (same order as Welch), 'knee' aperiodic mode
@@ -85,6 +86,23 @@ def test_tool7_10s_epochs_then_8bis_and_9(src, tmp_path):
     assert bp['epoch_idx'].nunique() == 3 * len(stages30)
     kept = bp[~bp['rejected'] & ~bp['channel_dropped']]
     assert np.isfinite(kept['power_db']).all()
+
+
+@pytest.mark.tool7
+@pytest.mark.tool9
+def test_tool7_notes_its_output_folder_and_tool9_finds_the_run(src, tmp_path):
+    """An output folder other than the study folder: tool 7 notes it, and the next tools find the run from the study
+    folder alone."""
+    data = inputs_copy(src, tmp_path / 'data', ['reports_quality_overview'])
+    out = tmp_path / 'out'
+    out.mkdir()
+    run_tool7(data, SIM_LINE, lambda nb: nb.pick('fc_out', out))
+    names = json.loads((data / 'config_param' / 'file_names.json').read_text(encoding='utf-8'))
+    assert names['preproc_output']['value'] == str(out.resolve()) and names['preproc_output']['tool'] == '7'
+    with NotebookSession(pipeline.T9) as nb:
+        nb.pick('fc_data', data)
+        assert Path(nb.value('fc_raw.selected_path')) == out / 'derivatives' / 'preproc_epo'
+        assert '(the only run found)' in nb.value('raw_row.children[0].children[0].value')
 
 
 @pytest.mark.tool7

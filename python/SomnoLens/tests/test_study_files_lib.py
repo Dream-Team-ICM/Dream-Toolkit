@@ -1,6 +1,7 @@
 """The rules of tools/study_files_lib.py: the names registry (config_param/file_names.json), the counting of the
 companion suffixes and the pre-choice of the hypnogram suffix (tools 0, 3, 3bis, 5, 6, 7)."""
 import json
+import os
 import sys
 from pathlib import Path
 
@@ -160,6 +161,73 @@ def test_a_study_keeps_the_name_of_its_configuration_files(tmp_path):
     assert SF.config_file_name(study, names, *args) == 'mine.json'
     names = {'channel_config': {'value': str(tmp_path / 'elsewhere.json'), 'tool': '2'}}   # not in config_param/
     assert SF.config_file_name(study, names, *args) == 'channel_config.json'
+
+
+def _run(study, name, n=2):
+    folder = study / 'derivatives' / name
+    folder.mkdir(parents=True)
+    for i in range(n):
+        (folder / f's{i}_all-epo.fif').write_bytes(b'')
+    return folder
+
+
+def test_the_runs_of_tool_7_are_found_from_the_study_folder(tmp_path):
+    study = tmp_path / 'study'
+    study.mkdir()
+    assert SF.epoch_folders(study) == []
+    first = _run(study, 'preproc_epo')
+    (study / 'derivatives' / 'preproc_epo_empty').mkdir()                 # no epochs: not a run
+    (study / 'derivatives' / 'rejection_auto').mkdir()
+    assert SF.epoch_folders(study) == [(first, 2)]
+    second = _run(study, 'preproc_epo_v2', 3)
+    assert SF.epoch_folders(study) == [(first, 2), (second, 3)]
+    assert SF.epoch_folder_options(study, [(second, 3)]) == [
+        ('derivatives/preproc_epo_v2  (3 participants)', str(second))]
+    outside = _run(tmp_path / 'out', 'preproc_epo', 1)                    # tool 7's output folder, as it noted it
+    names = {'preproc_output': {'value': str((tmp_path / 'out').resolve()), 'tool': '7'}}
+    assert SF.epoch_folders(study, names)[-1] == (outside, 1)
+    names = {'preproc_output': {'value': '.', 'tool': '7'}}               # noted, then back to the study folder
+    assert SF.epoch_folders(study, names) == [(first, 2), (second, 3)]
+
+
+def test_the_reports_of_a_run_are_paired_by_name(tmp_path):
+    study = tmp_path / 'study'
+    first, second = _run(study, 'preproc_epo'), _run(study, 'preproc_epo_v2')
+    assert SF.paired_reports_folder(first) is None
+    (study / 'reports_preproc').mkdir()
+    assert SF.paired_reports_folder(first) == study / 'reports_preproc'
+    assert SF.paired_reports_folder(second) is None                       # never another run's reports
+    (study / 'reports_preproc_v2').mkdir()
+    assert SF.paired_reports_folder(second) == study / 'reports_preproc_v2'
+    assert SF.paired_reports_folder(study / 'derivatives' / 'other') is None
+
+
+def test_the_most_recent_decision_comes_first(tmp_path):
+    study = tmp_path / 'study'
+    epochs = _run(study, 'preproc_epo')
+    assert SF.decision_folders(epochs) == []
+    assert SF.decision_folder_options(study, []) == [('none: no decision', SF.NO_DECISION)]
+    for name, date in (('rejection_auto', 1000), ('rejection_manual', 2000)):
+        folder = study / 'derivatives' / name
+        folder.mkdir()
+        table = folder / 's0_epoch_decision.tsv'
+        table.write_text('x', encoding='utf-8')
+        os.utime(table, (date, date))
+    (study / 'derivatives' / 'rejection_empty').mkdir()
+    found = SF.decision_folders(epochs)
+    assert [f.name for f, _, _ in found] == ['rejection_manual', 'rejection_auto'] and found[0][2] == 1
+    options = SF.decision_folder_options(study, found)
+    assert 'tool 8,' in options[0][0] and 'tool 8bis,' in options[1][0] and options[-1][1] == SF.NO_DECISION
+
+
+def test_the_light_read_of_a_folder_says_what_it_holds(tmp_path):
+    study = tmp_path / 'study'
+    epochs = _run(study, 'preproc_epo')
+    assert SF.check_epoch_folder(epochs) == ('ok', '2 participants')
+    assert SF.check_epoch_folder(study)[0] == 'ok'                        # recursive, like the tools
+    (tmp_path / 'empty').mkdir()
+    for check in (SF.check_epoch_folder, SF.check_reports_folder, SF.check_decision_folder):
+        assert check(tmp_path / 'empty')[0] == 'warn'
 
 
 def test_a_path_is_recorded_relative_to_the_study_when_inside_it(tmp_path):

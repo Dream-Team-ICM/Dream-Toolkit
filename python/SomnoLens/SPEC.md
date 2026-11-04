@@ -188,17 +188,16 @@ my_study/                               <- pick this folder in every tool
   `<study>/config_param/` but writes the exclusion registry to `<output>/config_param/` (and tool 5bis
   keeps its registry beside tool 5's outputs).
 - **The outputs mirror the recordings' tree relative to the study folder**: `data/sub1.edf` gives
-  `derivatives/preproc_epo/data/sub1_all-epo.fif`. Harmless (tools 8 / 8bis / 9 use explicit folder pickers
-  and recursive globs), and useful with group sub-folders (`data/group1/`, `data/group2/`).
+  `derivatives/preproc_epo/data/sub1_all-epo.fif`. Harmless (tools 8 / 8bis / 9 read one epochs folder, with
+  recursive globs), and useful with group sub-folders (`data/group1/`, `data/group2/`).
 - **Companions stay beside the recording** by design: the hypnograms are found by suffix next to the EDF,
   and an annotation belongs to the recording. `derivatives/autoscoring_gssc/` holds only the
   hypnodensity + parameters. (Tools 5, 6 and 7 also find a hypnogram elsewhere in the study, by its file name.)
 - **The names a tool chose are recorded** in `config_param/file_names.json` (*Cross-cutting → Names registry*),
   so the later tools follow a suffix the user changed. A study keeps its names: the short defaults of 2026-11-03
   (`_hypno_remapped.txt`, `_hypno_<algo>.txt`) apply to a new study only.
-- **The study folder is the only thing to pick** (phase 3 of the file selection, 2026-11-04; tools 0, 2 to 7, tools 8,
-  8bis and 9 to follow): each tool finds its inputs in it and lists them (*Cross-cutting → Voila page conventions →
-  Inputs found*). Tool 2's file is now called `config_param/channel_config.json`; a study already processed keeps
+- **The study folder is the only thing to pick** (phase 3 of the file selection, 2026-11-04; every tool but 1 and 1bis):
+  each tool finds its inputs in it and lists them (*Cross-cutting → Voila page conventions → Inputs found*). Tool 2's file is now called `config_param/channel_config.json`; a study already processed keeps
   `remap_reref_persubject.json`, and every reader finds either (`study_files_lib.find_input`).
 - **Exact names**: `config_param` and `derivatives`. Tools 8 / 8bis / 9 find the registry through
   `find_data_folder` (first ancestor holding `config_param/`, else the parent of `derivatives/` or
@@ -360,11 +359,11 @@ test must point it at a copied `preproc_epo`.
   unreadable file never overwritten), the counting of the companion suffixes (participants 1, 2, 10, 20: no false
   `0_…` suffix) and the hypnogram pre-choice (the toolkit's own hypnograms never win, a recorded name is followed,
   a study keeps its output names), where each input is found, the light read of each input, the name a tool writes
-  in `config_param/`. `test_inputs_found.py` (standard, markers `tool0` to `tool7`): Section 1 of each tool in its
+  in `config_param/`. `test_inputs_found.py` (standard, markers `tool0` to `tool9`): Section 1 of each tool in its
   notebook on empty `.edf` files: the inputs found, a recorded name followed, a file chosen by hand, the refusal
   when a required input is missing, the Advanced box; on the chain's study, the files found are the ones the chain
   picks by hand (so the outputs are the chain's); tool 5's table noted when written outside the study, and found by
-  tool 5bis. `test_hypno_prechoice.py` (standard, markers `tool3`, `tool3bis`, `tool5` to
+  tool 5bis; the runs of tool 7 (menu, reports paired by name), the most recent decision pre-chosen by tool 9, `none`. `test_hypno_prechoice.py` (standard, markers `tool3`, `tool3bis`, `tool5` to
   `tool7`): the same pre-choice in the five notebooks, on empty `.edf` files beside the raw export, the remapped
   hypnogram, tool 3bis's and tool 0's outputs. `test_quality_lib.py` (quick): tool 6's signal-preparation label and the rule that warns on a
   skipped participant prepared differently.
@@ -492,8 +491,9 @@ instead of restating them. Only tool-specific deltas are kept inline.
     `… (+k)`), followed by the notes of the pre-choice. The menu stays hidden until a detection calls
     `fill(owners, recordings, notes)` (`owners` = `study_files_lib.companion_suffix_owners`), and `fill({}, [])`
     empties it (another folder, nothing found: the plain field is back).
-  - **Inputs found** (2026-11-04, tools 2 to 7 and their Curry twins; tool 0 keeps its summary line): the study folder is
-    the only picker the user has to use. `inputs_list, show = UI.inputs_list(children)` holds the list, hidden behind a
+  - **Inputs found** (2026-11-04, tools 3bis, 4 to 9 and their Curry twins; tools 2 and 3 have no input file beyond their
+    menu and keep only the Advanced box, tool 0 keeps its summary line): the study folder is the only picker the user has
+    to use. `inputs_list, show = UI.inputs_list(children)` holds the list, hidden behind a
     grey line until the study folder is picked. `row, locate = UI.input_row(picker, name, need, absent, check, on_change)`
     is one line: the file found, how (*default location*, *recorded by tool N*, *chosen by hand*), what a light read
     found (`check`: *11 participants*) or what is missing, with **Choose another…**, which shows the tool's own
@@ -505,10 +505,14 @@ instead of restating them. Only tool-specific deltas are kept inline.
     run still goes: what it cannot read fails with the usual message. **ipyfilechooser trap**: every `FileChooser` built
     without a `layout` shares one `Layout` object (a default argument), so `input_row` gives its picker its own before
     hiding it, otherwise the study folder's picker hides too. Custom stages are a line without a button
-    (`UI.custom_stages_html(stages, loaded)`).
+    (`UI.custom_stages_html(stages, loaded)`). A picker of folders works the same (`locate` selects the folder itself).
+    `menu, fill = UI.choice_menu(description, on_choose)` goes in front of a row when the study holds several candidates
+    (the runs of tool 7, the decisions): hidden with fewer than two options, `fill` selects the first without calling
+    `on_choose`. `locate(..., note=…)` replaces *not found: …* when having no file is the user's choice (*none*).
   - **Advanced box** (2026-11-04): `box, mark = UI.advanced_box(children)`, closed by default, holds what most studies
     leave alone (tool 2: the JSON file name; 3: the output suffix; 3bis: the three output suffixes; 4: the mapping file
-    name; 5, 7: the output folder and the custom stages field; 0, 6: the custom stages field). `mark(['output folder'])`
+    name; 5, 7: the output folder and the custom stages field; 0, 6, 9: the custom stages field; tool 8 keeps its field
+    beside the participant, tool 8bis has none). `mark(['output folder'])`
     puts `⚠️ default changed: output folder` in its title, so a change is not forgotten; the tool compares with the value
     it proposed for this study.
   - **Progress**: `UI.progress_bar(description)` → (bar, row with `i / N`), `UI.finish_progress(bar, n_failed)`
@@ -666,7 +670,8 @@ instead of restating them. Only tool-specific deltas are kept inline.
   hypnogram in the run); `hypnogram_rescored` (tool 0, the list of the rescored suffixes saved); `channel_config`
   (tool 2, at *Preview & Save*) and `event_remap` (tool 4, at *Preview & Save*), a path; `sleep_metrics_table` (tool 5,
   only when the table is outside its default place: an output folder other than the study folder, then kept up to date,
-  so the chain's outputs gain no file). A path is relative to the study folder when inside it, else absolute
+  so the chain's outputs gain no file); `preproc_output` (tool 7, the same rule, its output folder, for tools 8, 8bis, 9).
+  A path is relative to the study folder when inside it, else absolute
   (`path_to_record`). Written only
   when a tool really writes its files, never at a scan. The rules of the exclusion registry: each tool rewrites
   only its own keys (`write_names(study, tool, values)`), an unchanged value keeps its date and the file is not
@@ -875,8 +880,9 @@ instead of restating them. Only tool-specific deltas are kept inline.
 - **Feature tools read tool 7's epochs + a decision (`preproc_epo/` + `rejection_*`)**: every
   feature-extraction tool (9, then 10, 11 …) reads tool 7's `{file_id}_all-epo.fif` (every epoch; the
   channels deselected in tool 7 included, marked bad) from the **preprocessed-epochs folder** and the keep/reject
-  decision from a **decision folder**, both chosen through **explicit folder pickers** (never a
-  recursively-scanned root: versioned runs must stay apart, as in tools 8/8bis): `derivatives/rejection_auto/`
+  decision from a **decision folder**, both found from the study folder or chosen by hand, one folder each (never a
+  recursively-scanned root: versioned runs must stay apart, as in tools 8/8bis, *Runs of tool 7* in
+  `study_files_lib`): `derivatives/rejection_auto/`
   (tool 8bis) or `derivatives/rejection_manual/` (tool 8), holding `{file_id}_epoch_decision.tsv` (`file_id,
   epoch_idx, stage, in_scope, rejected, reject_reason`, + `manual_override, seen` from tool 8) and
   `{file_id}_channel_decision.tsv` (`file_id, channel, dropped, drop_reason, badness_pct`; `drop_reason` =
@@ -2323,11 +2329,11 @@ Manual quality control of the epochs that `7_preprocessing_voila` flagged: inspe
 
 **Shared library (`qc_rejected_epochs_lib.py`)**: the analysis + plotting used by both the notebook and the batch live in one module (imported by both) to avoid drift, `METHOD_ORDER`, the **rejection-method colour palette** (single source, see *Cross-cutting*), `DISPLAY_SCALE_UV`, the custom-stage helpers, the Welch-PSD config and the specparam 1/f fit are copied from tool 7 and kept in sync. The **per-epoch flags are authoritative from `epochs.metadata`**, but the **decision** built on them is recomposed from the user's method/stage/event-type selection (`recompute_reject`, see below) rather than read from the stored `reject_flag`. The **per-channel attribution** shown here (which channel drove a flag, margins to threshold) is **recomputed** from the signal with the same formulas + the persisted thresholds (fallback: tool-7 defaults when no params JSON is present). The notebook-only helpers (`recompute_reject`, `plot_psd_overlays_grid`, `plot_epoch_montage`, `plot_epoch_detail`, `load_event_onsets`, `build_manual_decision_row`, `manual_decision_html`) take **optional** parameters with backward-compatible defaults, so the batch twin keeps calling them unchanged. Tool 7 now *does* persist the per-(epoch, channel) boolean masks (`{file_id}_epoch_channel_rejection.tsv`), but tool 8 still recomputes because it needs the **continuous metric values** (p-p, gradient, 1/f MAE/R²) for its plots, not just the booleans: a future refactor could let it read the booleans from that TSV for the attribution while still recomputing the values (see task plan §8.3).
 
-**Section 1: Load + selection**: **three folder pickers** (mirroring 8bis, its reports picker is here too but **optional**, and used only for the per-channel flags, see below): an **optional Study folder** (`fc_data`, holds `derivatives/` + `reports_preproc/`) that on selection `reset(path=…)`s the raw picker to `<study>/derivatives`, and a **Preprocessed-epochs folder** (`fc_raw`, holds the tool-7 `*_all-epo.fif`, e.g. `derivatives/preproc_epo`). Selecting the raw folder explicitly (instead of one derivatives root scanned recursively) keeps renamed/versioned tool-7 runs apart on the participant dropdown. `find_participants(raw_root)` fills the dropdown. The params JSON + custom stages are read from the fif's folder / the study folder. **Output derivation** (data vs reports split, precomputed at load): decision tables → `raw_root.parent/rejection_manual/<subtree>/` (beside the raw folder), reports → `<data_root>/reports_rejection_manual/<subtree>/` (beside `reports_preproc/`), where `<subtree>` is the participant path relative to the raw folder and `data_root` is the selected Study folder or, if unset, derived by finding the `derivatives/` ancestor of the raw folder (its parent). Two additions on top of the pickers:
+**Section 1: Load + selection** (2026-11-04): the **Study folder** (`fc_data`, holds `derivatives/` + `reports_preproc/`) and the *Inputs found* list: the **Preprocessed-epochs folder** (`fc_raw`, the tool-7 `*_all-epo.fif`, found by `study_files_lib.epoch_folders`: the `derivatives/preproc_epo*` of the study and of the output folder tool 7 noted) and the **Reports folder** (`fc_reports`, paired by name, `preproc_epo_v2` → `reports_preproc_v2`, **optional** here, used only for the per-channel flags, see below). Several runs: a menu (`run_menu`) with their number of participants; *Choose another…* for a run elsewhere. One epochs folder at a time (instead of one derivatives root scanned recursively) keeps renamed/versioned tool-7 runs apart on the participant dropdown. Without a study folder the pickers still work by hand (the tests). `find_participants(raw_root)` fills the dropdown. The params JSON + custom stages are read from the fif's folder / the study folder. **Output derivation** (data vs reports split, precomputed at load): decision tables → `raw_root.parent/rejection_manual/<subtree>/` (beside the raw folder), reports → `<data_root>/reports_rejection_manual/<subtree>/` (beside `reports_preproc/`), where `<subtree>` is the participant path relative to the raw folder and `data_root` is the selected Study folder or, if unset, derived by finding the `derivatives/` ancestor of the raw folder (its parent). Two additions on top of the pickers:
 - **"Already processed" badge**: the scan counts, and the participant dropdown annotates, the files already reviewed manually: "done" = **both** the `rejection_manual/` `_epoch_decision.tsv` **and** a review record (`_epoch_rejection_reviewed.tsv` or `_manualreject_decision.tsv`) on disk, the same data-and-report gate as the toolkit's skip convention. Purely **informative**: it never blocks reloading or re-saving (tool 8 is interactive and handles one participant at a time, re-saving overwrites, which the load summary states explicitly).
 - **Sections 2–4 are cleared on every participant load and every "Apply selection"** (`_reset_sections`, fed by one `_RESET_HOOKS[<section>]` entry per section, keyed so a re-run Jupyter cell replaces its entry): the report output, the navigator (list, slider, labels, `Show` back to `flagged`, filters, a pending Apply-to-all confirmation) and the review output, each with a `Participant X loaded: click "…"` line. Before this, a navigator list built for the previous participant survived until "Start navigator" was clicked again, so a Keep/Reject toggle in between acted on the **wrong epochs** of the new participant. **Unsaved-changes guard** (`_unsaved_guard`): manual Keep/Reject changes live in memory until Section 4 saves them (`S['dirty']`, cleared once the decision record is written), so a Load or Apply that would discard them first only prints `⚠ Unsaved manual changes on X (n epoch(s) changed…)` and a second click goes ahead. Annotations are written immediately and never count as unsaved.
 - **Selection = what counts as "rejected"** (the manual analogue of 8bis's Section 2): checkbox rows for **stages to review** (AASM + custom, all ticked: the review **focus**, not a part of the decision, see below) and **flagging methods** (`METHOD_ORDER`, all ticked, methods absent from the `.fif` are disabled at load), plus (revealed by the `event` method checkbox, per the *checkbox-revealed widgets* rule) one checkbox per **canonical event type**, populated at load from the `.fif`'s `evt_<type>` metadata columns (all ticked). See *Rejection redefinition* below.
-- **Optional third picker (Reports folder)** (`fc_reports`, pre-pointed by the Data-folder chooser): the **only** thing tool 8 reads from `reports_preproc/`, and only when the user points at it, `{file_id}_epoch_channel_rejection.tsv`, located by `rglob` **within that folder only** (so versioned tool-7 runs never mix). It gives the **exact** per-(epoch, channel) flags including the per-channel 1/f ones, which tool 8 would otherwise have to refit (~8 min on a 32-channel night). Absent → automatic fallback to `recompute_channel_flags` (time-domain only) with a visible ⚠ in the badness line. This narrows the former "tool 8 never reads `reports_preproc/`" invariant, exactly as anticipated above.
+- **Optional reports folder** (`fc_reports`, paired with the epochs folder): the **only** thing tool 8 reads from `reports_preproc/`, `{file_id}_epoch_channel_rejection.tsv`, located by `rglob` **within that folder only** (so versioned tool-7 runs never mix). It gives the **exact** per-(epoch, channel) flags including the per-channel 1/f ones, which tool 8 would otherwise have to refit (~8 min on a 32-channel night). Absent → automatic fallback to `recompute_channel_flags` (time-domain only) with a visible ⚠ in the badness line. This narrows the former "tool 8 never reads `reports_preproc/`" invariant, exactly as anticipated above.
 - **Channel triage** (`box_triage`, matters on a high-density montage, see *Cross-cutting → High-density montage support* for the measured motivation): a **guided two-question block**, tool 7 judged no whole epoch, it flagged **(epoch × channel) pairs**, so the UI asks *(1) which electrodes do I keep?* then *(2) how many of the kept ones must be flagged to throw the epoch away?*, in that order (a dropped electrode no longer counts in (2)), each with a worked example and the "when to use it" that a non-expert needs (a sparse PSG montage keeps everything and rejects epochs, a dense one drops the electrode rather than half the night) (a **single threshold field** `Drop channels flagged in more than (%) of the epochs`) **default 0 = keep every channel**, so the decision out of the box is exactly tool 7's, which **auto-applies** (on every value change and at every participant load, since an `observe` handler only fires on a change) to the **per-channel checkboxes**, each labelled with its badness (`CPz: 59 %`) and still correctable by hand: 8bis's channel-first rule applied as a *suggestion*, tool 8 never drops a channel on its own, and re-editing the threshold re-applies the rule and discards the manual corrections. Then a **flag-source line** (`reports TSV` vs the time-domain fallback + its ⚠) and an **epoch-rule dropdown** (`any flagged channel` (classic) / `> P % of the kept channels`, value field `P (%)`) whose value box follows the *checkbox-revealed widgets* rule. When a channel exceeds 20 % (8bis's value) the load log names it and points at the field. An unticked channel no longer flags any epoch **and is recorded as dropped in the saved channel decision** (`unticked in tool 8`; tool 9 still computes it, flagged `channel_dropped`). The channel layer is engaged **only when the user actually uses it** (a channel dropped, or a rule ≠ `any`). Otherwise `pair_flags` is not passed to `recompute_reject` at all, so the decision is exactly tool 7's stored flags, which matters because the recomputed fallback depends on thresholds that differ from the tool-7 run when no params JSON is present. Unticking **every** channel is refused at save time with a message (the same edge case as 8bis's channel-first step on a sparse montage, where a 20 % threshold can exceed every channel). Provenance: `dropped_channels` / `epoch_rule` / `epoch_rule_value` / `channel_flags_source` are **additive** columns of `_manualreject_decision.tsv` (constant on the classic path) plus `manual_dropped_channels` / `manual_epoch_rule` in the `.fif` metadata.
 
 **Rejection redefinition (`recompute_reject`, the core of Sections 2–4)**: instead of consuming tool 7's stored `reject_flag`, tool 8 **recomposes** the rejected set from the ticked selection, `base_reject[e] = ⋁ selected flag_<method>[e]` on **every** epoch, and the review focus `focus[e] = stage[e] ∈ stages_sel` (notebook state `S['focus']`), where the `event` method contributes the **OR of the ticked `evt_<type>` columns** (falling back to `flag_event` on pre-feature data). It also returns a recomputed `reject_method` (`'multiple'` when ≥2 selected methods hit). With every present method and event type ticked this reproduces tool 7's `reject_flag` **exactly**, whatever the ticked stages (verified on a real 911-epoch file: 260 = 260), so the default run is unchanged. Unticking lets the user drop a method after reading the tool-7 reports. A **"Apply selection"** button recomputes it after load (event types are only known once the `.fif` is read). It resets the manual overrides **only when the decision inputs changed** (methods, event types, dropped channels, epoch rule: `_decision_key()`); a change of the stages alone only moves the focus and **keeps the overrides, even unsaved ones** (no unsaved-changes guard, `S['dirty']` preserved), otherwise widening the focus to W after reviewing N2/N3 would silently discard the N2/N3 review. **Load and Apply print the very same block** (`_print_decision`), the rejected share alone on its emphasised line (`==> REJECTED 582 / 941 epochs (all stages) = 61.8 %`), then the same share in the review focus (`in the review focus (N2, N3): …`), methods / events / channels + epoch rule, because the two used to be a multi-line dump versus one long sentence, which made a re-decision impossible to compare with the previous one. The load block keeps the file facts (epoch count and length, channels, sfreq, methods and event types **present in the file**, companions, numbering, thresholds) above it, and "Apply" prints a **blank line first** since that output area is never cleared between runs. **The decision covers every epoch** (since 2026-10-05; before, the unticked stages were saved `in_scope = False` and a review done for an N2/N3 study had to be redone for a REM one): the focus stages are what the navigator walks and the Section-2 report shows, a flagged epoch of a stage outside the focus (never reviewed) keeps the automatic decision (rejected), and the saved tables carry `in_scope = True` everywhere. The focus is also the **reference of the channel badness** (`channel_badness(..., focus)`, like 8bis's reference stages: wake movement artefacts would otherwise suggest dropping a channel that is clean in sleep) and it **gates the expensive work**: the 1/f fit runs only on focus epochs (`compute_epoch_metrics(..., fit_mask=focus)`) and is **skipped entirely** when neither `1f_r2` nor `1f_error` is selected (`do_1f=False`).
@@ -2434,20 +2440,20 @@ run loop, the writes, `DECISION_DIRNAME`, `registry_folder` and the global summa
 copy, imports the library through the same probe as `qc_rejected_epochs_lib`. Proven output-neutral by
 `tests/refactor_check.py` on the whole chain. Edit the library, never a copy.
 
-**Inputs (Section 1 selects two folders explicitly, then a `Scan` button)** (deliberately *not* one root
+**Inputs (Section 1 finds two folders from the study folder, then a `Scan` button)** (deliberately *not* one root
 scanned recursively, tool 7 is often re-run with different parameters and its outputs renamed/versioned side
 by side, e.g. `preproc_epo`, `preproc_epo_v2`, `reports_preproc_v2`, a recursive `rglob` on `derivatives/`
 would mix every version, duplicating `file_id`s):
-- **Study folder** (`fc_data`, **optional** convenience, first chooser, holds `derivatives/` +
-  `reports_preproc/` as in tool 7): on selection it `reset(path=…)`s `fc_raw` to `<study>/derivatives`
-  (where the `preproc_epo*` folders sit) and `fc_reports` to `<study>` (parent of the `reports_preproc*`
-  folders), so the two choosers below open at the right place. The user still picks the specific
-  (possibly versioned) subfolder. It does not select anything on its own.
+- **Study folder** (`fc_data`, first picker, holds `derivatives/` + `reports_preproc/` as in tool 7): the tool finds
+  tool 7's run in it and lists it under *Inputs found* (`study_files_lib.epoch_folders`, the `derivatives/preproc_epo*`
+  of the study and of the output folder tool 7 noted). Several runs: a menu (`run_menu`) with their number of
+  participants. Without a study folder the two pickers still work by hand (the tests).
 - **Preprocessed-epochs folder** (`fc_raw`): holds the tool-7 `{file_id}_all-epo.fif` (e.g. `derivatives/preproc_epo`).
   Participants are `qc_rejected_epochs_lib.find_participants(raw_root)` and each participant's subtree is
   `fif.parent.relative_to(raw_root)`.
-- **Reports folder** (`fc_reports`): holds `{file_id}_epoch_channel_rejection.tsv` (e.g.
-  `reports_preproc`). Each TSV is located by `reports_root.rglob(...)` **within this folder only**
+- **Reports folder** (`fc_reports`, paired by name with the epochs folder, `paired_reports_folder`: `preproc_epo_v2` →
+  `reports_preproc_v2`, never another run's; required, the scan refuses without it): holds
+  `{file_id}_epoch_channel_rejection.tsv` (e.g. `reports_preproc`). Each TSV is located by `reports_root.rglob(...)` **within this folder only**
   (cached at scan time as `S['tsv_by_fid']`, reused by the run). The optional tool-7 event sidecars
   (`{file_id}_event_epoch_flags.tsv`, `{file_id}_event_counts.tsv`) are also located here and cached
   (`S['flags_by_fid']` / `S['counts_by_fid']`).
@@ -2607,12 +2613,14 @@ the writes (data before the report, `_spectral_stage.tsv` last), Re-aggregate on
 two former computation / plotting cells are gone. Proven output-neutral by `tests/refactor_check.py` on the whole
 chain. Edit the library, never a copy.
 
-**Section 1: Folders and scan**: an optional **Study folder** (pre-points the others, supplies
-`config_param/custom_stages.json` and the exclusion registry), the required **Preprocessed-epochs folder** (tool 7
-`*_all-epo.fif`, `fc_raw`), the **Decision folder** (`fc_decision`: `rejection_auto` / `rejection_manual`;
-optional, without it every epoch is kept or only those tool 7 did not flag, `cb_exclude_flagged`, with an amber
-warning), and an optional **Participant info** `.csv`/`.tsv` joined on a chosen column (`os.path.normcase` on
-both sides). `Scan` reads each `.fif` header + metadata **without loading the signal**, joins the decision
+**Section 1: Study folder and scan** (2026-11-04): the **Study folder** (supplies `config_param/custom_stages.json` and
+the exclusion registry) and the *Inputs found* list: the required **Preprocessed-epochs folder** (tool 7 `*_all-epo.fif`,
+`fc_raw`, `study_files_lib.epoch_folders`, a menu with several runs), the **Decision folder** (`fc_decision`, the
+`rejection_auto*` / `rejection_manual*` beside the epochs folder: a menu, `decision_menu`, **the most recent pre-chosen**
+by the date of its latest `_epoch_decision.tsv`, the line saying which and why, and `none`, with which every epoch is
+kept or only those tool 7 did not flag, `cb_exclude_flagged`, with an amber warning; without a study folder, nothing is
+pre-chosen), an optional **Participant info** (`participants.tsv` / `.csv` / `.xlsx` at the root) joined on a chosen
+column (`os.path.normcase` on both sides), and the custom stages, whose field sits in the *Advanced* box. `Scan` reads each `.fif` header + metadata **without loading the signal**, joins the decision
 tables (`load_decision`), shows the participant table (epochs, **kept** epochs, channels, **dropped**
 channels, sfreq, epoch length, stages with kept epochs, sidecar found or not, **excluded** + reason), the
 **N / M already processed** count, the **channel-coverage table** (participants keeping each channel), and
@@ -2986,21 +2994,14 @@ code assumes and where it fails on real databases; the inferred structure could 
 for the later tools.
 this part could also checks the companion files (hypno, events etc), and gives warning if some are missing
 
-### File selection pointed at the expected files (TODO, follows the display harmonization)
-
-The display harmonization (done 2026-11-02, *Cross-cutting → Voila page conventions*) left two of its ideas for
-later. The first is the file selection: every picker used to make the user choose each file, so that they
-understand what each step needs; with the growing number of generated files and reports, it is better to **point
-each picker at the expected file** (still editable for another one) and to **warn when a file is missing**.
-Planned in `tools/plan_file_selection.md`. Done: phases 1 and 2 (2026-11-03: the hypnogram pre-choice in one rule, the
-names registry `config_param/file_names.json`, the suffix menus) and phase 3a (2026-11-04: the *Inputs found* list and the
-*Advanced* box in tools 0, 2 to 7, `channel_config.json` for tool 2). Left: phase 3b, the versioned runs of tools 8, 8bis, 9.
-
 ### Renaming the outputs, several channel configurations of tool 2 (TODO, follows the display harmonization)
 
 A way to name / rename a tool's outputs, the same in every tool. Use case: several channel configuration files
 from tool 2, to run the later tools on different channel configurations. Open question: how to keep apart the
-outputs of the later tools when they are run on different configurations.
+outputs of the later tools when they are run on different configurations. Two things seen during the file selection work
+(2026-11-04): the names registry retains one channel configuration, the others are reached with *Choose another…*
+(a menu in the *Inputs found* list would follow from this work); tool 8bis writes its decisions to
+`derivatives/rejection_auto/` whatever the epochs folder, so `preproc_epo` and `preproc_epo_v2` share one decision folder.
 
 ### Skip only what was made with the current settings: tools 6, 7 and 9 (TODO)
 

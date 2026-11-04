@@ -4,6 +4,7 @@ picks another one by hand. The Advanced box (output folder, custom stages, outpu
 
 Picking the study folder only reads it: only the test that runs tool 5 writes, on a copy."""
 import json
+import os
 import shutil
 from pathlib import Path
 
@@ -297,6 +298,117 @@ def test_tool0_finds_the_new_name_like_the_other_tools(tmp_path):
         assert nb.value('advanced.get_title(0)') == 'Advanced'
 
 
+# --------------------------------------------------------------------------------- tools 8, 8bis and 9
+def make_run(study, run='preproc_epo', reports=True):
+    """A run of tool 7, as these tools find it: only the file names matter until the scan."""
+    folder = study / 'derivatives' / run
+    folder.mkdir(parents=True)
+    for fid in IDS:
+        (folder / f'{fid}_all-epo.fif').write_bytes(b'')
+    if reports:
+        rep = study / run.replace('preproc_epo', 'reports_preproc')
+        rep.mkdir()
+        for fid in IDS:
+            (rep / f'{fid}_epoch_channel_rejection.tsv').write_text('file_id\n', encoding='utf-8')
+    return folder
+
+
+def make_decision(study, name, date):
+    folder = study / 'derivatives' / name
+    folder.mkdir(parents=True)
+    table = folder / f'{IDS[0]}_epoch_decision.tsv'
+    table.write_text('epoch_idx\n', encoding='utf-8')
+    os.utime(table, (date, date))
+    return folder
+
+
+@pytest.mark.tool8bis
+def test_tool8bis_finds_the_run_and_its_reports(tmp_path):
+    study = make_study(tmp_path / 'study')
+    with NotebookSession(pipeline.T8BIS) as nb:
+        assert not shown(nb)
+        nb.pick('fc_data', study)
+        assert 'not found: run tool 7 first' in line(nb, 'raw_row')       # no run yet
+        nb.click('btn_scan')
+        assert 'run tool 7 first' in nb.value('lbl_scan.value')
+    first = make_run(study)
+    with NotebookSession(pipeline.T8BIS) as nb:
+        nb.pick('fc_data', study)
+        assert nb.value('fc_data.layout.display') != 'none'
+        assert Path(nb.value('fc_raw.selected_path')) == first
+        assert Path(nb.value('fc_reports.selected_path')) == study / 'reports_preproc'
+        assert '(the only run found)' in line(nb, 'raw_row') and '2 participants' in line(nb, 'raw_row')
+        assert '(paired with the epochs folder)' in line(nb, 'reports_row')
+        assert nb.value('run_menu.layout.display') == 'none'
+    second = make_run(study, 'preproc_epo_v2')
+    third = make_run(study, 'preproc_epo_v3', reports=False)
+    with NotebookSession(pipeline.T8BIS) as nb:
+        nb.pick('fc_data', study)
+        assert nb.value('run_menu.layout.display') == ''
+        assert Path(nb.value('fc_raw.selected_path')) == first
+        assert 'derivatives/preproc_epo_v2  (2 participants)' in [o[0] for o in nb.value('list(run_menu.options)')]
+        nb.set('run_menu', str(second))
+        assert Path(nb.value('fc_raw.selected_path')) == second and '(chosen in the menu)' in line(nb, 'raw_row')
+        assert Path(nb.value('fc_reports.selected_path')) == study / 'reports_preproc_v2'
+        nb.set('run_menu', str(third))                                    # never another run's reports
+        assert nb.value('fc_reports.selected_path') is None and 'not found' in line(nb, 'reports_row')
+        nb.click('btn_scan')
+        assert 'run tool 7 first' in nb.value('lbl_scan.value')
+
+
+@pytest.mark.tool8
+def test_tool8_finds_the_run_and_lists_its_participants(tmp_path):
+    study = make_study(tmp_path / 'study')
+    make_run(study, reports=False)
+    with NotebookSession(pipeline.T8) as nb:
+        assert not shown(nb)
+        nb.pick('fc_data', study)
+        assert nb.value('list(dd_part.options)') == list(IDS)
+        assert '(the only run found)' in line(nb, 'raw_row')
+        assert 'not found: the per-channel flags are recomputed' in line(nb, 'reports_row')   # optional here
+    second = make_run(study, 'preproc_epo_v2')
+    (second / f'{IDS[0]}_all-epo.fif').unlink()
+    with NotebookSession(pipeline.T8) as nb:
+        nb.pick('fc_data', study)
+        nb.set('run_menu', str(second))
+        assert nb.value('list(dd_part.options)') == [IDS[1]]              # the participants follow the run
+        assert Path(nb.value('fc_reports.selected_path')) == study / 'reports_preproc_v2'
+
+
+@pytest.mark.tool9
+def test_tool9_preselects_the_most_recent_decision(tmp_path):
+    study = make_study(tmp_path / 'study')
+    (study / 'participants.tsv').write_text('participant_id\tage\ns1\t30\ns2\t40\n', encoding='utf-8')
+    raw = make_run(study)
+    with NotebookSession(pipeline.T9) as nb:
+        assert not shown(nb)
+        nb.pick('fc_data', study)
+        assert Path(nb.value('fc_raw.selected_path')) == raw
+        assert nb.value('fc_decision.selected_path') is None
+        assert 'not found: no rejection is applied (run tool 8 or 8bis)' in line(nb, 'decision_row')
+        assert nb.value('decision_menu.layout.display') == 'none'         # nothing to choose but 'none'
+        assert Path(nb.value('fc_subj.selected')) == study / 'participants.tsv'
+        assert nb.value('dd_join_col.value') == 'participant_id'
+        assert 'N4' in nb.value('custom_stages_line.value') and nb.value('advanced.get_title(0)') == 'Advanced'
+        nb.set('txt_custom', 'N4, N5')
+        assert 'default changed: custom stages' in nb.value('advanced.get_title(0)')
+    auto, manual = make_decision(study, 'rejection_auto', 1000), make_decision(study, 'rejection_manual', 2000)
+    with NotebookSession(pipeline.T9) as nb:
+        nb.pick('fc_data', study)
+        assert Path(nb.value('fc_decision.selected_path')) == manual
+        assert '(the most recent decision)' in line(nb, 'decision_row') and '1 participants' in line(nb, 'decision_row')
+        assert nb.value('decision_menu.layout.display') == ''
+        nb.set('decision_menu', str(auto))
+        assert Path(nb.value('fc_decision.selected_path')) == auto and '(chosen in the menu)' in line(nb, 'decision_row')
+        nb.set('decision_menu', '')
+        assert nb.value('fc_decision.selected_path') is None and 'none chosen' in line(nb, 'decision_row')
+        nb.pick('fc_decision', manual)                                    # by hand
+        assert Path(nb.value('fc_decision.selected_path')) == manual and '(chosen by hand)' in line(nb, 'decision_row')
+    with NotebookSession(pipeline.T9) as nb:                              # no study folder: both picked by hand
+        nb.pick('fc_raw', raw)
+        assert nb.value('fc_decision.selected_path') is None
+
+
 # ------------------------------------------------------------------------- the chain's study folder
 @pytest.mark.tool7
 def test_tool7_finds_in_the_chain_study_the_files_the_chain_picks(chain):
@@ -328,6 +440,34 @@ def test_tool5_finds_in_the_chain_study_the_files_the_chain_picks(chain):
         nb.pick('fc_data', data)
         assert Path(nb.value('fc_subj.selected')) == data / 'participants.tsv'
         assert Path(nb.value('fc_remap.selected')) == data / 'config_param' / 'event_remap.json'
+
+
+@pytest.mark.tool8bis
+def test_tool8bis_finds_in_the_chain_study_the_folders_the_chain_picks(chain):
+    data = Path(chain['data'])
+    with NotebookSession(pipeline.T8BIS) as nb:
+        nb.pick('fc_data', data)
+        assert Path(nb.value('fc_raw.selected_path')) == data / 'derivatives' / 'preproc_epo'
+        assert Path(nb.value('fc_reports.selected_path')) == data / 'reports_preproc'
+
+
+@pytest.mark.tool8
+def test_tool8_finds_in_the_chain_study_the_folders_the_chain_picks(chain):
+    data = Path(chain['data'])
+    with NotebookSession(pipeline.T8) as nb:
+        nb.pick('fc_data', data)
+        assert Path(nb.value('fc_raw.selected_path')) == data / 'derivatives' / 'preproc_epo'
+        assert Path(nb.value('fc_reports.selected_path')) == data / 'reports_preproc'
+
+
+@pytest.mark.tool9
+def test_tool9_finds_in_the_chain_study_the_run_and_a_decision(chain):
+    data = Path(chain['data'])
+    with NotebookSession(pipeline.T9) as nb:
+        nb.pick('fc_data', data)
+        assert Path(nb.value('fc_raw.selected_path')) == data / 'derivatives' / 'preproc_epo'
+        assert Path(nb.value('fc_decision.selected_path')).parent == data / 'derivatives'
+        assert Path(nb.value('fc_subj.selected')) == data / 'participants.tsv'
 
 
 @pytest.mark.tool5bis

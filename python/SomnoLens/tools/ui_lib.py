@@ -308,8 +308,9 @@ def input_row(picker, name, need, absent, check=None, on_change=None):
     every change of the selection, found or chosen by hand (the picker's own callback: do not register another).
 
     Returns (row, locate): put `row` in the page and, after the study folder is picked, call
-    locate(study, path, how, folder) with what study_files_lib.find_input returned (path None when not found);
-    locate(None) empties it (no study folder)."""
+    locate(study, path, how, folder) with what study_files_lib.find_input returned (path None when not found; a
+    folder for a picker of folders). locate(None) empties it (no study folder). `note` replaces 'not found: …' when no
+    file is the user's choice (e.g. 'none': every epoch is kept)."""
     line = widgets.HTML('')
     another = button(CHOOSE_ANOTHER, 'helper', tooltip=f'Pick the {name.lower()} by hand')
     # A FileChooser built without a layout shares ONE Layout object with every other one (ipyfilechooser's default
@@ -318,14 +319,14 @@ def input_row(picker, name, need, absent, check=None, on_change=None):
     picker.layout.display = 'none'
     row = widgets.VBox([widgets.HBox([line, another], layout=widgets.Layout(align_items='center')), picker],
                        layout=widgets.Layout(display='none'))
-    state = {'study': None, 'auto': None, 'how': ''}
+    state = {'study': None, 'auto': None, 'how': '', 'note': None}
 
     def _show():
         row.layout.display = '' if (state['study'] or picker.selected) else 'none'
         path = picker.selected
         if not path:
-            kind = NEED_KIND[need]
-            line.value = input_line_html(kind, name, msg(kind, f'not found: {absent}', symbol=False))
+            kind = 'info' if state['note'] else NEED_KIND[need]
+            line.value = input_line_html(kind, name, msg(kind, state['note'] or f'not found: {absent}', symbol=False))
             return
         same = state['auto'] is not None and (os.path.normcase(os.path.abspath(str(path)))
                                               == os.path.normcase(os.path.abspath(str(state['auto']))))
@@ -353,11 +354,14 @@ def input_row(picker, name, need, absent, check=None, on_change=None):
         except Exception:
             pass
 
-    def locate(study, path=None, how='', folder=None):
-        state.update(study=study, auto=path, how=how)
+    def locate(study, path=None, how='', folder=None, note=None):
+        state.update(study=study, auto=path, how=how, note=note)
         picker.layout.display = 'none'
         if path:
-            picker.reset(path=str(Path(path).parent), filename=Path(path).name)
+            if picker.show_only_dirs:  # a picker of folders: the folder itself, no file name
+                picker.reset(path=str(path), filename='')
+            else:
+                picker.reset(path=str(Path(path).parent), filename=Path(path).name)
             picker._apply_selection()  # selected without a click, without the callback (called below)
         elif folder or study:
             picker.reset(path=str(folder or study), filename='')
@@ -368,6 +372,31 @@ def input_row(picker, name, need, absent, check=None, on_change=None):
     another.on_click(_on_another)
     picker.register_callback(lambda _fc: _changed())
     return row, locate
+
+
+def choice_menu(description, on_choose, min_shown=2):
+    """A menu in front of an input row, when the study holds several candidates (several runs of tool 7, several
+    decision folders). Hidden with fewer than `min_shown` options. Returns (menu, fill): fill(options) sets
+    [(label, value)] and selects the first; on_choose(value) is called when the menu is changed, not by fill."""
+    menu = widgets.Dropdown(description=description, options=[('', '')], value='', style=LABEL_STYLE,
+                            layout=widgets.Layout(width=WIDE_WIDTH, display='none'))
+    state = {'busy': False}
+
+    def _on_change(change):
+        if not state['busy']:
+            on_choose(change['new'])
+
+    def fill(options):
+        state['busy'] = True
+        try:
+            menu.options = list(options) or [('', '')]
+            menu.value = menu.options[0][1]
+        finally:
+            state['busy'] = False
+        menu.layout.display = '' if len(options) >= min_shown else 'none'
+
+    menu.observe(_on_change, names='value')
+    return menu, fill
 
 
 def inputs_list(children):

@@ -1,14 +1,15 @@
 """Where the files of a study are and what they are called.
 
 Format-agnostic (no EDF or Curry reading, no MNE), so every Voila page and Curry twin can import it next to
-ui_lib. Three things live here:
+ui_lib. Four things live here:
 
 - the **names registry** `config_param/file_names.json`: each tool notes the names it wrote (or read), e.g. the
   suffix of the hypnograms tool 3 remapped, so the later tools follow a name the user changed;
 - the **choice of a companion suffix**: a companion file sits beside its recording, named
   `<recording name><suffix>`, and the tools pre-choose the suffix to read among the ones found;
 - the **inputs of a tool** (tool 2's channel configuration, tool 4's event mapping...): where each is looked for
-  in the study folder, and a light read of the file found, for the 'Inputs found' list of the pages.
+  in the study folder, and a light read of the file found, for the 'Inputs found' list of the pages;
+- the **runs of tool 7** and the decisions made on them, found from the study folder (tools 8, 8bis, 9).
 """
 import datetime
 import json
@@ -326,3 +327,93 @@ def check_sleep_metrics_table(path):
     if ids is None:
         return 'warn', "not a tool-5 sleep metrics table: no 'file_id' column"
     return 'ok', f'{len(ids)} participants'
+
+
+# ---------------------------------------------------------------------------------------------------------
+# The runs of tool 7 and the decisions made on them (tools 8, 8bis, 9)
+# ---------------------------------------------------------------------------------------------------------
+NO_DECISION = ''                 # the value of the 'none' option of a decision menu
+
+
+def epoch_folders(study, names=None):
+    """The folders of preprocessed epochs of the study, as [(folder, number of participants)]: the
+    derivatives/preproc_epo* holding *_all-epo.fif, in the study folder then in the output folder tool 7 noted.
+    Tool 7 always writes preproc_epo: there are several only when a folder was renamed by hand to keep a former run
+    (preproc_epo_v2), or with tool 7's output folder."""
+    study = Path(study)
+    roots = [study]
+    rec = recorded(names, 'preproc_output')
+    if rec:
+        other = Path(rec) if Path(rec).is_absolute() else study / rec
+        if _norm(other.resolve()) != _norm(study.resolve()):
+            roots.append(other)
+    found = []
+    for root in roots:
+        derivatives = root / 'derivatives'
+        if not derivatives.is_dir():
+            continue
+        for folder in sorted(derivatives.iterdir()):
+            if folder.is_dir() and folder.name.lower().startswith('preproc_epo'):
+                n = sum(1 for _ in folder.rglob('*_all-epo.fif'))
+                if n:
+                    found.append((folder, n))
+    return found
+
+
+def epoch_folder_options(study, folders):
+    """The options of a menu of epoch_folders: [(label, folder as text)]."""
+    return [(f'{path_to_record(study, folder)}  ({n} participants)', str(folder)) for folder, n in folders]
+
+
+def paired_reports_folder(epoch_folder):
+    """The reports folder of a run of tool 7, by its name beside derivatives/: preproc_epo_v2 -> reports_preproc_v2.
+    None when there is none."""
+    epoch_folder = Path(epoch_folder)
+    if not epoch_folder.name.lower().startswith('preproc_epo'):
+        return None
+    candidate = epoch_folder.parent.parent / ('reports_preproc' + epoch_folder.name[len('preproc_epo'):])
+    return candidate if candidate.is_dir() else None
+
+
+def decision_folders(epoch_folder):
+    """The decision folders beside an epochs folder (rejection_auto* of tool 8bis, rejection_manual* of tool 8), the
+    most recent first, as [(folder, date of its latest *_epoch_decision.tsv, number of participants)]."""
+    found = []
+    for folder in sorted(Path(epoch_folder).parent.iterdir()):
+        if folder.is_dir() and folder.name.lower().startswith(('rejection_auto', 'rejection_manual')):
+            tables = list(folder.rglob('*_epoch_decision.tsv'))
+            if tables:
+                found.append((folder, max(t.stat().st_mtime for t in tables), len(tables)))
+    return sorted(found, key=lambda x: -x[1])
+
+
+def decision_folder_options(study, folders):
+    """The options of a menu of decision_folders, then 'none': [(label, folder as text or NO_DECISION)]."""
+    options = []
+    for folder, mtime, n in folders:
+        tool = 'tool 8bis' if folder.name.lower().startswith('rejection_auto') else 'tool 8'
+        saved = datetime.datetime.fromtimestamp(mtime).strftime('%Y-%m-%d %H:%M')
+        options.append((f'{path_to_record(study, folder)}  ({tool}, {n} participants, {saved})', str(folder)))
+    return options + [('none: no decision', NO_DECISION)]
+
+
+def _count_files(folder, pattern):
+    return sum(1 for _ in Path(folder).rglob(pattern))
+
+
+def check_epoch_folder(path):
+    """A light read of a folder of preprocessed epochs: ('ok', '11 participants') or ('warn', what is wrong)."""
+    n = _count_files(path, '*_all-epo.fif')
+    return ('ok', f'{n} participants') if n else ('warn', 'no tool-7 *_all-epo.fif in this folder')
+
+
+def check_reports_folder(path):
+    """A light read of tool 7's reports folder: ('ok', '11 participants') or ('warn', what is wrong)."""
+    n = _count_files(path, '*_epoch_channel_rejection.tsv')
+    return ('ok', f'{n} participants') if n else ('warn', 'no tool-7 *_epoch_channel_rejection.tsv in this folder')
+
+
+def check_decision_folder(path):
+    """A light read of a decision folder: ('ok', '11 participants') or ('warn', what is wrong)."""
+    n = _count_files(path, '*_epoch_decision.tsv')
+    return ('ok', f'{n} participants') if n else ('warn', 'no *_epoch_decision.tsv in this folder')

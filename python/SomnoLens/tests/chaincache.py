@@ -43,9 +43,9 @@ TOOL_DEPS = {
     '5bis': [TOOLS / '5bis_exclude_sleep_macrostructure_voila.ipynb', LIB_PSL, LIB_MACRO, LIB_EIO, LIB_UI, LIB_SF],
     '6': [TOOLS / '6_quality_overview_voila.ipynb', LIB_PSL, LIB_QUAL, LIB_UI, LIB_SF],
     '7': [TOOLS / '7_preprocessing_voila.ipynb', LIB_PSL, LIB_PREP, LIB_EIO, LIB_UI, LIB_SF],   # the libraries import edf_io_lib
-    '8bis': [TOOLS / '8bis_reject_automatically_voila.ipynb', LIB_PSL, LIB_QC, LIB_PREP, LIB_AR, LIB_EIO, LIB_UI],
-    '8': [TOOLS / '8_reject_manually_voila.ipynb', LIB_PSL, LIB_QC, LIB_PREP, LIB_EIO, LIB_UI],
-    '9': [TOOLS / '9_spectral_features_voila.ipynb', LIB_PSL, LIB_SPEC, LIB_EIO, LIB_UI],
+    '8bis': [TOOLS / '8bis_reject_automatically_voila.ipynb', LIB_PSL, LIB_QC, LIB_PREP, LIB_AR, LIB_EIO, LIB_UI, LIB_SF],
+    '8': [TOOLS / '8_reject_manually_voila.ipynb', LIB_PSL, LIB_QC, LIB_PREP, LIB_EIO, LIB_UI, LIB_SF],
+    '9': [TOOLS / '9_spectral_features_voila.ipynb', LIB_PSL, LIB_SPEC, LIB_EIO, LIB_UI, LIB_SF],
 }
 # What each tool writes in the data folder (deleted before it reruns)
 TOOL_OUTPUTS = {

@@ -1,8 +1,8 @@
 # Plan : sélection automatique des fichiers (hypnogrammes, entrées, dossiers)
 
-Statut : phases 1 et 2 faites le 2026-11-03 (§4, §5), contrôlées dans Voila le 2026-11-04 (outils 3, 5, 7). Phase 3a
-(outils 0, 2 à 7) faite le 2026-11-04 (§6.7, §6.8), pilote de l'outil 7 contrôlé dans Voila. Reste la phase 3b (outils
-8, 8bis, 9). Remplace, une fois fait, les deux
+Statut : phases 1 et 2 faites le 2026-11-03 (§4, §5), contrôlées dans Voila le 2026-11-04 (outils 3, 5, 7). Phases 3a et
+3b faites le 2026-11-04 (§6.7 à §6.9), pilote de l'outil 7 contrôlé dans Voila. Reste : le contrôle visuel des autres
+outils, puis la suppression de ce plan. Remplace, une fois fait, les deux
 points de SPEC *Planned modules* « Companion suffixes chosen from the detected ones, in the batch tools » et « File
 selection pointed at the expected files ».
 
@@ -317,6 +317,20 @@ Un encadré « Advanced » ouvert et modifié s'affiche avec un petit ⚠ (« de
 - Écart avec le §6.1 : les custom stages de l'outil 3 restent visibles, c'est là qu'on les déclare.
 - Pas fait : le menu quand il y a plusieurs configurations de l'outil 2 dans `config_param/` (§6.2) : le registre n'en
   retient qu'une, « Choose another… » donne accès aux autres.
+
+### 6.9 Phase 3b : les outils 8, 8bis, 9 (2026-11-04)
+
+- `study_files_lib` : `epoch_folders` (les `derivatives/preproc_epo*` de l'étude et du dossier de sortie noté par l'outil 7
+  sous `preproc_output`), `paired_reports_folder`, `decision_folders` (la plus récente d'abord), leurs options de menu,
+  `check_epoch_folder`, `check_reports_folder`, `check_decision_folder`.
+- `ui_lib` : `choice_menu` (caché avec moins de deux options), `input_row` accepte un sélecteur de dossiers et une `note`
+  (aucun fichier, par choix).
+- Outil 7 : note son dossier de sortie quand ce n'est pas l'étude (même règle que l'outil 5, les sorties de la chaîne ne
+  gagnent aucun fichier). Outils 8 et 8bis : le run de l'outil 7 et ses rapports appariés par le nom (optionnels pour 8,
+  obligatoires pour 8bis), un menu s'il y a plusieurs runs. Outil 9 : le run, la décision la plus récente pré-choisie, un
+  menu avec « none », la table des participants (`.xlsx` lu aussi), le champ custom stages dans Advanced.
+- Sans dossier d'étude, les sélecteurs marchent toujours à la main, et rien n'est pré-choisi (les tests, un run hors étude).
+- Tests : `run_tool9` choisit « none » dans le menu quand il veut « aucune décision » (l'outil pré-choisit sinon).
 
 ## 7. Hors périmètre
 

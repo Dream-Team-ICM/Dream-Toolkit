@@ -127,6 +127,37 @@ def test_input_row_says_what_was_found_and_follows_a_file_chosen_by_hand(tmp_pat
         assert symbol in row.children[0].children[0].value
 
 
+def test_input_row_of_a_folder_and_its_note(tmp_path):
+    from ipyfilechooser import FileChooser
+    folder = tmp_path / 'derivatives' / 'preproc_epo'
+    folder.mkdir(parents=True)
+    picker = FileChooser()
+    picker.show_only_dirs = True
+    row, locate = UI.input_row(picker, 'Preprocessed epochs', 'optional', 'run tool 7 first')
+    line = row.children[0].children[0]
+    locate(tmp_path, folder, 'the only run found', tmp_path)
+    assert Path(picker.selected_path) == folder                            # the folder itself, not its parent
+    assert 'derivatives/preproc_epo' in line.value and '(the only run found)' in line.value
+    locate(tmp_path, None, '', tmp_path, note='none chosen: no rejection is applied')
+    assert picker.selected_path is None and 'none chosen' in line.value and 'not found' not in line.value
+    locate(tmp_path, None, '', tmp_path)
+    assert 'not found: run tool 7 first' in line.value
+
+
+def test_choice_menu_shows_only_with_several_candidates():
+    chosen = []
+    menu, fill = UI.choice_menu('Run:', chosen.append)
+    assert menu.layout.display == 'none'
+    fill([('one', 'a')])
+    assert menu.layout.display == 'none' and menu.value == 'a' and chosen == []     # filling chooses nothing
+    fill([('one', 'a'), ('two', 'b')])
+    assert menu.layout.display == '' and menu.value == 'a' and chosen == []
+    menu.value = 'b'
+    assert chosen == ['b']
+    fill([])
+    assert menu.layout.display == 'none' and chosen == ['b']
+
+
 def test_inputs_list_waits_for_the_study_folder():
     import ipywidgets as widgets
     field = widgets.Text()
