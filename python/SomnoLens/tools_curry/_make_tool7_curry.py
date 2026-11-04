@@ -208,11 +208,9 @@ replace_in_cell(ui_paths,
 replace_all_cells("next to the EDF files", "next to the .cdt files",
                   "event detection EDF-files text", required=False)
 
-# 4d2. Docstring mentioning "EDF folder"
-replace_in_cell(ui_paths,
-    '"""Auto-detect hypnogram .txt suffixes in the EDF folder and populate the widget."""',
-    '"""Auto-detect hypnogram .txt suffixes in the .cdt folder and populate the widget."""',
-    "cell4 docstring")
+# 4d2. (the docstring of _detect_hypno_suffixes names no format: passes through)
+# 4d3. The inputs of the 'Inputs found' list (study_files_lib.find_input / check_*, ui_lib.input_row) are
+# format-agnostic: they pass through.
 
 # 4e. (fc_config title: names tool 2, valid for both formats)
 

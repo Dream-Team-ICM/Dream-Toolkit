@@ -1,16 +1,19 @@
 """Where the files of a study are and what they are called.
 
 Format-agnostic (no EDF or Curry reading, no MNE), so every Voila page and Curry twin can import it next to
-ui_lib. Two things live here:
+ui_lib. Three things live here:
 
 - the **names registry** `config_param/file_names.json`: each tool notes the names it wrote (or read), e.g. the
   suffix of the hypnograms tool 3 remapped, so the later tools follow a name the user changed;
 - the **choice of a companion suffix**: a companion file sits beside its recording, named
-  `<recording name><suffix>`, and the tools pre-choose the suffix to read among the ones found.
+  `<recording name><suffix>`, and the tools pre-choose the suffix to read among the ones found;
+- the **inputs of a tool** (tool 2's channel configuration, tool 4's event mapping...): where each is looked for
+  in the study folder, and a light read of the file found, for the 'Inputs found' list of the pages.
 """
 import datetime
 import json
 import os
+import re
 from pathlib import Path
 
 NAMES_FILE = 'file_names.json'
@@ -209,3 +212,117 @@ def output_suffix(names, key, counts, new_default, former_default):
     if any(_norm(s) == _norm(former_default) and c > 0 for s, c in counts.items()):
         return former_default
     return new_default
+
+
+# ---------------------------------------------------------------------------------------------------------
+# The inputs of a tool: where each is looked for in the study folder, and a light read of the file found
+# (the 'Inputs found' list of the Voila pages, ui_lib.input_row)
+# ---------------------------------------------------------------------------------------------------------
+# Tool 2's channel configuration: new studies get the new name, a study already processed keeps the former one
+CHANNEL_CONFIG_DEFAULT = 'channel_config.json'
+CHANNEL_CONFIG_FORMER = 'remap_reref_persubject.json'
+EVENT_REMAP_DEFAULT = 'event_remap.json'
+
+# key -> the places looked for, relative to the study folder, after the path recorded under the same key in the
+# names registry
+INPUT_PLACES = {
+    'channel_config': (f'config_param/{CHANNEL_CONFIG_DEFAULT}', f'config_param/{CHANNEL_CONFIG_FORMER}'),  # tool 2
+    'event_remap': (f'config_param/{EVENT_REMAP_DEFAULT}',),                  # tool 4
+    'quality_summary': ('reports_quality_overview/quality_summary.tsv',),     # tool 6
+    'sleep_metrics_table': ('reports_features_macrostructure/global_sleep_metrics.tsv',),   # tool 5
+    'participant_info': ('participants.tsv', 'participants.csv', 'participants.xlsx'),       # the user's table
+}
+
+
+def find_input(study, names, key):
+    """The file of one input of a tool, as (path, how, folder):
+      - the path recorded under `key` in the names registry, when the file exists (how = 'recorded by tool N');
+      - else the first of INPUT_PLACES[key] found in the study (how = 'default location');
+      - else (None, '', folder).
+    `folder` is where 'Choose another…' opens: the file's folder, else the first place's folder that exists, else
+    the study folder. A recorded path is relative to the study folder, or absolute when the file is elsewhere."""
+    study = Path(study)
+    rec = recorded(names, key)
+    if rec:
+        path = Path(rec) if Path(rec).is_absolute() else study / rec
+        if path.is_file():
+            return path, f"recorded by tool {names[key].get('tool', '?')}", path.parent
+    for place in INPUT_PLACES[key]:
+        if (study / place).is_file():
+            return study / place, 'default location', (study / place).parent
+    folders = [(study / place).parent for place in INPUT_PLACES[key]]
+    return None, '', next((f for f in folders if f.is_dir()), study)
+
+
+def path_to_record(study, path):
+    """How a path is written in the names registry: relative to the study folder (with '/') when inside it, else
+    absolute. find_input reads both."""
+    try:
+        return Path(path).resolve().relative_to(Path(study).resolve()).as_posix()
+    except ValueError:
+        return str(Path(path).resolve())
+
+
+def config_file_name(study, names, key, default, former=None):
+    """The name of the file a tool writes in config_param/ (tool 2's channel configuration, tool 4's event mapping),
+    so that a study keeps its name: the name recorded under `key` when it is in config_param/, else `former` when
+    the study already has that file, else `default`."""
+    rec = recorded(names, key)
+    if rec and Path(rec).parent.as_posix() == 'config_param':
+        return Path(rec).name
+    config_param = Path(study) / 'config_param'
+    if former and (config_param / former).is_file() and not (config_param / default).is_file():
+        return former
+    return default
+
+
+def check_channel_config(path):
+    """A light read of tool 2's channel configuration: ('ok', '11 participants') or ('warn', what is wrong)."""
+    cfg = json.loads(Path(path).read_text(encoding='utf-8'))
+    if not isinstance(cfg, dict) or not cfg:
+        return 'warn', 'not a channel configuration: empty, or not a JSON object'
+    n_bad = sum(1 for v in cfg.values() if not (isinstance(v, dict) and 'remap' in v))
+    if n_bad:
+        return 'warn', f"not a channel configuration: {n_bad} of {len(cfg)} entries have no 'remap' key"
+    return 'ok', f'{len(cfg)} participants'
+
+
+def check_event_remap(path):
+    """A light read of tool 4's event mapping: ('ok', '14 labels → 5 event types') or ('warn', what is wrong)."""
+    text = Path(path).read_text(encoding='utf-8')
+    try:
+        remap = json.loads(text)
+    except json.JSONDecodeError:   # the lenient read of the tools: one trailing comma repaired (load_event_remap)
+        remap = json.loads(re.sub(r',(\s*[}\]])', r'\1', text))
+    if not isinstance(remap, dict) or not remap:
+        return 'warn', 'not an event mapping: empty, or not a JSON object'
+    if not all(v is None or isinstance(v, str) for v in remap.values()):
+        return 'warn', 'not an event mapping: the values must be event types (text)'
+    n_types = len({v for v in remap.values() if v})
+    return 'ok', f'{len(remap)} labels → {n_types} event types'
+
+
+def _tsv_ids(path):
+    """The distinct values of the 'file_id' column of a TSV table, or None when it has no such column."""
+    with open(path, encoding='utf-8') as f:
+        header = f.readline().rstrip('\r\n').split('\t')
+        if 'file_id' not in header:
+            return None
+        col = header.index('file_id')
+        return {line.rstrip('\r\n').split('\t')[col] for line in f if line.strip()}
+
+
+def check_quality_summary(path):
+    """A light read of tool 6's quality summary: ('ok', '11 recordings') or ('warn', what is wrong)."""
+    ids = _tsv_ids(path)
+    if ids is None:
+        return 'warn', "not a quality summary: no 'file_id' column"
+    return 'ok', f'{len(ids)} recordings'
+
+
+def check_sleep_metrics_table(path):
+    """A light read of tool 5's global_sleep_metrics.tsv: ('ok', '11 participants') or ('warn', what is wrong)."""
+    ids = _tsv_ids(path)
+    if ids is None:
+        return 'warn', "not a tool-5 sleep metrics table: no 'file_id' column"
+    return 'ok', f'{len(ids)} participants'

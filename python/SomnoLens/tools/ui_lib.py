@@ -1,8 +1,9 @@
 """The look of the SomnoLens Voila pages, in one place (SPEC *Cross-cutting -> Voila page conventions*).
 
 Colours of the messages, section headers, buttons, field widths and progress bars, so that every tool looks
-and reads the same. Only the look: no computation, no state, nothing written to disk. The HTML reports keep
-their own style: they are outputs, and an output must not change with the look of the page.
+and reads the same, and the small widgets every page builds the same way (the suffix menus, the 'Inputs found'
+list, the 'Advanced' box). No computation, nothing written to disk. The HTML reports keep their own style:
+they are outputs, and an output must not change with the look of the page.
 
 Imported by every Voila tool (and its Curry twin), like the other shared modules:
     import ui_lib as UI
@@ -12,6 +13,7 @@ Imported by every Voila tool (and its Curry twin), like the other shared modules
     progress, progress_row = UI.progress_bar('Participants:')   # put progress_row in the page
 """
 import os
+from pathlib import Path
 
 import ipywidgets as widgets
 
@@ -268,3 +270,145 @@ def suffix_menu(field, info):
     menu.observe(_on_menu, names='value')
     field.observe(_on_field, names='value')
     return menu, fill
+
+
+# ---------------------------------------------------------------------------
+# The 'Inputs found' list: one line per input of a tool, found in the study folder or chosen by hand
+# ---------------------------------------------------------------------------
+CHOOSE_ANOTHER = 'Choose another…'
+# the kind of the line of an input that is not found: required = the run refuses, recommended, optional
+NEED_KIND = {'required': 'error', 'recommended': 'warn', 'optional': 'info'}
+
+
+def input_line_html(kind, name, detail):
+    """One line of the 'Inputs found' list: the symbol of `kind`, the input's name in bold (a fixed width, so the
+    lines align) and `detail` (HTML)."""
+    sym = MESSAGE_STYLES[kind][2]
+    return (f'<div style="line-height:1.4;">{sym} <b style="display:inline-block; min-width:{LABEL_WIDTH};">'
+            f'{name}</b> {detail}</div>')
+
+
+def _shown_path(path, study):
+    """A path as the list shows it: relative to the study folder when inside it, else in full."""
+    try:
+        rel = os.path.relpath(path, study) if study else str(path)
+    except ValueError:            # another drive (Windows)
+        rel = str(path)
+    return str(path) if rel.startswith('..') else rel.replace(os.sep, '/')
+
+
+def input_row(picker, name, need, absent, check=None, on_change=None):
+    """One line of the 'Inputs found' list, for an input file the tool finds in the study folder: the file found
+    (and how), or what is missing, then a 'Choose another…' button that shows the tool's own `picker` (a
+    FileChooser, kept under its name: the run, and the tests, read its selection) for a file chosen by hand.
+
+    need = 'required' (❌ when not found: the run refuses), 'recommended' (⚠️) or 'optional' (ℹ️); absent = what the
+    line says after 'not found: ' (e.g. 'run tool 2 first'); check(path) -> (kind, text) = a light read of the file
+    (e.g. ('ok', '11 participants') or ('warn', 'not a channel configuration')); on_change(picker) is called after
+    every change of the selection, found or chosen by hand (the picker's own callback: do not register another).
+
+    Returns (row, locate): put `row` in the page and, after the study folder is picked, call
+    locate(study, path, how, folder) with what study_files_lib.find_input returned (path None when not found);
+    locate(None) empties it (no study folder)."""
+    line = widgets.HTML('')
+    another = button(CHOOSE_ANOTHER, 'helper', tooltip=f'Pick the {name.lower()} by hand')
+    # A FileChooser built without a layout shares ONE Layout object with every other one (ipyfilechooser's default
+    # argument): this picker gets its own before it is hidden, or the study folder's picker would hide with it.
+    picker.layout = widgets.Layout(width=picker.layout.width)
+    picker.layout.display = 'none'
+    row = widgets.VBox([widgets.HBox([line, another], layout=widgets.Layout(align_items='center')), picker],
+                       layout=widgets.Layout(display='none'))
+    state = {'study': None, 'auto': None, 'how': ''}
+
+    def _show():
+        row.layout.display = '' if (state['study'] or picker.selected) else 'none'
+        path = picker.selected
+        if not path:
+            kind = NEED_KIND[need]
+            line.value = input_line_html(kind, name, msg(kind, f'not found: {absent}', symbol=False))
+            return
+        same = state['auto'] is not None and (os.path.normcase(os.path.abspath(str(path)))
+                                              == os.path.normcase(os.path.abspath(str(state['auto']))))
+        how = state['how'] if same else 'chosen by hand'
+        kind, read = 'ok', ''
+        if check is not None:
+            try:
+                kind, read = check(path)
+            except Exception as e:
+                kind, read = 'warn', f'unreadable: {e}'
+        detail = f'<code>{_shown_path(path, state["study"])}</code> {msg("muted", f"({how})", symbol=False)}'
+        if read:
+            detail += ' · ' + msg('muted' if kind == 'ok' else kind, read, symbol=False)
+        line.value = input_line_html(kind, name, detail)
+
+    def _changed():
+        _show()
+        if on_change is not None:
+            on_change(picker)
+
+    def _on_another(_):
+        picker.layout.display = ''
+        try:
+            picker._show_dialog()      # open its file list at once (ipyfilechooser 0.6)
+        except Exception:
+            pass
+
+    def locate(study, path=None, how='', folder=None):
+        state.update(study=study, auto=path, how=how)
+        picker.layout.display = 'none'
+        if path:
+            picker.reset(path=str(Path(path).parent), filename=Path(path).name)
+            picker._apply_selection()  # selected without a click, without the callback (called below)
+        elif folder or study:
+            picker.reset(path=str(folder or study), filename='')
+        else:
+            picker.reset()
+        _changed()
+
+    another.on_click(_on_another)
+    picker.register_callback(lambda _fc: _changed())
+    return row, locate
+
+
+def inputs_list(children):
+    """The 'Inputs found' list of Section 1: its title, then `children` (input rows, suffix menus, lines...). Returns
+    (widget, show): put `widget` under the study folder's picker and call show(True) once the study folder is
+    picked, show(False) when there is none. Until then a grey line says to pick it."""
+    wait = widgets.HTML(msg('muted', 'Pick the study folder: the tool finds its inputs in it.', symbol=False))
+    box_ = widgets.VBox([widgets.HTML(text_block('<b>Inputs found</b>'))] + list(children),
+                        layout=widgets.Layout(display='none'))
+
+    def show(on):
+        box_.layout.display = '' if on else 'none'
+        wait.layout.display = 'none' if on else ''
+
+    return widgets.VBox([wait, box_]), show
+
+
+def custom_stages_html(stages, loaded):
+    """The custom stages line of the 'Inputs found' list: `stages` = the non-AASM stages the run will use (the field
+    of the Advanced box), `loaded` = the ones read from config_param/custom_stages.json (tool 3)."""
+    if list(stages) != list(loaded):
+        return input_line_html('info', 'Custom stages', f'{", ".join(stages) or "none"} '
+                               + msg('muted', '(changed in Advanced, for this run)', symbol=False))
+    if stages:
+        return input_line_html('ok', 'Custom stages', f'{", ".join(stages)} '
+                               + msg('muted', '(<code>config_param/custom_stages.json</code>, tool 3)', symbol=False))
+    return input_line_html('info', 'Custom stages', msg('muted', 'none registered: the AASM stages only', symbol=False))
+
+
+# ---------------------------------------------------------------------------
+# The 'Advanced' box: the settings a beginner leaves alone, closed by default
+# ---------------------------------------------------------------------------
+def advanced_box(children, title='Advanced'):
+    """A closed box holding `children` (widgets). Returns (box, mark): call mark(changes) with the names of the
+    settings that differ from their default ([] = none), so that a changed box says so in its title and is not
+    forgotten: 'Advanced  ⚠️ default changed: output folder'."""
+    inner = widgets.VBox(list(children))
+    box_ = widgets.Accordion(children=[inner], selected_index=None, layout=widgets.Layout(width=WIDE_WIDTH))
+    box_.set_title(0, title)
+
+    def mark(changes):
+        box_.set_title(0, f'{title}  {WARN} default changed: {", ".join(changes)}' if changes else title)
+
+    return box_, mark

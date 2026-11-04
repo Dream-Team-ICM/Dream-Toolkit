@@ -104,3 +104,67 @@ def test_a_study_keeps_its_output_names():
     assert SF.output_suffix({}, 'hypnogram_remapped', new, *args) == '_hypno_remapped.txt'
     names = {'hypnogram_remapped': {'value': '_mine.txt'}}
     assert SF.output_suffix(names, 'hypnogram_remapped', old, *args) == '_mine.txt'
+
+
+def test_an_input_is_found_where_it_was_recorded_else_at_its_default_location(tmp_path):
+    study = tmp_path / 'study'
+    (study / 'config_param').mkdir(parents=True)
+    path, how, folder = SF.find_input(study, {}, 'channel_config')
+    assert (path, how, folder) == (None, '', study / 'config_param')    # 'Choose another…' opens in config_param/
+    assert SF.find_input(study, {}, 'quality_summary') == (None, '', study)
+    former = study / 'config_param' / 'remap_reref_persubject.json'
+    former.write_text('{}', encoding='utf-8')
+    assert SF.find_input(study, {}, 'channel_config')[:2] == (former, 'default location')   # a study keeps its name
+    new = study / 'config_param' / 'channel_config.json'
+    new.write_text('{}', encoding='utf-8')
+    assert SF.find_input(study, {}, 'channel_config')[0] == new
+    mine = tmp_path / 'elsewhere' / 'my_channels.json'
+    mine.parent.mkdir()
+    mine.write_text('{}', encoding='utf-8')
+    names = {'channel_config': {'value': str(mine), 'tool': '2'}}
+    assert SF.find_input(study, names, 'channel_config') == (mine, 'recorded by tool 2', mine.parent)
+    names = {'channel_config': {'value': 'config_param/gone.json', 'tool': '2'}}   # recorded, but no longer there
+    assert SF.find_input(study, names, 'channel_config')[0] == new
+
+
+def test_the_light_read_of_an_input_says_what_it_holds(tmp_path):
+    def write(name, text):
+        (tmp_path / name).write_text(text, encoding='utf-8')
+        return tmp_path / name
+
+    cfg = {'s1': {'remap': {'C3': 'C3'}, 'ref_channels': ['M2']}, 's2': {'remap': {}, 'ref_channels': []}}
+    assert SF.check_channel_config(write('c.json', json.dumps(cfg))) == ('ok', '2 participants')
+    assert SF.check_channel_config(write('c.json', '{}'))[0] == 'warn'
+    kind, text = SF.check_channel_config(write('c.json', json.dumps({'Arousal': 'arousal'})))
+    assert kind == 'warn' and "'remap'" in text
+    assert SF.check_event_remap(write('e.json', '{"Arousal": "arousal", "Eveil": "arousal", "x": null,}')) == \
+        ('ok', '3 labels → 1 event types')                                # one trailing comma repaired, like the tools
+    assert SF.check_event_remap(write('e.json', json.dumps(cfg)))[0] == 'warn'
+    assert SF.check_quality_summary(write('q.tsv', 'file_id\tchannel\ns1\tC3\ns1\tO1\ns2\tC3\n')) == ('ok', '2 recordings')
+    assert SF.check_quality_summary(write('q.tsv', 'a\tb\n1\t2\n'))[0] == 'warn'
+    assert SF.check_sleep_metrics_table(write('g.tsv', 'file_id\tTST\ns1\t400\ns2\t420\n')) == ('ok', '2 participants')
+    assert SF.check_sleep_metrics_table(write('g.tsv', 'a\tb\n1\t2\n'))[0] == 'warn'
+
+
+def test_a_study_keeps_the_name_of_its_configuration_files(tmp_path):
+    study = tmp_path / 'study'
+    (study / 'config_param').mkdir(parents=True)
+    args = ('channel_config', SF.CHANNEL_CONFIG_DEFAULT, SF.CHANNEL_CONFIG_FORMER)
+    assert SF.config_file_name(study, {}, *args) == 'channel_config.json'             # a new study
+    former = study / 'config_param' / 'remap_reref_persubject.json'
+    former.write_text('{}', encoding='utf-8')
+    assert SF.config_file_name(study, {}, *args) == 'remap_reref_persubject.json'     # keeps the name it has
+    (study / 'config_param' / 'channel_config.json').write_text('{}', encoding='utf-8')
+    assert SF.config_file_name(study, {}, *args) == 'channel_config.json'             # the one find_input finds first
+    names = {'channel_config': {'value': 'config_param/mine.json', 'tool': '2'}}
+    assert SF.config_file_name(study, names, *args) == 'mine.json'
+    names = {'channel_config': {'value': str(tmp_path / 'elsewhere.json'), 'tool': '2'}}   # not in config_param/
+    assert SF.config_file_name(study, names, *args) == 'channel_config.json'
+
+
+def test_a_path_is_recorded_relative_to_the_study_when_inside_it(tmp_path):
+    study = tmp_path / 'study'
+    (study / 'config_param').mkdir(parents=True)
+    assert SF.path_to_record(study, study / 'config_param' / 'x.json') == 'config_param/x.json'
+    outside = tmp_path / 'out' / 'table.tsv'
+    assert SF.path_to_record(study, outside) == str(outside.resolve())

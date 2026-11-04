@@ -33,7 +33,8 @@ The "what to do / what not to break" reminders, grouped by theme. Each points to
   the header scan, **not** the raw-based `detect_channel_types`). It **must tolerate a missing `transducer_type`
   column** so the generated Curry twin still works (name-only there). Auto-detected into editable dropdowns
   (`(none)` if absent), fanned out to participants like `remap`/`ref_channels`, and saved in an **additive,
-  optional** `context_channels` block of `remap_reref_persubject.json` (**omitted when empty** → JSONs
+  optional** `context_channels` block of the channel configuration (`channel_config.json`; a study keeps
+  `remap_reref_persubject.json`, **`study_files_lib.find_input`** finds either) (**omitted when empty** → JSONs
   without context stay byte-identical). Analysis tools 6/7 ignore it. Only tools that explicitly ask (e.g.
   tool 8's per-epoch inspector) load these channels on demand. The Curry
   twin is **regenerated** via `tools_curry/_make_tool2_curry.py` (new code passes through, no generator
@@ -176,8 +177,9 @@ The "what to do / what not to break" reminders, grouped by theme. Each points to
   + References, `section_html` / `subsection_html` (continuous numbering), message colours, buttons by role
   (`run` / `save` green, `read` blue = **Scan** as the entry button, `caution`, `helper`), widths, `picker_title`
   / `help_html` / `text_block` (a long widget text needs one: a widget HTML spaces wrapped lines by 28 px),
-  progress bars, suffix menus (`suffix_menu`: the field stays what the tool reads). **No button that only
-  reveals widgets**: a section builds itself after the step it
+  progress bars, suffix menus (`suffix_menu`: the field stays what the tool reads), the **Inputs found** list
+  (`input_row`: the study folder is the only picker to use, the tool finds the rest, **the picker stays what the run
+  reads**), the **Advanced** box (`advanced_box`). **No button that only reveals widgets**: a section builds itself after the step it
   needs (`waiting_html` until then). A new page or widget follows it; `tests/test_ui_lib.py` guards the pages.
   → SPEC *Cross-cutting → Voila page conventions*.
 

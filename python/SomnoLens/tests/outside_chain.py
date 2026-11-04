@@ -102,6 +102,7 @@ def run_tool7_variant(data):
     data = Path(data)
     with NotebookSession(T7) as nb:
         nb.pick('fc_edf', data)
+        nb.run('fc_quality.reset()')     # tool 7 finds the chain's quality table in the study: this variant runs without
         nb.pick('fc_config', data / 'config_param' / 'remap_reref_persubject.json')
         nb.pick('fc_events', data / 'config_param' / 'event_remap.json')
         nb.pick('fc_out', data)

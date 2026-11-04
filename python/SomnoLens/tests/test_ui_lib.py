@@ -92,6 +92,70 @@ def test_suffix_menu_lists_the_suffixes_and_follows_its_field():
     assert menu.layout.display == 'none' and field.description == 'Hypno suffix:'
 
 
+def test_input_row_says_what_was_found_and_follows_a_file_chosen_by_hand(tmp_path):
+    from ipyfilechooser import FileChooser
+    study = tmp_path / 'study'
+    (study / 'config_param').mkdir(parents=True)
+    found = study / 'config_param' / 'channels.json'
+    found.write_text('{}', encoding='utf-8')
+    mine = tmp_path / 'mine.json'
+    mine.write_text('{}', encoding='utf-8')
+    study_picker, picker, changes = FileChooser(), FileChooser(), []
+    row, locate = UI.input_row(picker, 'Channel configuration', 'required', 'run tool 2 first',
+                               check=lambda p: ('ok', '11 participants') if Path(p) == found else ('warn', 'empty'),
+                               on_change=lambda fc: changes.append(fc.selected))
+    line = row.children[0].children[0]
+    assert row.layout.display == 'none'                                    # no study folder yet
+    assert study_picker.layout.display != 'none'      # the pickers share a default Layout: only this one is hidden
+    locate(study, None, '', study / 'config_param')
+    assert row.layout.display == '' and UI.ERROR in line.value and 'not found: run tool 2 first' in line.value
+    assert picker.selected is None and changes == [None]
+    locate(study, found, 'default location', found.parent)
+    assert picker.selected == str(found) and picker.layout.display == 'none'   # selected without a click
+    assert 'config_param/channels.json' in line.value and '(default location)' in line.value
+    assert '11 participants' in line.value and UI.OK in line.value
+    picker.reset(path=str(tmp_path), filename='mine.json')                 # chosen by hand, as with the dialog
+    picker._show_dialog()
+    picker._on_select_click(None)
+    assert '(chosen by hand)' in line.value and str(mine) in line.value    # outside the study: shown in full
+    assert UI.WARN in line.value and changes[-1] == str(mine)
+    locate(None)
+    assert row.layout.display == 'none' and picker.selected is None
+    for need, symbol in [('recommended', UI.WARN), ('optional', UI.INFO)]:
+        row, locate = UI.input_row(FileChooser(), 'Event remap', need, 'no event flagging')
+        locate(study, None, '', study)
+        assert symbol in row.children[0].children[0].value
+
+
+def test_inputs_list_waits_for_the_study_folder():
+    import ipywidgets as widgets
+    field = widgets.Text()
+    widget, show = UI.inputs_list([field])
+    wait, box = widget.children
+    assert 'Pick the study folder' in wait.value and box.layout.display == 'none' and field in box.children
+    show(True)
+    assert box.layout.display == '' and wait.layout.display == 'none'
+    show(False)
+    assert box.layout.display == 'none' and wait.layout.display == ''
+
+
+def test_custom_stages_line_says_where_they_come_from():
+    assert 'custom_stages.json' in UI.custom_stages_html(['N4'], ['N4']) and UI.OK in UI.custom_stages_html(['N4'], ['N4'])
+    assert 'changed in Advanced' in UI.custom_stages_html(['N4', 'N5'], ['N4'])
+    assert 'none' in UI.custom_stages_html([], ['N4']) and 'changed in Advanced' in UI.custom_stages_html([], ['N4'])
+    assert 'none registered' in UI.custom_stages_html([], [])
+
+
+def test_advanced_box_is_closed_and_says_when_a_default_was_changed():
+    import ipywidgets as widgets
+    box, mark = UI.advanced_box([widgets.Text()])
+    assert box.selected_index is None and box.get_title(0) == 'Advanced'
+    mark(['output folder'])
+    assert box.get_title(0) == f'Advanced  {UI.WARN} default changed: output folder'
+    mark([])
+    assert box.get_title(0) == 'Advanced'
+
+
 # ---------------------------------------------------------------------------
 # Guards: every page keeps to the conventions (no drift back to a page's own style)
 # ---------------------------------------------------------------------------

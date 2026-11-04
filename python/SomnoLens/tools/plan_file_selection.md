@@ -1,7 +1,8 @@
 # Plan : sélection automatique des fichiers (hypnogrammes, entrées, dossiers)
 
-Statut : phases 1 et 2 faites le 2026-11-03 (§4, §5) ; phase 3 à faire, après un contrôle visuel des phases 1
-et 2 dans Voila. Remplace, une fois fait, les deux
+Statut : phases 1 et 2 faites le 2026-11-03 (§4, §5), contrôlées dans Voila le 2026-11-04 (outils 3, 5, 7). Phase 3a
+(outils 0, 2 à 7) faite le 2026-11-04 (§6.7, §6.8), pilote de l'outil 7 contrôlé dans Voila. Reste la phase 3b (outils
+8, 8bis, 9). Remplace, une fois fait, les deux
 points de SPEC *Planned modules* « Companion suffixes chosen from the detected ones, in the batch tools » et « File
 selection pointed at the expected files ».
 
@@ -281,6 +282,41 @@ Un encadré « Advanced » ouvert et modifié s'affiche avec un petit ⚠ (« de
   par outil avec seulement le dossier d'étude (tout trouvé) doit donner les mêmes sorties que la chaîne. Niveau
   proposé : full à la fin de la phase.
 - Si la phase est trop grosse pour un commit : 3a (outils 0, 2, 3, 3bis, 4, 5, 5bis, 6, 7), 3b (8, 8bis, 9).
+
+### 6.7 Pilote : l'outil 7 (2026-11-04)
+
+- `study_files_lib` : `INPUT_PLACES` (où chaque entrée est cherchée), `find_input(study, names, key)` → (chemin,
+  comment, dossier où « Choose another… » s'ouvre) et les lectures légères `check_channel_config`,
+  `check_event_remap`, `check_quality_summary`. La configuration de l'outil 2 est cherchée sous
+  `channel_config.json` puis `remap_reref_persubject.json` (l'outil 2 écrit encore l'ancien nom : §6.4 à faire).
+- `ui_lib` : `input_row(picker, name, need, absent, check, on_change)` → (ligne, locate), `input_line_html` (une
+  ligne sans bouton, pour les custom stages) et `advanced_box(children)` → (encadré, mark).
+- Outil 7, section 1 : le dossier d'étude, puis la liste (configuration ❌ si absente, quality summary ⚠️, event
+  remap ℹ️, custom stages en lecture seule, les trois menus de suffixes, la case des annotations), l'encadré
+  Advanced (dossier de sortie, champ custom stages) et la ligne des rapports existants. Scan et Run refusent sans
+  configuration (« run tool 2 first »). Le jumeau Curry suit sans changement de générateur (une ligne retirée).
+- Tests : `tests/test_inputs_found.py` (la liste, « chosen by hand », l'encadré, le refus, et sur la chaîne les
+  mêmes fichiers que ceux que la chaîne choisit), `test_ui_lib`, `test_study_files_lib`. La variante 7 de
+  `tests/outside_chain.py` désélectionne la quality table que l'outil trouve désormais seul.
+- Pas encore : plusieurs configurations de l'outil 2 (menu), l'enregistrement du dossier de sortie de l'outil 7
+  (pour 8, 8bis, 9 : phase 3b).
+
+### 6.8 Phase 3a : les autres outils (2026-11-04)
+
+- `ui_lib` : `inputs_list` (la liste, cachée avant le dossier d'étude) et `custom_stages_html`, repris par l'outil 7.
+- `study_files_lib` : `sleep_metrics_table`, `participant_info`, `config_file_name` (une étude garde le nom de son
+  fichier), `path_to_record`, `check_sleep_metrics_table`.
+- Outil 6 : configuration et custom stages dans la liste, champ custom stages dans Advanced. Outil 5 : event remap et
+  table des participants dans la liste, dossier de sortie et custom stages dans Advanced ; la table n'est notée dans le
+  registre que si elle est hors de sa place par défaut (les sorties de la chaîne ne gagnent aucun fichier). Outil 5bis :
+  la table de l'outil 5 dans la liste. Outil 3bis : un sélecteur de configuration est ajouté (elle était codée en dur), les
+  trois suffixes de sortie dans Advanced. Outil 3 : le suffixe de sortie dans Advanced, pas de liste (son entrée est le
+  menu). Outil 4 : le mapping existant dans la liste (une autre cohorte possible), le nom du fichier dans Advanced, enregistré
+  à la sauvegarde. Outil 2 : `channel_config.json`, le nom dans Advanced, enregistré à la sauvegarde. Outil 0 : les
+  entrées par `find_input`, le champ custom stages dans Advanced (son résumé d'étude reste, pas de liste).
+- Écart avec le §6.1 : les custom stages de l'outil 3 restent visibles, c'est là qu'on les déclare.
+- Pas fait : le menu quand il y a plusieurs configurations de l'outil 2 dans `config_param/` (§6.2) : le registre n'en
+  retient qu'une, « Choose another… » donne accès aux autres.
 
 ## 7. Hors périmètre
 

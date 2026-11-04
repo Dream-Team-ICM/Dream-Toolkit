@@ -307,7 +307,9 @@ replace_in_cell(code,
     'the <b>TXT suffix</b> field: default <code>_ScoredEvents_Export.txt</code>);\n'
     '<br>&#x2022; then the <b>CSV</b> <code>*_event_xml.csv</code> (suffix in the <b>CSV suffix</b> field);\n'
     '<br>&#x2022; then, as a fallback, the <code>&lt;ScoredEvents&gt;</code> of the <code>*.edf.XML</code>.\n'
-    '<br>&#x2022; Selecting the folder auto-detects both suffixes and refreshes the info lines below.\n'
+    '<br>&#x2022; Selecting the folder auto-detects both suffixes, finds the existing mapping (<b>Inputs found</b>;\n'
+    '<i>Choose another…</i> starts from another file, e.g. another cohort\'s) and refreshes the info lines below. The\n'
+    '<b>Advanced</b> box holds the name of the file Section 4 saves.\n'
     '<br>&#x2022; Click <b>Scan</b> to read the events and list the configurations.\n'
     '<br>&#x2022; "Skip labels already mapped" hides labels already present in an existing\n'
     '<code>event_remap.json</code> (incremental harmonization when you add a new cohort).</p>\n'
@@ -316,7 +318,9 @@ replace_in_cell(code,
     '<p>Pick the folder of your Curry (.cdt) database. Each .cdt is expected to have a Curry event\n'
     'text export next to it, whose suffix is set in the <b>Event export suffix</b> field below\n'
     '(default <code>_ScoredEvents_Export.txt</code>).\n'
-    '<br>&#x2022; Selecting the folder auto-detects the suffix and refreshes the info line below.\n'
+    '<br>&#x2022; Selecting the folder auto-detects the suffix, finds the existing mapping (<b>Inputs found</b>;\n'
+    '<i>Choose another…</i> starts from another file, e.g. another cohort\'s) and refreshes the info line below. The\n'
+    '<b>Advanced</b> box holds the name of the file Section 4 saves.\n'
     '<br>&#x2022; Click <b>Scan</b> to read the events and list the configurations.\n'
     '<br>&#x2022; "Skip labels already mapped" hides labels already present in an existing\n'
     '<code>event_remap.json</code> (incremental harmonization when you add a new cohort).</p>\n'
@@ -379,11 +383,11 @@ replace_in_cell(code,
     '            csv_suffix_info.value = ""\n'
     '            txt_suffix_info.value = ""\n'
     '            return\n'
-    '        existing = load_existing_mapping(folder)\n'
+    '        existing = load_existing_mapping()\n'
     '        msg = f"<small>{len(edfs)} EDF file(s) found. "\n'
-    '        msg += (f"{len(existing)} label(s) already mapped in event_remap.json."\n'
-    '                if existing else "No existing event_remap.json yet.")\n'
-    '        existing_info.value = msg + "</small>"\n'
+    '        msg += (f"{len(existing)} label(s) already mapped."\n'
+    '                if existing else "No existing mapping yet.")\n'
+    '        existing_info.value = msg + "</small>" + mapping_note\n'
     '        stems = [f.stem for f in edfs]\n'
     '        # --- Event TXT-export suffix auto-detection (Compumedics/Curry *_ScoredEvents_Export.txt) ---\n'
     "        # Scan .txt files whose name contains 'event' so hypnogram .txt files are not counted.\n"
@@ -416,11 +420,11 @@ replace_in_cell(code,
     "            existing_info.value = UI.msg('warn', 'No .cdt files found in selected folder.')\n"
     '            csv_suffix_info.value = ""\n'
     '            return\n'
-    '        existing = load_existing_mapping(folder)\n'
+    '        existing = load_existing_mapping()\n'
     '        msg = f"<small>{len(cdts)} .cdt file(s) found. "\n'
-    '        msg += (f"{len(existing)} label(s) already mapped in event_remap.json."\n'
-    '                if existing else "No existing event_remap.json yet.")\n'
-    '        existing_info.value = msg + "</small>"\n'
+    '        msg += (f"{len(existing)} label(s) already mapped."\n'
+    '                if existing else "No existing mapping yet.")\n'
+    '        existing_info.value = msg + "</small>" + mapping_note\n'
     '        # --- Event-export suffix auto-detection (Curry: *_ScoredEvents_Export.txt) ---\n'
     "        # Scan .txt files whose name contains 'event' so hypnogram .txt files are not counted.\n"
     '        all_evt = [f for f in folder.rglob("*")\n'
@@ -525,8 +529,8 @@ replace_in_cell(code,
 
 # Remove the EDF's txt_suffix + txt_suffix_info from the layout row
 replace_in_cell(code,
-    '    section1, chooser, txt_menu, txt_suffix, txt_suffix_info, csv_menu, csv_suffix, csv_suffix_info,\n    existing_info, skip_existing, run_scan_button, scan_progress_row, out_scan,',
-    '    section1, chooser, csv_menu, csv_suffix, csv_suffix_info,\n    existing_info, skip_existing, run_scan_button, scan_progress_row, out_scan,',
+    '    section1, chooser, inputs_list, txt_menu, txt_suffix, txt_suffix_info, csv_menu, csv_suffix, csv_suffix_info,\n    existing_info, skip_existing, advanced, run_scan_button, scan_progress_row, out_scan,',
+    '    section1, chooser, inputs_list, csv_menu, csv_suffix, csv_suffix_info,\n    existing_info, skip_existing, advanced, run_scan_button, scan_progress_row, out_scan,',
     "remove txt_suffix from layout")
 
 replace_in_cell(code,

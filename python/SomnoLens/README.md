@@ -77,7 +77,9 @@ The app opens in the web browser. Launch every tool from the `SomnoLens` folder,
 ### The study folder
 
 Every tool first asks for the **study folder**: the folder that holds your recordings (in any sub-folder tree)
-and receives the outputs. Always pick this same folder, never `data/`:
+and receives the outputs. Always pick this same folder, never `data/`. It is the only thing to pick: each tool finds
+the files it needs in it, lists them with where each comes from and says which tool to run when one is missing
+(*Choose another…* on a line picks another file by hand).
 
 ```
 my_study/                      <- pick this folder in every tool
