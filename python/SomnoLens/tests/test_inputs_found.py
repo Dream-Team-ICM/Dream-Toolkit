@@ -235,8 +235,12 @@ def test_tool3_keeps_the_output_suffix_in_advanced(tmp_path):
         nb.pick('chooser', study)
         assert nb.value('output_suffix_box.value') == '_Hypnogram_remapped.txt'     # a study keeps its name
         assert nb.value('advanced.get_title(0)') == 'Advanced'
+        assert 'custom_stages.json: N4' in nb.value('custom_stages_info.value')   # the field is in the box, the line stays
         nb.set('output_suffix_box', '_mine.txt')
         assert 'default changed: output suffix' in nb.value('advanced.get_title(0)')
+        nb.set('custom_stages_box', 'N4, N5')
+        assert 'default changed: output suffix, custom stages' in nb.value('advanced.get_title(0)')
+        assert 'N4, N5 (changed in the Advanced box' in nb.value('custom_stages_info.value')
 
 
 # ----------------------------------------------------------------------------------------------- tool 4

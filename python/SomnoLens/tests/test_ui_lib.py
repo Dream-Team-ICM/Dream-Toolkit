@@ -190,6 +190,12 @@ def test_advanced_box_is_closed_and_says_when_a_default_was_changed():
 # ---------------------------------------------------------------------------
 # Guards: every page keeps to the conventions (no drift back to a page's own style)
 # ---------------------------------------------------------------------------
+def test_details_open_shows_it_can_be_opened():
+    line = UI.details_open('Details')
+    assert line.startswith('<details style=') and 'cursor:pointer' in line and '(click to open)</span></summary>' in line
+    assert '\n' not in line        # one line, then a blank one: the Markdown inside the block is still rendered
+
+
 def test_there_are_pages():
     assert len(PAGES) >= 20, [p.name for p in PAGES]
 
@@ -202,5 +208,9 @@ def test_page_follows_the_conventions(page):
     assert re.search(r'^\s*import ui_lib as UI\b', code, re.M), 'the page must import ui_lib as UI'
     assert not re.search(r"button_style\s*=\s*['\"]info['\"]", code), "no 'info' button style: use UI.button and a role"
     for kind, text in found:
+        if kind == 'markdown':
+            assert '<details>' not in text, 'a Details block opens with UI.details_open (it shows it can be opened)'
+            assert text.count('<details ') == text.count(f'<details style="{UI.DETAILS_BOX_STYLE}">')
+            assert text.count('<details ') == text.count(f'<summary style="{UI.DETAILS_TITLE_STYLE}">')
         if kind == 'markdown' and re.search(r'^## ', text, re.M):
             assert text.startswith(UI.SECTION_RULE + '\n\n## '), f'section cell without the thick rule: {text[:60]!r}'

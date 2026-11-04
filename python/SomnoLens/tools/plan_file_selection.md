@@ -221,8 +221,8 @@ seule (`config_param/custom_stages.json`: N4), le champ de remplacement passe da
 | 7 | quality summary | `reports_quality_overview/quality_summary.tsv` | ⚠️ recommandé (sans lui, aucun canal pré-désélectionné) |
 | 8, 8bis, 9 | époques, rapports, décision | §6.3 | époques ❌ ; rapports : 8 ℹ️ (flags recalculés), 8bis ❌ ; décision (9) ℹ️ |
 
-Plusieurs configurations de l'outil 2 dans `config_param/` : un menu, la dernière enregistrée par l'outil 2 en
-premier. Garder séparées les sorties des outils suivants reste hors périmètre (§7).
+Plusieurs configurations de l'outil 2 dans `config_param/` : la dernière enregistrée par l'outil 2 est pré-choisie,
+« Choose another… » pour les autres. Garder séparées les sorties des outils suivants reste hors périmètre (§7).
 
 ### 6.3 Runs versionnés (outils 8, 8bis, 9)
 
@@ -260,7 +260,7 @@ aux runs reste le TODO *Renaming the outputs* (§7).
 | Outil | Dans « Advanced » | Reste visible |
 |---|---|---|
 | 2 | nom du fichier JSON enregistré (défaut `channel_config.json`) | sélection et remap des canaux |
-| 3 | suffixe de sortie | hypnogramme brut (menu), sections suivantes |
+| 3 | suffixe de sortie, champ custom stages (ajouté le 2026-11-04) | hypnogramme brut (menu), custom stages utilisés (une ligne), sections suivantes |
 | 3bis | les trois suffixes de sortie | modèles, hypnogramme expert (menu) |
 | 4 | nom de `event_remap.json` | suffixes TXT / CSV (menus) |
 | 5 | dossier de sortie, champ custom stages | liste des entrées, suffixes (menus) |
@@ -314,9 +314,8 @@ Un encadré « Advanced » ouvert et modifié s'affiche avec un petit ⚠ (« de
   menu). Outil 4 : le mapping existant dans la liste (une autre cohorte possible), le nom du fichier dans Advanced, enregistré
   à la sauvegarde. Outil 2 : `channel_config.json`, le nom dans Advanced, enregistré à la sauvegarde. Outil 0 : les
   entrées par `find_input`, le champ custom stages dans Advanced (son résumé d'étude reste, pas de liste).
-- Écart avec le §6.1 : les custom stages de l'outil 3 restent visibles, c'est là qu'on les déclare.
-- Pas fait : le menu quand il y a plusieurs configurations de l'outil 2 dans `config_param/` (§6.2) : le registre n'en
-  retient qu'une, « Choose another… » donne accès aux autres.
+- Décidé le 2026-11-04, après le contrôle visuel : pas de menu quand il y a plusieurs configurations de l'outil 2 (§6.2),
+  la dernière enregistrée est pré-choisie et « Choose another… » donne accès aux autres.
 
 ### 6.9 Phase 3b : les outils 8, 8bis, 9 (2026-11-04)
 

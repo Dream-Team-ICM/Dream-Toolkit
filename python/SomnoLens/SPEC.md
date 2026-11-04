@@ -510,13 +510,18 @@ instead of restating them. Only tool-specific deltas are kept inline.
     (the runs of tool 7, the decisions): hidden with fewer than two options, `fill` selects the first without calling
     `on_choose`. `locate(..., note=…)` replaces *not found: …* when having no file is the user's choice (*none*).
   - **Advanced box** (2026-11-04): `box, mark = UI.advanced_box(children)`, closed by default, holds what most studies
-    leave alone (tool 2: the JSON file name; 3: the output suffix; 3bis: the three output suffixes; 4: the mapping file
+    leave alone (tool 2: the JSON file name; 3: the output suffix and the custom stages field, whose stages in use stay
+    shown on a line outside the box; 3bis: the three output suffixes; 4: the mapping file
     name; 5, 7: the output folder and the custom stages field; 0, 6, 9: the custom stages field; tool 8 keeps its field
     beside the participant, tool 8bis has none). `mark(['output folder'])`
     puts `⚠️ default changed: output folder` in its title, so a change is not forgotten; the tool compares with the value
     it proposed for this study.
   - **Progress**: `UI.progress_bar(description)` → (bar, row with `i / N`), `UI.finish_progress(bar, n_failed)`
     (green, orange when something failed). Tools 1, 1bis, 2, 3 and 4 have one over their files.
+  - **Details blocks** (2026-11-04): a `<details>` of a Markdown cell opens with the line `UI.details_open(title, hint)`
+    returns (a box with a bold title and *(click to open)*, otherwise nothing shows that the small arrow can be clicked),
+    written out since a Markdown cell cannot call Python, then a blank line. Guarded by `tests/test_ui_lib.py`. The HTML
+    reports keep their own style, and so do the blocks tool 0 builds inside its steps.
   - **No button that only reveals widgets**: a section builds itself once the step it needs is done (tool 4's
     model, adopted by tools 2 and 3); until then it shows `UI.waiting_html(n)` (*Complete section n first.*), and
     a change upstream puts the sections after it back on hold (`invalidate_after`). (*Choose another…* is not one:
@@ -2999,8 +3004,8 @@ this part could also checks the companion files (hypno, events etc), and gives w
 A way to name / rename a tool's outputs, the same in every tool. Use case: several channel configuration files
 from tool 2, to run the later tools on different channel configurations. Open question: how to keep apart the
 outputs of the later tools when they are run on different configurations. Two things seen during the file selection work
-(2026-11-04): the names registry retains one channel configuration, the others are reached with *Choose another…*
-(a menu in the *Inputs found* list would follow from this work); tool 8bis writes its decisions to
+(2026-11-04): the later tools pre-choose the channel configuration tool 2 saved last, the others are reached with
+*Choose another…* (enough, no menu: decided on 2026-11-04); tool 8bis writes its decisions to
 `derivatives/rejection_auto/` whatever the epochs folder, so `preproc_epo` and `preproc_epo_v2` share one decision folder.
 
 ### Skip only what was made with the current settings: tools 6, 7 and 9 (TODO)

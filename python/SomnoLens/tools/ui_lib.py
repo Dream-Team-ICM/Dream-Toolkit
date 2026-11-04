@@ -68,6 +68,20 @@ def help_html(text):
     return f'<div style="color:{MUTED_COLOR}; font-size:90%; line-height:1.4;">{text}</div>'
 
 
+# A Details block of a Markdown cell: a box with a bold title, so that it shows it can be opened. A Markdown cell cannot
+# call Python: its opening line is written out, the one details_open returns (tests/test_ui_lib.py checks it).
+DETAILS_BOX_STYLE = 'border:1px solid #bbb; border-radius:4px; background:#f7f7f7; padding:8px 12px; margin:10px 0;'
+DETAILS_TITLE_STYLE = 'cursor:pointer; font-weight:bold;'
+DETAILS_HINT_STYLE = f'font-size:85%; font-weight:normal; color:{MUTED_COLOR};'
+
+
+def details_open(title, hint='click to open'):
+    """The opening line of a Details block: <details> + its <summary>. Leave a blank line after it in a Markdown cell,
+    and close the block with </details>."""
+    return (f'<details style="{DETAILS_BOX_STYLE}"><summary style="{DETAILS_TITLE_STYLE}">{title} '
+            f'<span style="{DETAILS_HINT_STYLE}">({hint})</span></summary>')
+
+
 def text_block(html):
     """A long text of a widget HTML, as a block with a normal line height. The widget's own line height is a
     one-line field's (28 px, so that a short label lines up with the fields beside it): a text that wraps would
