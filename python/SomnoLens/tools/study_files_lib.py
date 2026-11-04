@@ -99,22 +99,27 @@ def write_names(study, tool, values):
 # ---------------------------------------------------------------------------------------------------------
 # Companion suffixes
 # ---------------------------------------------------------------------------------------------------------
-def companion_suffix_counts(recordings, files):
-    """{suffix: number of files named <recording name><suffix>} over `files`.
+def companion_suffix_owners(recordings, files):
+    """{suffix: [names of the recordings having a file <recording name><suffix>]} over `files`.
 
     A file counts for the recording with the LONGEST name it starts with: 10_hypno.txt belongs to recording 10,
     never to recording 1 (which would add a false suffix '0_hypno.txt'). The folder is not compared: tools 5, 6
     and 7 find a hypnogram anywhere in the study by its file name."""
     stems = [Path(r).stem for r in recordings]
-    counts = {}
+    owners_by_suffix = {}
     for f in files:
         name = Path(f).name
         owners = [s for s in stems if _norm(name).startswith(_norm(s)) and len(name) > len(s)]
         if not owners:
             continue
-        suffix = name[len(max(owners, key=len)):]
-        counts[suffix] = counts.get(suffix, 0) + 1
-    return counts
+        stem = max(owners, key=len)
+        owners_by_suffix.setdefault(name[len(stem):], []).append(stem)
+    return owners_by_suffix
+
+
+def companion_suffix_counts(recordings, files):
+    """{suffix: number of files named <recording name><suffix>} (see companion_suffix_owners)."""
+    return {s: len(r) for s, r in companion_suffix_owners(recordings, files).items()}
 
 
 def toolkit_hypno_suffixes(names, own_outputs=()):

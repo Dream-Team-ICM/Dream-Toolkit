@@ -277,12 +277,8 @@ replace_in_cell(cell3,
 # 3c. (removed) Hypno suffix detection: study_files_lib counts the companions by file name (a .cdt stem works
 # the same), the global edf_files → cdt_files rename below translates its argument.
 
-# 3d. EDF files matched text
-replace_in_cell(cell3,
-    "f'&nbsp;— {best_count}/{n_total} EDF files matched</small>'",
-    "f'&nbsp;— {best_count}/{n_total} .cdt files matched</small>'",
-    "cell3 EDF files matched text",
-)
+# 3d. (removed) The coverage line under the suffix menu (ui_lib.suffix_menu) speaks of recordings: valid for both
+# formats.
 
 # 3f. Remove thresh_bounds widget (between thresh_flat and thresh_peaks)
 replace_in_cell(cell3,

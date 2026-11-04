@@ -318,8 +318,8 @@ test must point it at a copied `preproc_epo`.
   the sections build themselves). Tool 4: raw labels listed, a French label suggested, an ignored label
   saved as `null`, an existing mapping kept. Tool 2 stays at "executes" (too interactive), tool 1bis
   verifies itself (`sha256(file[256:])`).
-- `test_ui_lib.py` (quick): `ui_lib`'s messages, section headers, picker titles, text blocks, button roles and
-  progress bar,
+- `test_ui_lib.py` (quick): `ui_lib`'s messages, section headers, picker titles, text blocks, button roles,
+  progress bar and suffix menu (it follows its text field both ways, *Other suffix…*, the recordings missing),
   and the guard that every Voila page and Curry twin keeps to the conventions (imports `ui_lib`, opens on
   `# Tool `, no `info` button, the same section rule).
 - `test_tool0.py` (marker `tool0`, standard on synthetic, full adds real; each test on a copy of the study
@@ -472,6 +472,16 @@ instead of restating them. Only tool-specific deltas are kept inline.
     `UI.help_html(text)`. **Any other long text of a widget HTML** (one that can wrap): `UI.text_block(html)`.
     The three, and the boxes, set their own line height (1.4): a widget HTML otherwise spaces wrapped lines like
     one-line fields (28 px, kept on purpose for a short label beside a field).
+  - **Suffix menus** (2026-11-03): `menu, fill = UI.suffix_menu(field, info)` puts a menu of the companion
+    suffixes found in front of a suffix text field (tools 3, 3bis, 4, 5, 6, 7 and the Curry twins of 3, 4, 6, 7;
+    tool 0 keeps its per-recording hypnogram menu with *Other file…*). Each option is `suffix  (n/N)`, n = the
+    recordings having it; a last option **Other suffix…** shows the field (relabelled *Other suffix:*) for a
+    suffix typed by hand. The **field stays the value the tool reads** and keeps its name, so the tests that set
+    it, and the tool's own pre-choice, still work: the menu follows the field both ways. Under it, `info` says
+    `n/N recordings have it` (green) or names the ones that miss it (orange, `MISSING_SHOWN` = 10 names, then
+    `… (+k)`), followed by the notes of the pre-choice. The menu stays hidden until a detection calls
+    `fill(owners, recordings, notes)` (`owners` = `study_files_lib.companion_suffix_owners`), and `fill({}, [])`
+    empties it (another folder, nothing found: the plain field is back).
   - **Progress**: `UI.progress_bar(description)` → (bar, row with `i / N`), `UI.finish_progress(bar, n_failed)`
     (green, orange when something failed). Tools 1, 1bis, 2, 3 and 4 have one over their files.
   - **No button that only reveals widgets**: a section builds itself once the step it needs is done (tool 4's
@@ -631,8 +641,9 @@ instead of restating them. Only tool-specific deltas are kept inline.
   `recorded(names, key)`.
 - **Hypnogram-suffix auto-detection** (one rule, `study_files_lib`, since 2026-11-03; tools 0, 3, 3bis, 5, 6,
   7 and the Curry twins of 3, 6, 7): on folder selection, the `.txt` files of the study are scanned, the
-  candidate suffixes counted by `companion_suffix_counts(recordings, files)`, and the suffix widget pre-filled,
-  with a colour-coded info label (green = all recordings matched, orange = partial/none). A file counts for the
+  candidate suffixes counted by `companion_suffix_owners(recordings, files)`, and the suffix menu filled
+  (*Voila page conventions → Suffix menus*: every suffix with its number of files, the pre-choice selected, the
+  recordings missing it named under it). A file counts for the
   recording with the **longest** name it starts with (`10_hypno.txt` belongs to `10`, never to `1`: the former
   per-recording prefix test gave recording `1` a false suffix `0_hypno.txt`, which could win on a small study
   with ids 1, 2, 10, 20). The folder is not compared, since tools 5, 6 and 7 find a hypnogram anywhere in the
@@ -653,8 +664,8 @@ instead of restating them. Only tool-specific deltas are kept inline.
      comparison), tool 3 puts back its default `_Hypnogram_Export.txt` (an empty field would read every `.txt`).
      Running the chain on an automatic hypnogram stays possible, by choosing its suffix by hand.
 
-  Set aside from the **pre-choice only**: the displayed list keeps every `.txt` suffix found with its count and
-  `← selected`, so a mis-detection stays visible and correctable by hand. A recorded name is noted under the
+  Set aside from the **pre-choice only**: the menu keeps every `.txt` suffix found with its count, so a
+  mis-detection stays visible and correctable by hand. A recorded name is noted under the
   field (*Pre-chosen: the name recorded in config_param/file_names.json*). Why the exports: Curry and Profusion
   write `*_ScoredEvents_Export.txt` (24 characters, longer than `_Hypnogram_remapped.txt`), `*_Summary_Export.txt`
   and `*_StudyLog_Export.txt` beside the hypnograms; read as a hypnogram, an event export makes `np.loadtxt` fail
@@ -1552,7 +1563,7 @@ Interactive tool to **visualize** the scored-event configurations present across
 
 **Event sourcing (TXT-first / CSV / XML-fallback)**: a shared `load_events(edf_path, txt_suffix='_ScoredEvents_Export.txt', csv_suffix='_event_xml.csv')` helper reads three Compumedics companions in priority order, (1) the `*_ScoredEvents_Export.txt` **text export** (the "classic" Profusion/Curry French export: comma-separated, **no header**, `HH:MM:SS` clock time + `M:SS[.s]` duration + French label, **encoding sniffed**, UTF-16 with BOM or UTF-8/ANSI, and parsed inline by `load_events_from_txt`, mirroring `curry_io._parse_events_txt`), (2) the event CSV (`Name, Start, Duration` in seconds), (3) the `<ScoredEvents>` of the `*.edf.XML` (Profusion `CMPStudyConfig`, `<Input>` ignored). For the harmonization scan **only the names are needed**, so the `.txt` clock times are *not* converted (Start/Duration `NaN`, no EDF-header read). `read_edf_start_datetime()` (EDF header offsets 168/176, 2-digit-year clipping) supplies the recording-start datetime that converts them to seconds **only** in the 1bis check. CSV and XML were verified equivalent on ICEBERG. The `<ScoredEventSettings>` catalogue is **not** used for grouping.
 
-**Configurable event suffixes**: two editable text fields, **`TXT suffix:`** (default `_ScoredEvents_Export.txt`) and **`CSV suffix:`** (default `_event_xml.csv`), drive `event_companion_paths(edf_path, txt_suffix, csv_suffix)`, so datasets exported with different suffixes are supported. On folder selection **both** are **auto-detected** (mirroring the hypnogram-suffix detection of `6_quality_overview`, see *Cross-cutting procedures*): for the TXT the `.txt` files **whose name contains `event`** are scanned (so hypnogram `.txt` are not counted), for the CSV the `.csv` files. Candidate suffixes are counted and each field auto-filled with the **most frequent** suffix (shortest on ties), each with its own colour-coded info line (green = all EDFs matched, orange = partial/none). The XML fallback (`.edf.XML`) is auto-derived, no field.
+**Configurable event suffixes**: two editable text fields, **`TXT suffix:`** (default `_ScoredEvents_Export.txt`) and **`CSV suffix:`** (default `_event_xml.csv`), drive `event_companion_paths(edf_path, txt_suffix, csv_suffix)`, so datasets exported with different suffixes are supported. On folder selection **both** are **auto-detected** (mirroring the hypnogram-suffix detection of `6_quality_overview`, see *Cross-cutting procedures*): for the TXT the `.txt` files **whose name contains `event`** are scanned (so hypnogram `.txt` are not counted), for the CSV the `.csv` files. Candidate suffixes are counted and each suffix menu (*Voila page conventions → Suffix menus*) pre-set on the **most frequent** suffix (shortest on ties), with the number of recordings that have it and the ones that miss it under it (the Curry twin keeps a single menu, the event export). The XML fallback (`.edf.XML`) is auto-derived, no field.
 
 **Configuration grouping**: files are grouped by their `frozenset` of **unique event labels actually present**, two files with the same unique labels share one configuration even if their event counts/timing differ.
 
@@ -2916,20 +2927,6 @@ the event names (no start datetime): its loader needs a decision (a `.txt` with 
 by tool 4, skipped by the library). **No test runs a Curry twin on a recording**: the four twins must be checked by
 the user in Voila on Curry data before the change is committed.
 
-### Companion suffixes chosen from the detected ones, in the batch tools (TODO)
-
-Tools 3, 3bis, 4, 5, 6 and 7 pre-fill an editable text field with the companion suffix they detect (hypnogram,
-event TXT / CSV) and list the other suffixes found ("Detected: …"). Give them tool 0's step-1 pattern: a
-**dropdown of the detected suffixes, each with its number of files** (the detection stays: it gives an overview of
-the files available), plus a last option **"Other suffix…"** revealing the text field for a suffix typed by hand.
-The selected value must stay the one the run reads (the tests drive `hypno_suffix` / `txt_suffix` / `csv_suffix`:
-keep those names or adapt the tests). Touches the six notebooks, the Curry twins / generators of tools 3, 4, 6, 7
-and the tests that set these widgets.
-
-Phase 2 of `tools/plan_file_selection.md`. Its phase 1 is done (2026-11-03): the toolkit's own hypnograms no
-longer win the pre-choice, the names registry `config_param/file_names.json` and the short default names
-(*Cross-cutting → Names registry* and *Hypnogram-suffix auto-detection*).
-
 ### Database organisation inferred by tool 1 (TODO, audit first)
 
 Tool 1's reading of how the database is organised (participants from the file names, the sub-folder as a group
@@ -2946,8 +2943,11 @@ this part could also checks the companion files (hypno, events etc), and gives w
 The display harmonization (done 2026-11-02, *Cross-cutting → Voila page conventions*) left two of its ideas for
 later. The first is the file selection: every picker used to make the user choose each file, so that they
 understand what each step needs; with the growing number of generated files and reports, it is better to **point
-each picker at the expected file** (still editable for another one) and to **warn when a file is missing**. To be
-designed together with *Companion suffixes chosen from the detected ones* above.
+each picker at the expected file** (still editable for another one) and to **warn when a file is missing**.
+Planned in `tools/plan_file_selection.md` (phase 3: the *Inputs found* list, the versioned runs of tools 8, 8bis,
+9, the *Advanced* box, `channel_config.json` for tool 2). Its phases 1 and 2 are done (2026-11-03): the hypnogram
+pre-choice in one rule and the names registry `config_param/file_names.json` (*Cross-cutting → Names registry*,
+*Hypnogram-suffix auto-detection*), and the suffix menus (*Voila page conventions → Suffix menus*).
 
 ### Renaming the outputs, several channel configurations of tool 2 (TODO, follows the display harmonization)
 

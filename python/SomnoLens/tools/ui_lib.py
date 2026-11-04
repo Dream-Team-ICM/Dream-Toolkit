@@ -11,6 +11,8 @@ Imported by every Voila tool (and its Curry twin), like the other shared modules
     info.value = UI.msg('warn', '2 recordings have no hypnogram.')
     progress, progress_row = UI.progress_bar('Participants:')   # put progress_row in the page
 """
+import os
+
 import ipywidgets as widgets
 
 # ---------------------------------------------------------------------------
@@ -180,3 +182,89 @@ def progress_bar(description='Participants:', width=FIELD_WIDTH):
 def finish_progress(bar, n_failed=0):
     """Colour of a finished bar: green, or orange when some items failed."""
     bar.bar_style = 'warning' if n_failed else 'success'
+
+
+# ---------------------------------------------------------------------------
+# Suffix menus: the companion suffixes found beside the recordings, with their number of files
+# ---------------------------------------------------------------------------
+OTHER_SUFFIX = 'Other suffix…'
+MISSING_SHOWN = 10            # recordings named in the 'missing' line, then '… (+N)'
+
+
+def suffix_menu(field, info):
+    """A menu of the detected suffixes in front of a suffix text field. `field` stays the value the tool reads (a
+    test, or the tool's own detection, may still set it: the menu follows); it shows only with 'Other suffix…',
+    for a suffix typed by hand, and the menu stays hidden until a detection fills it. `info` (a widget HTML under
+    the field) says how many recordings have the selected suffix and names the ones that miss it.
+
+    Returns (menu, fill): put `menu` just before `field` in the page and, after each detection, call
+    fill(owners, recordings, notes='') with owners = {suffix: [recording names]} (study_files_lib), the names of
+    every recording, and optional HTML lines shown under the count (e.g. the notes of the hypnogram pre-choice).
+    fill({}, []) empties it (no folder, nothing found)."""
+    label = field.description
+    menu = widgets.Dropdown(options=[(OTHER_SUFFIX, OTHER_SUFFIX)], value=OTHER_SUFFIX, description=label,
+                            style={'description_width': field.style.description_width},
+                            layout=widgets.Layout(width=field.layout.width, display='none'))
+    state = {'owners': {}, 'recordings': [], 'notes': '', 'busy': False}
+
+    def _match(text):
+        key = os.path.normcase(text.strip())
+        return next((s for s in state['owners'] if os.path.normcase(s) == key), None) if key else None
+
+    def _show():
+        menu_on = bool(state['owners'])
+        menu.layout.display = '' if menu_on else 'none'
+        field.description = 'Other suffix:' if menu_on else label
+        field.layout.display = 'none' if (menu_on and menu.value != OTHER_SUFFIX) else ''
+        n = len(state['recordings'])
+        if not n or not field.value.strip():
+            info.value = state['notes'].removeprefix('<br>')
+            return
+        have = {os.path.normcase(r) for r in state['owners'].get(_match(field.value), [])}
+        missing = [r for r in state['recordings'] if os.path.normcase(r) not in have]
+        if missing:
+            shown = ', '.join(missing[:MISSING_SHOWN])
+            if len(missing) > MISSING_SHOWN:
+                shown += f', … (+{len(missing) - MISSING_SHOWN})'
+            line = msg('warn', f'{n - len(missing)}/{n} recordings have it; missing: {shown}.')
+        else:
+            line = msg('ok', f'{n}/{n} recordings have it.')
+        info.value = f'<small>{line}</small>' + state['notes']
+
+    def _on_menu(change):
+        if state['busy']:
+            return
+        if change['new'] != OTHER_SUFFIX:
+            state['busy'] = True
+            try:
+                field.value = change['new']
+            finally:
+                state['busy'] = False
+        _show()
+
+    def _on_field(change):
+        if state['busy']:
+            return
+        state['busy'] = True
+        try:
+            menu.value = _match(change['new']) or OTHER_SUFFIX
+        finally:
+            state['busy'] = False
+        _show()
+
+    def fill(owners, recordings, notes=''):
+        state.update(owners=dict(owners), recordings=list(recordings), notes=notes)
+        n = len(state['recordings'])
+        state['busy'] = True
+        try:
+            menu.options = ([(f'{s}  ({len(r)}/{n})', s)
+                             for s, r in sorted(state['owners'].items(), key=lambda x: (-len(x[1]), x[0]))]
+                            + [(OTHER_SUFFIX, OTHER_SUFFIX)])
+            menu.value = _match(field.value) or OTHER_SUFFIX
+        finally:
+            state['busy'] = False
+        _show()
+
+    menu.observe(_on_menu, names='value')
+    field.observe(_on_field, names='value')
+    return menu, fill

@@ -73,6 +73,25 @@ def test_progress_bar_text_follows_the_bar():
     assert bar.bar_style == 'warning'
 
 
+def test_suffix_menu_lists_the_suffixes_and_follows_its_field():
+    import ipywidgets as widgets
+    field = widgets.Text(value='_x.txt', description='Hypno suffix:', layout=widgets.Layout(width='420px'))
+    info = widgets.HTML('')
+    menu, fill = UI.suffix_menu(field, info)
+    assert menu.layout.display == 'none' and field.layout.display != 'none'      # nothing detected yet
+    fill({'_a.txt': ['s1', 's2'], '_b.txt': ['s1']}, ['s1', 's2'])
+    assert menu.options[0] == ('_a.txt  (2/2)', '_a.txt') and menu.options[-1][1] == UI.OTHER_SUFFIX
+    assert menu.value == UI.OTHER_SUFFIX and field.description == 'Other suffix:'   # '_x.txt': typed by hand
+    field.value = '_a.txt'           # set by a test or by the tool's own detection: the menu follows
+    assert menu.value == '_a.txt' and field.layout.display == 'none' and '2/2 recordings' in info.value
+    menu.value = '_b.txt'            # chosen in the menu: the field, the value the tool reads, follows
+    assert field.value == '_b.txt' and 'missing: s2' in info.value
+    menu.value = UI.OTHER_SUFFIX
+    assert field.layout.display == '' and field.value == '_b.txt'
+    fill({}, [])                     # another folder, nothing found: back to the plain field
+    assert menu.layout.display == 'none' and field.description == 'Hypno suffix:'
+
+
 # ---------------------------------------------------------------------------
 # Guards: every page keeps to the conventions (no drift back to a page's own style)
 # ---------------------------------------------------------------------------

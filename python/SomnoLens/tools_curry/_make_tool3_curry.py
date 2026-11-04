@@ -38,11 +38,6 @@ replacements = [
         "a study folder holding the `.edf` recordings",
         "a study folder holding the Curry 9 `.cdt` recordings"
     ),
-    # Match message "EDF files matched" → ".cdt files matched"
-    (
-        "f'&nbsp;— {best_count}/{n_total} EDF files matched</small>'",
-        "f'&nbsp;— {best_count}/{n_total} .cdt files matched</small>'"
-    ),
     # chooser title hint
     (
         "UI.picker_title('Study folder')",

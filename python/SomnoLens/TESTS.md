@@ -231,6 +231,7 @@ change of date in a report.
 |---|---|
 | Every Voila notebook | Opens and runs from top to bottom without error, EDF tools and Curry twins (quick level) |
 | Page look | Every Voila page and Curry twin takes its look from the shared style module (title, section lines, button styles), so no page drifts back to its own style (quick level) |
+| Suffix menus | The menu of the suffixes found lists each one with its number of recordings, follows its text field both ways (the field is what the tool reads), shows the field for a suffix typed by hand ("Other suffix…"), names the recordings that miss the chosen suffix and empties itself for another folder (quick level) |
 | Every tool | No Python error appears in any tool's output during the chain |
 | Every tool | Every reference file is owned by a tool (none escapes the comparison) |
 | Tool 5bis | Validating writes the criteria exclusions to the registry; a new validation replaces them but keeps the manual decisions; a forced inclusion is refused without a comment; the exclusion columns are never mistaken for sleep metrics |

@@ -1,6 +1,7 @@
 # Plan : sélection automatique des fichiers (hypnogrammes, entrées, dossiers)
 
-Statut : phase 1 faite le 2026-11-03 (§4) ; phases 2 et 3 à faire. Remplace, une fois fait, les deux
+Statut : phases 1 et 2 faites le 2026-11-03 (§4, §5) ; phase 3 à faire, après un contrôle visuel des phases 1
+et 2 dans Voila. Remplace, une fois fait, les deux
 points de SPEC *Planned modules* « Companion suffixes chosen from the detected ones, in the batch tools » et « File
 selection pointed at the expected files ».
 
@@ -177,7 +178,8 @@ traitée écrirait une seconde copie remappée sous le nouveau nom. Le fichier r
   `txt_hypno_suffix`, `txt_suffix`, `csv_suffix`, `txt_summary_suffix`, …) : les tests qui le règlent ne changent pas.
   Le menu écrit dans le champ.
 - Le menu est construit par `ui_lib` (la seule bibliothèque qui construit des widgets) : `UI.suffix_choice(...)`.
-- Outils 3, 3bis, 4, 5, 6, 7. L'outil 0 a déjà son menu : il passe par le même constructeur. Jumeaux Curry 3, 4, 6, 7.
+- Outils 3, 3bis, 4, 5, 6, 7. Jumeaux Curry 3, 4, 6, 7. L'outil 0 garde son propre menu, par enregistrement, avec
+  « Other file… » (décision prise à l'implémentation : un menu par participant, pas par étude).
 - Tests : quick (le constructeur) + un test de notebook « Other suffix… ». Niveau proposé : standard sur les outils
   concernés.
 

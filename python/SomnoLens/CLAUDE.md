@@ -176,7 +176,8 @@ The "what to do / what not to break" reminders, grouped by theme. Each points to
   + References, `section_html` / `subsection_html` (continuous numbering), message colours, buttons by role
   (`run` / `save` green, `read` blue = **Scan** as the entry button, `caution`, `helper`), widths, `picker_title`
   / `help_html` / `text_block` (a long widget text needs one: a widget HTML spaces wrapped lines by 28 px),
-  progress bars. **No button that only reveals widgets**: a section builds itself after the step it
+  progress bars, suffix menus (`suffix_menu`: the field stays what the tool reads). **No button that only
+  reveals widgets**: a section builds itself after the step it
   needs (`waiting_html` until then). A new page or widget follows it; `tests/test_ui_lib.py` guards the pages.
   → SPEC *Cross-cutting → Voila page conventions*.
 
