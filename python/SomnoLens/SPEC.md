@@ -3020,8 +3020,8 @@ a section below. Update this list when an item is done.
    cut-off of the band-pass.
 4. *Slow-wave and spindle extraction*. The licence waits for it.
 5. Features: *Database organisation inferred by tool 1*, *Tool 6: keep a raw run and a prepared run side by side*,
-   *Tool 2: richer context channels*, *Tool 3bis: follow-ups of the Score_EDF port*, *Simulated recording generator in
-   tool 0*.
+   *Tool 2: richer context channels*, *Tool 3bis: follow-ups of the Score_EDF port*, *Standalone comparison of
+   hypnograms*, *Simulated recording generator in tool 0*.
 6. Between larger jobs: *English everywhere*, *Tools 1 to 4: one code cell per section*.
 7. After the extraction: *Clean-up before distribution*, *Distribution and licensing*, the installation tutorial.
 8. Long term: *EDF reading of tools 2, 4, 6, 7 through `edf_io_lib`*, *A Curry twin of tool 0*, *Tool 0: interactive
@@ -3324,6 +3324,45 @@ Left out of the port of 2026-10-27 (`tools/plan_score_edf_fixes.md`, deleted onc
 - **Tool 0's step 3**: offers GSSC only; YASA and SleepFM could be added (same `autoscoring_lib` functions).
 - **Standalone Score_EDF** (autoscoring without the SomnoLens pipeline): draft plan `tools/plan_score_edf_standalone.md`
   (rebuild it on 3bis's libraries, raw hypnograms, channel aliases, one-click install).
+
+### Standalone comparison of hypnograms + rescoring of the disagreements (TODO)
+
+User request, 2026-11-05. A standalone notebook that takes two or more hypnograms of the same recording (several
+scorers, a scorer and a model, two models), finds the epochs where they disagree and reports the metrics of Anderer et
+al. 2023 (*Overview of the hypnodensity approach to scoring sleep for polysomnography and home sleep testing*,
+Frontiers in Sleep 2, doi:10.3389/frsle.2023.1163477). Ideally it then shows those epochs, so that they can be rescored
+on the spot.
+
+- **Disagreements**: per epoch, each hypnogram's stage and whether they all agree. The list of the disagreeing epochs,
+  which stages they oppose, and where they fall in the night.
+- **Metrics on the stages** (list taken from the article on 2026-11-05, to check against it when planning): pairwise
+  agreement (% of epochs), Cohen's kappa overall and per stage, F1, Matthews correlation, complete agreement (% of
+  epochs on which all hypnograms agree), majority-vote consensus (ties broken by weighting each scorer by their kappa
+  against the others), any-match agreement (a model counts as right when it matches at least one scorer).
+- **Metrics on a hypnodensity**: built per epoch from the share of hypnograms giving each stage, or the model's
+  probabilities when tool 3bis wrote them. Ambiguity `100 × (1 − p_MAX)`, ambiguous epoch `p_MAX ≤ 0.95`, continuity
+  `100 × (1 − |p_MAX(i) − p_MAX(i+1)|)` for adjacent epochs of the same class, stable NREM / REM (two adjacent epochs
+  above 0.95), ICC between the probability curves, average cosine similarity. **Trap**: with hypnograms alone
+  `p_MAX` is a share of votes, so with two of them it is 0.5 or 1, and below 21 hypnograms `p_MAX ≤ 0.95` only means
+  "not unanimous".
+- **Sleep parameters**: TST and time in each stage per hypnogram, then paired t-tests and ICC between hypnograms
+  (several nights needed).
+- **Rescoring (optional, needs the EDF)**: the metrics need only the hypnogram files. Navigate from one disagreeing
+  epoch to the next, each hypnogram's stage shown, and save a new hypnogram. Inputs are never overwritten.
+
+Already in the toolkit: `autoscoring_compare_lib` (`read_expert`, `align_manual_hypnogram`, `compute_agreement`,
+`plot_confusion_matrices`), but always against one reference hypnogram, while here no hypnogram need be the reference.
+`edf_io_lib.hypno_length_status` (hypnogram lengths). `qc_rejected_epochs_lib.plot_epoch_montage` (fixed clinical
+scales). Tool 0's explorer: **Next disagreement**, **Use GSSC's stage**, the stage buttons and keys, `guard_unsaved`,
+`_rescored.txt` + `_rescore_log.tsv` (§0), against GSSC only and inside the tool-0 page.
+
+To decide: how standalone (a page of `tools/` with `ui_lib` and the toolkit's libraries, or independent of SomnoLens
+with its own minimal environment, like *Standalone Score_EDF* above; without a study, no `hypnogram_rescored` entry
+in the names registry); which label formats (tool-3 labels only, or raw exports through a mapping) and how MT,
+custom and unscored epochs count; hypnograms of different lengths or start times; which hypnogram the rescoring
+starts from; whether the rescorer sees who gave which stage (blind adjudication or not); several nights (database
+tables and figures, the group statistics); whether Section 4 of tool 3bis ends up sharing these metrics when its
+outputs are harmonised.
 
 ### Code review of 2026-10-24: SomnoLens findings (TODO, small)
 
