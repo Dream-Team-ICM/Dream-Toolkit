@@ -3007,6 +3007,29 @@ under the `pip:` block). These were bumped for Curry. The EDF tools continue to 
 
 Modules still in development. The quality-overview (6), preprocessing (7) and QC-of-rejected-epochs (8) tools above are stable and were promoted out of this section.
 
+### Order of the TODOs (agreed on 2026-11-05)
+
+What can silently give a wrong result comes first, then what forces a full reprocess, then the features. Each item is
+a section below. Update this list when an item is done.
+
+1. **Next: *Skip only what was made with the current settings*** (tools 6, 7, 9). It could also warn that the decisions
+   of tools 8 / 8bis and the features of tool 9 are out of date after a reprocess.
+2. *Code review of 2026-10-24*, first #10 (`load_events` skips a broken file silently).
+3. *Tool 7: band-pass phase* and *Lighter conda environments* (the version refresh goes with the split, decided on
+   2026-10-29), together, between two studies: every output is reprocessed. Before item 4: slow waves sit near the low
+   cut-off of the band-pass.
+4. *Slow-wave and spindle extraction*. The licence waits for it.
+5. Features: *Database organisation inferred by tool 1*, *Tool 6: keep a raw run and a prepared run side by side*,
+   *Tool 2: richer context channels*, *Tool 3bis: follow-ups of the Score_EDF port*, *Simulated recording generator in
+   tool 0*.
+6. Between larger jobs: *English everywhere*, *Tools 1 to 4: one code cell per section*.
+7. After the extraction: *Clean-up before distribution*, *Distribution and licensing*, the installation tutorial.
+8. Long term: *EDF reading of tools 2, 4, 6, 7 through `edf_io_lib`*, *A Curry twin of tool 0*, *Tool 0: interactive
+   canvas for the epoch explorer*, *Event-epoch visualizer (Phase B)*, tool 8's per-(epoch, channel) override.
+
+Still to check by hand, not covered by the tests: a real participant table through tools 5 and 9, tool 2's full *Preview &
+Save* (it writes the channel configuration and the names registry).
+
 ### Simulated recording generator in tool 0 + rework of the `test_data` defect set (TODO)
 
 Add to tool 0 the option to generate a simulated recording and inject chosen noise / artifact types, to try the
@@ -3135,6 +3158,10 @@ companions) of `tools_curry/curry_header.py` / `curry_io.py` behind the same fun
 A new feature tool for the sleep microstructure: detection of slow waves and spindles. Everything is still to
 design (inputs, detection method, outputs). It comes before the distribution: the licence step waits for it
 (user decision, 2026-11-02).
+
+Before designing it, discuss feature by feature how it uses tool 7's preprocessing (filters, re-reference, resampling,
+epoching, flagging) or does without it: a detection may have its own signal needs, so do not assume it starts from
+`_all-epo.fif` as tool 9 does (user request, 2026-11-05).
 
 ### Lighter conda environments + a dedicated autoscoring environment (TODO)
 
