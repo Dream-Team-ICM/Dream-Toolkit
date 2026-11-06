@@ -4,7 +4,7 @@ light copy of the database (one participant where possible) and is checked for w
     tool 7   10 s epochs (then 8bis and 9 on them), resampling to 128 Hz, notch off, custom stage N4, an output
              folder noted and found by tool 9, a new version (then 8bis, 8 and 9 on it, the first run untouched)
     tool 6   resampling + high-pass: the dead channel stays flagged, no healthy channel gets flagged; the
-             preparation is recorded, and a second run without it warns on each skipped participant
+             preparation is recorded (a later run with other settings: tests/test_settings_skip.py)
     tool 9   multitaper PSD (same order as Welch), 'knee' aperiodic mode
     tool 8   a flagged epoch rescued / a kept epoch added in the navigator; an unticked stage stays in
              the decision (focus only, overrides kept);
@@ -259,14 +259,6 @@ def test_tool6_resampling_and_highpass(src, tmp_path):
         nb.set('hp_check', True)
         nb.set('hp_freq', 0.5)
         nb.click('btn_run')
-        # A second run without preparation, 'Skip already processed' ticked (default): every participant is
-        # skipped, each with a warning naming the preparation its tables were made with.
-        nb.set('cb_resample', False)
-        nb.set('hp_check', False)
-        nb.click('btn_run')
-        second_log = nb.widget_text()
-    assert second_log.count('⚠️ made with resampled to 128 Hz, high-pass 0.5 Hz, this run: none '
-                            '(untick Skip to redo it)') == len(IDS), second_log[-2000:]
     reports = data / 'reports_quality_overview'
     q = tsv(reports / 'quality_summary.tsv')
     assert (q['signal_preparation'] == 'resampled to 128 Hz, high-pass 0.5 Hz').all()

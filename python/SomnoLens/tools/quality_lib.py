@@ -780,12 +780,13 @@ def signal_preparation_label(resampled_to=None, highpassed_at=None):
     return ', '.join(steps) if steps else 'none'
 
 
-def signal_preparation_mismatch(stored, do_resample, target_freq, do_highpass, hp_freq_val):
+def signal_preparation_mismatch(stored, do_resample, target_freq, do_highpass, hp_freq_val, native_sf=None):
     """Why a participant's stored `signal_preparation` label differs from this run's settings ('' when it does
-    not, or cannot be told). The high-pass is always compared. The resampling only when the stored file was
-    resampled: a file that was not may simply have been at or below the target rate already (prepare_signal
-    never upsamples), which only its header would tell. An empty label (a table written before the column
-    existed) is never reported."""
+    not, or cannot be told). The high-pass is always compared. A stored resampling too. A file stored without
+    resampling counts as different only when this run would really resample it, which takes `native_sf`, its rate
+    in the header: it may simply have been at or below the target already (prepare_signal never upsamples), and
+    without `native_sf` this cannot be told. An empty label (a table written before the column existed) is never
+    reported."""
     if not isinstance(stored, str) or not stored.strip():
         return ''
     parts = [p.strip() for p in stored.split(',')]
@@ -793,11 +794,73 @@ def signal_preparation_mismatch(stored, do_resample, target_freq, do_highpass, h
     stored_rs = next((p for p in parts if p.startswith('resampled to')), None)
     run_hp = f'high-pass {hp_freq_val:g} Hz' if (do_highpass and hp_freq_val is not None) else None
     run_rs = f'resampled to {target_freq:g} Hz' if (do_resample and target_freq is not None) else None
-    if stored_hp == run_hp and (stored_rs is None or stored_rs == run_rs):
+    newly_resampled = (stored_rs is None and run_rs is not None and native_sf is not None
+                       and target_freq < native_sf)
+    if stored_hp == run_hp and (stored_rs is None or stored_rs == run_rs) and not newly_resampled:
         return ''
     run_label = signal_preparation_label(target_freq if do_resample else None,
                                          hp_freq_val if do_highpass else None)
     return f'made with {stored.strip()}, this run: {run_label}'
+
+
+def flag_thresholds_text(thresholds):
+    """{'flat_pct': 3.5, ...} -> 'bounds_pct:1+flat_pct:3.5+...' (sorted), the flag_thresholds column of tool 6's
+    tables."""
+    return '+'.join(f'{key}:{value:g}' for key, value in sorted(thresholds.items()))
+
+
+def parse_flag_thresholds(text):
+    """The reverse of flag_thresholds_text. {} for an empty cell (a table written before the column existed)."""
+    parsed = {}
+    if isinstance(text, str):
+        for item in text.split('+'):
+            key, _, value = item.partition(':')
+            try:
+                parsed[key] = float(value)
+            except ValueError:
+                pass
+    return parsed
+
+
+def flag_criteria(reasons):
+    """The criteria behind a channel's flag reasons: 'flat_pct=5.0% > 3.5%' -> 'flat_pct'. The reasons themselves
+    hold the threshold, so their text changes with it even when the same channel stays flagged for the same cause."""
+    return sorted(reason.split('=')[0].strip() for reason in reasons)
+
+
+def recorded_preparation(stored):
+    """The signal_preparation label of a participant's table, '' when the table was written before the column."""
+    if 'signal_preparation' not in stored.columns or stored.empty:
+        return ''
+    label = stored['signal_preparation'].iloc[0]
+    return label.strip() if isinstance(label, str) else ''
+
+
+def settings_differences(stored, do_resample, target_freq, do_highpass, hp_freq_val, thresholds, native_sf=None):
+    """What separates a participant's {file_id}_quality_metrics.tsv (`stored`) from this run's settings, as
+    (setting, recorded, this run) rows. [] when nothing does.
+    The signal preparation changes every metric. A threshold changes only the flags, so it counts only through
+    them: flag_channel is run again on the stored metrics, and a threshold that moves no flag is not a difference
+    (the report keeps the former threshold in its text). The former thresholds are given when a flag moves."""
+    rows = []
+    prepared = recorded_preparation(stored)
+    if signal_preparation_mismatch(prepared, do_resample, target_freq, do_highpass, hp_freq_val, native_sf):
+        rows.append(('signal preparation', prepared,
+                     signal_preparation_label(target_freq if do_resample else None,
+                                              hp_freq_val if do_highpass else None)))
+    flag_rows = []
+    for _, channel_row in stored.iterrows():
+        reason = channel_row['suspect_reason']
+        old = flag_criteria(reason.split(';')) if isinstance(reason, str) and reason.strip() else []
+        new = flag_criteria(flag_channel(channel_row, thresholds))
+        if old != new:
+            flag_rows.append((f"flags of {channel_row['channel']}", ', '.join(old) or 'none', ', '.join(new) or 'none'))
+    if flag_rows and 'flag_thresholds' in stored.columns:
+        recorded = parse_flag_thresholds(stored['flag_thresholds'].iloc[0])
+        for key, value in sorted(thresholds.items()):
+            if key in recorded and f'{recorded[key]:g}' != f'{value:g}':
+                rows.append((f'flag threshold {key}', f'{recorded[key]:g}', f'{value:g}'))
+    return rows + flag_rows
 
 
 def prepare_signal(raw, sf, file_id, do_resample, target_freq, do_highpass, hp_freq_val, warn=print, status=None):
@@ -922,6 +985,7 @@ def compute_channel_metrics(raw, sf, file_id, thresholds, hypno_vec, custom_stag
             'hist_extreme_pct': m['hist_extreme_pct'],
             'n_peaks': m['n_peaks'],
             'signal_preparation': signal_preparation,
+            'flag_thresholds': flag_thresholds_text(thresholds),
             'suspect_reason': '; '.join(ch_flags[ch]),
             'exclude': bool(ch_flags[ch]),
         })

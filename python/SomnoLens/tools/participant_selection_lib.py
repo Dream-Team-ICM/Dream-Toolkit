@@ -17,9 +17,11 @@ this code is used by tools 5, 5bis, 6, 7, 8, 8bis, 9 and their Curry twins, and 
    Excluded participants are still processed by every tool; they are only flagged in the tables
    (`participant_excluded`, `participant_exclude_reason`) and left out of group statistics / figures.
 
-2. ParticipantSelector: the "All participants / Subset only" block shared by the processing tools.
+2. ParticipantSelector: the "All participants / Subset only" block shared by the processing tools. With Skip
+   ticked, it also asks what to do with the participants made with other settings than the run's.
 """
 import datetime
+import html
 import os
 import re
 from pathlib import Path
@@ -268,6 +270,50 @@ def parse_id_list(text):
     return [t for t in re.split(r'[,;\s]+', text or '') if t]
 
 
+# ---------------------------------------------------------------------------
+# Participants made with other settings (Skip ticked)
+# ---------------------------------------------------------------------------
+# differences = {file_id: [(setting, recorded, this run), ...]}, found by each tool before any analysis. The run asks
+# what to do with them instead of reprocessing on its own: a page starts from its defaults at every launch, so a
+# difference may only mean that it was just opened, and reprocessing could overwrite a whole study.
+DIFFERENCES_SHOWN = 20       # lines of the box, then '… (+N)'
+
+
+def group_differences(differences):
+    """{file_id: [(setting, recorded, this run), ...]} -> [(setting, recorded, this run, [file_ids])], one row per
+    distinct difference, the most frequent first."""
+    groups = {}
+    for fid, rows in differences.items():
+        for row in rows:
+            groups.setdefault(tuple(str(value) for value in row), []).append(fid)
+    ordered = sorted(groups.items(), key=lambda item: -len(item[1]))     # a stable sort: first seen first on a tie
+    return [(*key, fids) for key, fids in ordered]
+
+
+def other_settings_html(differences, n_processed):
+    """The box listing the differences, with the participants concerned, before the two answers."""
+    import ui_lib as UI      # the look shared by the Voila pages (imported on use: screen only)
+    groups = group_differences(differences)
+    lines = []
+    for setting, recorded, current, fids in groups[:DIFFERENCES_SHOWN]:
+        names = ', '.join(fids[:UI.MISSING_SHOWN])
+        if len(fids) > UI.MISSING_SHOWN:
+            names += f' (+{len(fids) - UI.MISSING_SHOWN})'
+        lines.append(f'<li><b>{html.escape(setting)}</b>: {html.escape(recorded)} → {html.escape(current)} '
+                     f'<small>({len(fids)} participant(s): {html.escape(names)})</small></li>')
+    if len(groups) > DIFFERENCES_SHOWN:
+        lines.append(f'<li>… (+{len(groups) - DIFFERENCES_SHOWN} other differences)</li>')
+    return UI.box('warn', f'<b>{len(differences)} of the {n_processed} processed participant(s) were made with other '
+                  f'settings</b> (recorded → this run). Nothing has run yet.<ul style="margin:4px 0;">'
+                  f'{"".join(lines)}</ul>Keeping them mixes settings in the database tables.')
+
+
+def other_settings_list(differences):
+    """'165 (signal preparation), 176 (flags of C3, flags of O1)', for the log at the end of a run."""
+    return ', '.join(f'{fid} ({", ".join(dict.fromkeys(row[0] for row in rows))})'
+                     for fid, rows in differences.items())
+
+
 class ParticipantSelector:
     """'All participants / Subset only' + 'Skip already processed', with a summary line and a
     prominent warning box. Usage in a tool:
@@ -315,6 +361,15 @@ class ParticipantSelector:
                                  layout=w.Layout(display='none'))
         self.widget = w.VBox([w.HBox([self.dd_mode, self.tgl_list]), self.box_subset, self.lst,
                               self.cb_skip, self.lbl_summary, self.html_warn])
+        # The answers when participants were made with other settings (ask_other_settings): shown in the run's log.
+        self.btn_redo_other = ui_lib.button('Reprocess them', 'caution')
+        self.btn_keep_other = ui_lib.button('Keep them', 'run')
+        self._box_other = w.HBox([self.btn_redo_other, self.btn_keep_other])
+        self._on_other_answer = None
+        # Beside the page's Run button: the question sits under the progress bars, possibly below the window.
+        self.run_note = w.HTML('')
+        self.btn_redo_other.on_click(lambda _: self._answer_other('reprocess'))
+        self.btn_keep_other.on_click(lambda _: self._answer_other('keep'))
         self.dd_mode.observe(self._on_mode, names='value')
         self.tags.observe(self._on_tags, names='value')
         self.cmb_add.observe(self._on_add, names='value')
@@ -389,6 +444,27 @@ class ParticipantSelector:
         return UI.box('warn', f'<b>{len(skipped)} of the {len(self.chosen_ids())} selected participant(s) will '
                       f'NOT be processed: already processed</b> ({names}).<br>Untick <b>Skip already processed '
                       'participants</b> to reprocess them.')
+
+    def ask_other_settings(self, differences, n_processed, n_new, on_answer):
+        """Skip met participants made with other settings: show the differences and the two answers in the output
+        area this is called from (the tool's run log), then return. on_answer('reprocess' or 'keep') runs when a
+        button is clicked. The tool calls it before any analysis, and finds the differences again on the answer. It
+        shows run_note beside its Run button and empties it at the start of each Run."""
+        from IPython.display import HTML, display
+        import ui_lib as UI      # the look shared by the Voila pages (imported on use: screen only)
+        self.run_note.value = UI.msg('warn', 'Your answer is needed, just below')
+        n_redo = len(differences)
+        new_ones = f'run the {n_new} new one(s)'
+        self.btn_redo_other.description = f'Reprocess {n_redo} participant(s)' + (f' + {new_ones}' if n_new else '')
+        self.btn_keep_other.description = f'Keep them, {new_ones}' if n_new else 'Keep them, only rebuild the tables'
+        self._on_other_answer = on_answer
+        display(HTML(other_settings_html(differences, n_processed)))
+        display(self._box_other)
+
+    def _answer_other(self, answer):
+        on_answer, self._on_other_answer = self._on_other_answer, None     # one answer per question
+        if on_answer is not None:
+            on_answer(answer)
 
     # -- callbacks ----------------------------------------------------------------
     def _on_mode(self, change=None):

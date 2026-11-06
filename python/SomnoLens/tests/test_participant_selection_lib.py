@@ -145,6 +145,43 @@ def test_subset_with_skip_warns_about_the_processed_ones():
     assert sel.html_warn.value == ''
 
 
+def test_differences_are_grouped_with_the_participants_concerned():
+    differences = {'p1': [('high-pass', 'off', '0.5 Hz')],
+                   'p2': [('notch', '50 Hz', 'off'), ('high-pass', 'off', '0.5 Hz')]}
+    assert P.group_differences(differences) == [('high-pass', 'off', '0.5 Hz', ['p1', 'p2']),
+                                                ('notch', '50 Hz', 'off', ['p2'])]
+    box = P.other_settings_html(differences, 4)
+    assert '2 of the 4 processed participant(s) were made with other settings' in box
+    assert 'high-pass</b>: off → 0.5 Hz' in box and '2 participant(s): p1, p2' in box
+    assert 'Nothing has run yet' in box and 'mixes settings' in box
+    assert P.other_settings_list(differences) == 'p1 (high-pass), p2 (notch, high-pass)'
+
+
+def test_the_box_stays_short_on_a_large_database():
+    many = {f'p{i}': [('high-pass', 'off', '0.5 Hz')] for i in range(13)}
+    assert '13 participant(s): p0, p1, p2, p3, p4, p5, p6, p7, p8, p9 (+3)' in P.other_settings_html(many, 13)
+    varied = {f'p{i}': [(f'flags of ch{i}', 'none', 'n_peaks')] for i in range(23)}
+    box = P.other_settings_html(varied, 23)
+    assert box.count('<li>') == P.DIFFERENCES_SHOWN + 1 and '(+3 other differences)' in box
+
+
+def test_the_answers_say_what_they_do_and_count_once():
+    sel = make_selector()
+    answers = []
+    sel.ask_other_settings({'p1': [('notch', '50 Hz', 'off')]}, 2, 2, answers.append)
+    assert sel.btn_redo_other.description == 'Reprocess 1 participant(s) + run the 2 new one(s)'
+    assert sel.btn_keep_other.description == 'Keep them, run the 2 new one(s)'
+    assert 'just below' in sel.run_note.value                   # beside Run: the question may be below the window
+    sel.btn_keep_other.click()
+    sel.btn_redo_other.click()                                  # a second click on an answered question does nothing
+    assert answers == ['keep']
+    sel.ask_other_settings({'p1': [('notch', '50 Hz', 'off')]}, 2, 0, answers.append)
+    assert sel.btn_redo_other.description == 'Reprocess 1 participant(s)'
+    assert sel.btn_keep_other.description == 'Keep them, only rebuild the tables'
+    sel.btn_redo_other.click()
+    assert answers == ['keep', 'reprocess']
+
+
 def test_paste_and_list_pick_switch_to_subset_mode():
     sel = make_selector()
     sel.txt_paste.value = 'p4, p3; nope'
