@@ -10,6 +10,7 @@ defaults (deliberately not tool 7's: see SPEC section 9).
 """
 import os
 import json
+import hashlib
 from pathlib import Path
 
 import numpy as np
@@ -1619,3 +1620,116 @@ def participant_report_items(p, cfg, source, custom, tables, meta, ch_names, fre
            f'<code>{fid}_spectral_stage.tsv</code>.</small></p>'),
     ]
     return items
+
+
+# =============================================================================
+# What a participant already processed was made with (Skip ticked: tool 9's Run asks before any analysis)
+# =============================================================================
+FIT_SETTINGS = [('fit_fmin', '1/f fit fmin (Hz)'), ('fit_fmax', '1/f fit fmax (Hz)'), ('aperiodic_mode', 'aperiodic mode'),
+                ('peak_width_min', 'peak width min (Hz)'), ('peak_width_max', 'peak width max (Hz)'),
+                ('min_peak_height', 'min peak height'), ('max_n_peaks', 'max peaks'),
+                ('peak_threshold', 'peak threshold (SD)'), ('r2_min', 'poor fit if R2 <'), ('mae_max', 'poor fit if MAE >')]
+
+
+def _setting_text(value):
+    """A setting as the question shows it, and as two settings are compared."""
+    return f'{value:g}' if isinstance(value, (int, float)) and not isinstance(value, bool) else str(value)
+
+
+def _on_off(value):
+    return 'on' if value else 'off'
+
+
+def smoothing_label(smooth):
+    """The smoothing of the spectrum before the fit, in words."""
+    if not smooth.get('enabled'):
+        return 'off'
+    steps = []
+    if smooth.get('median'):
+        steps.append(f"median {smooth['median_span_hz']:g} Hz")
+    if smooth.get('lowess'):
+        steps.append(f"LOWESS {smooth['lowess_span_hz']:g} Hz")
+    return ' + '.join(steps)
+
+
+def computation_differences(computed, cfg):
+    """What separates the settings a participant's per-epoch outputs were computed with (`computed`, the cfg_json of its
+    _psd_epoch.npz) from this run's `cfg`, as (setting, recorded, this run) rows. Each one takes the full computation.
+    A widget without effect is no difference: the bandwidth with Welch, the window and the overlap with multitaper, the
+    fit and its smoothing when one side has no fit. Bands and measures are compared as sets."""
+    rows = []
+
+    def compare(setting, recorded, now):
+        recorded, now = _setting_text(recorded), _setting_text(now)
+        if recorded != now:
+            rows.append((setting, recorded, now))
+
+    def bands(values):
+        ordered = sorted(values, key=lambda band: (band[1], band[2], band[0]))
+        return '; '.join(f'{name} {low:g}-{high:g} Hz' for name, low, high in ordered)
+
+    psd_old, psd_new = computed['psd'], cfg['psd']
+    compare('PSD method', psd_old['method'], psd_new['method'])
+    compare('PSD fmin (Hz)', psd_old['fmin'], psd_new['fmin'])
+    compare('PSD fmax (Hz)', psd_old['fmax'], psd_new['fmax'])
+    if psd_old['method'] == psd_new['method'] == 'welch':
+        compare('Welch window (s)', psd_old['win_s'], psd_new['win_s'])
+        compare('Welch overlap (%)', psd_old['overlap_pct'], psd_new['overlap_pct'])
+        compare('Welch window shape', psd_old['window'], psd_new['window'])
+    if psd_old['method'] == psd_new['method'] == 'multitaper':
+        compare('multitaper bandwidth (Hz)', psd_old['bandwidth'], psd_new['bandwidth'])
+    compare('1/f fit', _on_off(computed['do_fit']), _on_off(cfg['do_fit']))
+    if computed['do_fit'] and cfg['do_fit']:
+        for key, label in FIT_SETTINGS:
+            compare(label, computed['fit'][key], cfg['fit'][key])
+        compare('smoothing before the fit', smoothing_label(computed['smooth']), smoothing_label(cfg['smooth']))
+    compare('bands', bands(computed['bands']), bands(cfg['bands']))
+    compare('measures', ', '.join(sorted(computed['measures'])), ', '.join(sorted(cfg['measures'])))
+    return rows
+
+
+def decision_fingerprint(meta, in_scope, rejected, dropped):
+    """A short fingerprint of what a decision says for the aggregates (the epochs kept, the channels dropped), not of its
+    files: a reason or a badness percentage reworded by tool 8 / 8bis changes no aggregate."""
+    digest = hashlib.sha256()
+    digest.update(meta['epoch_idx'].astype('int64').values.tobytes())
+    digest.update(np.asarray(in_scope, dtype=bool).tobytes())
+    digest.update(np.asarray(rejected, dtype=bool).tobytes())
+    digest.update('\n'.join(sorted(dropped)).encode('utf-8'))
+    return digest.hexdigest()[:16]
+
+
+def aggregation_settings(cfg, source, meta, in_scope, rejected, dropped):
+    """What a participant's aggregates are made with: {file_id}_spectral_settings.json, and what a later Run compares it
+    to. `stages` = the stages it really has kept epochs in (participant_tables' stages_sel): a stage ticked for the rest
+    of the database does not concern it. Poorly-fitted epochs can only be excluded when a fit ran."""
+    stages = meta['stage'].astype(str).values
+    kept = in_scope & ~rejected
+    return {'stages': [s for s in cfg['stages'] if s in set(stages[kept])],
+            'spaces': sorted(cfg['spaces']),
+            'min_epochs': int(cfg['min_epochs']),
+            'thirds': bool(cfg['thirds']),
+            'exclude_bad_fit': bool(cfg['exclude_bad_fit'] and cfg['do_fit']),
+            'decision_source': source,
+            'decision_fingerprint': decision_fingerprint(meta, in_scope, rejected, dropped)}
+
+
+def aggregation_differences(recorded, current):
+    """What separates two aggregation_settings, as (setting, recorded, this run) rows. Each one takes a re-aggregation
+    only: no PSD, no fit."""
+    rows = []
+
+    def compare(setting, old, new):
+        if old != new:
+            rows.append((setting, old, new))
+
+    compare('stages', ', '.join(sorted(recorded['stages'])), ', '.join(sorted(current['stages'])))
+    compare('averaging space', ', '.join(recorded['spaces']), ', '.join(current['spaces']))
+    compare('min epochs per cell', str(recorded['min_epochs']), str(current['min_epochs']))
+    compare('night thirds', _on_off(recorded['thirds']), _on_off(current['thirds']))
+    compare('exclude poorly-fitted epochs', _on_off(recorded['exclude_bad_fit']), _on_off(current['exclude_bad_fit']))
+    compare('decision', recorded['decision_source'], current['decision_source'])
+    if (recorded['decision_source'] == current['decision_source']
+            and recorded['decision_fingerprint'] != current['decision_fingerprint']):
+        rows.append(('decision', 'as it was at the last run', 'changed since'))
+    return rows

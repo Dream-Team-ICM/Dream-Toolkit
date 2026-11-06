@@ -13,6 +13,7 @@ import pytest
 
 import minidb
 import pipeline
+import snapshot
 from nbdriver import NotebookSession
 from pipeline import select_subset
 
@@ -386,3 +387,195 @@ def test_tool7_a_second_run_does_not_disturb_the_first(t7_data, ids):
         log = nb.widget_text()
     assert 'DIFFERENT' not in log, log[-2000:]
     assert 'Processed this run    : 0' in log
+
+
+# =====================================================================================  tool 9
+T9_OUTPUTS = ('sim*_spectral_stage.tsv', 'sim*_bandpower_epoch.tsv', 'sim*_psd_epoch.npz', 'sim*_spectral_settings.json',
+              'sim*_spectral_report.html')
+T9_TABLES = ('spectral_stage', 'aperiodic_stage', 'psd_stage', 'spectral_stage_third')
+
+
+@pytest.fixture
+def t9_data(src, tmp_path):
+    data = light_copy(src, tmp_path / 'data', ['reports_features_spectral'])
+    for folder in ('preproc_epo', 'rejection_auto', 'features_spectral'):
+        shutil.copytree(src / 'derivatives' / folder, data / 'derivatives' / folder)
+    return data
+
+
+def t9_folders(data):
+    return Path(data) / 'derivatives' / 'preproc_epo', Path(data) / 'derivatives' / 'rejection_auto'
+
+
+def t9_outputs(data):
+    return {**mtimes(Path(data) / 'derivatives' / 'features_spectral', *T9_OUTPUTS),
+            **mtimes(Path(data) / 'reports_features_spectral', *T9_OUTPUTS)}
+
+
+def open_tool9(nb, data):
+    """The same picks and options as the chain (pipeline.run_tool9), the session staying open for the answer."""
+    raw_dir, decision_dir = t9_folders(data)
+    nb.pick('fc_data', data)
+    nb.pick('fc_raw', raw_dir)
+    nb.pick('fc_decision', decision_dir)
+    nb.pick('fc_subj', Path(data) / 'participants.tsv')
+    nb.set('dd_join_col', 'participant_id')
+    nb.click('btn_scan')
+    nb.set('cb_avg_lin', True)
+    nb.set('cb_thirds', True)
+
+
+def feature_file(data, fid, name):
+    return Path(data) / 'derivatives' / 'features_spectral' / f'{fid}_{name}'
+
+
+@pytest.mark.tool9
+def test_tool9_same_settings_are_skipped_without_a_question(t9_data):
+    before = t9_outputs(t9_data)
+    log = pipeline.run_tool9(t9_data, *t9_folders(t9_data))
+    assert QUESTION not in log, log[-2000:]
+    assert '0 processed' in log
+    assert t9_outputs(t9_data) == before
+
+
+@pytest.mark.tool9
+def test_tool9_a_widget_without_effect_asks_nothing(t9_data):
+    with NotebookSession(pipeline.T9) as nb:
+        open_tool9(nb, t9_data)
+        nb.set('txt_bandwidth', 5.0)               # not used with Welch
+        nb.set('txt_n_jobs', 1)                    # changes no value
+        nb.click('btn_run')
+        log = nb.widget_text()
+    assert QUESTION not in log, log[-2000:]
+
+
+@pytest.mark.tool9
+def test_tool9_other_settings_ask_before_anything_runs_then_keep(t9_data, ids):
+    before = t9_outputs(t9_data)
+    with NotebookSession(pipeline.T9) as nb:
+        open_tool9(nb, t9_data)
+        nb.set('txt_min_epochs', 5)
+        nb.set('txt_win_s', 2.0)
+        nb.click('btn_run')
+        log = nb.widget_text()
+        assert f'{len(ids)} of the {len(ids)} processed participant(s) {QUESTION}' in log, log[-2000:]
+        assert 'to re-aggregate: min epochs per cell : 20 → 5' in log
+        assert 'to recompute: Welch window (s) : 4 → 2' in log
+        assert f'the full computation (PSD, fit) for {len(ids)}, a re-aggregation only for 0' in log
+        assert 'just below' in nb.value('participant_selector.run_note.value')
+        assert t9_outputs(t9_data) == before                           # nothing ran while waiting for the answer
+        assert nb.value('participant_selector.btn_keep_other.description') == 'Keep them, only rebuild the tables'
+        nb.click('participant_selector.btn_keep_other')
+        log = nb.widget_text()
+        assert nb.value('participant_selector.run_note.value') == ''
+    assert '0 processed' in log, log[-2000:]
+    assert 'Kept as they are, with their recorded settings' in log     # all kept, nobody new: nothing is mixed
+    assert t9_outputs(t9_data) == before
+
+
+@pytest.mark.tool9
+def test_tool9_reprocess_takes_the_path_each_setting_needs(t9_data, ids):
+    first, second = ids[0], ids[1]
+    npz_before = feature_file(t9_data, first, 'psd_epoch.npz').stat().st_mtime_ns
+
+    # An aggregation setting: re-aggregated, the spectra stay as they are.
+    with NotebookSession(pipeline.T9) as nb:
+        open_tool9(nb, t9_data)
+        select_subset(nb, [first], skip=True)
+        nb.set('txt_min_epochs', 5)
+        nb.click('btn_run')
+        assert 'the full computation (PSD, fit) for 0, a re-aggregation only for 1' in nb.widget_text()
+        nb.click('participant_selector.btn_redo_other')
+        log = nb.widget_text()
+    assert f'Made again (other settings): {first} (to re-aggregate: min epochs per cell)' in log, log[-2000:]
+    assert '1 processed' in log
+    assert feature_file(t9_data, first, 'psd_epoch.npz').stat().st_mtime_ns == npz_before
+    assert json.loads(feature_file(t9_data, first, 'spectral_settings.json').read_text(encoding='utf-8'))['min_epochs'] == 5
+
+    # A setting of the computation: the spectra are made again.
+    npz_second = feature_file(t9_data, second, 'psd_epoch.npz').stat().st_mtime_ns
+    with NotebookSession(pipeline.T9) as nb:
+        open_tool9(nb, t9_data)
+        select_subset(nb, [second], skip=True)
+        nb.set('txt_win_s', 2.0)
+        nb.click('btn_run')
+        assert 'the full computation (PSD, fit) for 1, a re-aggregation only for 0' in nb.widget_text()
+        nb.click('participant_selector.btn_redo_other')
+        log = nb.widget_text()
+    assert f'Made again (other settings): {second} (to recompute: Welch window (s))' in log, log[-2000:]
+    assert feature_file(t9_data, second, 'psd_epoch.npz').stat().st_mtime_ns != npz_second
+
+
+@pytest.mark.tool9
+def test_tool9_a_re_aggregation_equals_a_full_run(t9_data, ids):
+    fid = ids[0]
+    with NotebookSession(pipeline.T9) as nb:
+        open_tool9(nb, t9_data)
+        select_subset(nb, [fid], skip=True)
+        nb.set('txt_min_epochs', 200)
+        nb.click('btn_run')
+        nb.click('participant_selector.btn_redo_other')
+    reaggregated = {name: tsv(feature_file(t9_data, fid, f'{name}.tsv')) for name in T9_TABLES}
+    assert reaggregated['spectral_stage']['power_db_from_log_mean'].isna().any()   # the minimum took effect
+
+    with NotebookSession(pipeline.T9) as nb:
+        open_tool9(nb, t9_data)
+        select_subset(nb, [fid], skip=False)
+        nb.set('txt_min_epochs', 200)
+        nb.click('btn_run')
+        assert '1 processed' in nb.widget_text()
+    for name, table in reaggregated.items():
+        # the per-epoch spectrum is stored in float32: psd_stage agrees to ~1e-7 relative
+        diffs = snapshot.compare_tables(tsv(feature_file(t9_data, fid, f'{name}.tsv')), table, atol=1e-5)
+        assert not diffs, f'{name}: ' + '; '.join(diffs)
+
+
+@pytest.mark.tool9
+def test_tool9_a_decision_changed_is_asked_about_through_what_it_says(t9_data, ids):
+    fid = ids[0]
+    path = t9_folders(t9_data)[1] / f'{fid}_epoch_decision.tsv'
+    table = tsv(path)
+
+    # A reason reworded: the aggregates would not move.
+    table.assign(reject_reason='reworded').to_csv(path, sep='\t', index=False)
+    with NotebookSession(pipeline.T9) as nb:
+        open_tool9(nb, t9_data)
+        nb.click('btn_run')
+        assert QUESTION not in nb.widget_text()
+
+    # Epochs rejected: this participant only, by a re-aggregation.
+    newly = table.index[table['in_scope'] & ~table['rejected']][:25]
+    table.loc[newly, 'rejected'] = True
+    table.to_csv(path, sep='\t', index=False)
+    npz_before = feature_file(t9_data, fid, 'psd_epoch.npz').stat().st_mtime_ns
+    with NotebookSession(pipeline.T9) as nb:
+        open_tool9(nb, t9_data)
+        nb.click('btn_run')
+        log = nb.widget_text()
+        assert f'1 of the {len(ids)} processed participant(s) {QUESTION}' in log, log[-2000:]
+        assert 'to re-aggregate: decision : as it was at the last run → changed since' in log
+        assert 'Keeping them mixes settings' in log
+        nb.click('participant_selector.btn_redo_other')
+        log = nb.widget_text()
+    assert '1 processed' in log, log[-2000:]
+    assert feature_file(t9_data, fid, 'psd_epoch.npz').stat().st_mtime_ns == npz_before
+
+    # Nothing left to ask.
+    log = pipeline.run_tool9(t9_data, *t9_folders(t9_data))
+    assert QUESTION not in log, log[-2000:]
+
+
+@pytest.mark.tool9
+def test_tool9_outputs_written_before_the_record_compare_only_the_computation(t9_data, ids):
+    for path in (t9_data / 'derivatives' / 'features_spectral').glob('*_spectral_settings.json'):
+        path.unlink()
+    with NotebookSession(pipeline.T9) as nb:
+        open_tool9(nb, t9_data)
+        nb.set('txt_min_epochs', 5)                # not recorded: nothing to compare it with
+        nb.click('btn_run')
+        log = nb.widget_text()
+        assert QUESTION not in log, log[-2000:]
+        assert f'{len(ids)} participant(s) written before their settings were all recorded' in log
+        nb.set('txt_win_s', 2.0)                   # the computation stays compared, through the .npz
+        nb.click('btn_run')
+        assert 'to recompute: Welch window (s) : 4 → 2' in nb.widget_text()
