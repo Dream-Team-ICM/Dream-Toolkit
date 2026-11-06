@@ -290,9 +290,18 @@ def group_differences(differences):
     return [(*key, fids) for key, fids in ordered]
 
 
-def other_settings_html(differences, n_processed):
+def keeping_mixes_settings(n_different, n_processed, n_new):
+    """Whether keeping the participants made with other settings puts settings side by side in the tables: only if
+    someone else has this run's settings, already processed or about to be."""
+    return n_new > 0 or n_different < n_processed
+
+
+def other_settings_html(differences, n_processed, n_new=0):
     """The box listing the differences, with the participants concerned, before the two answers."""
     import ui_lib as UI      # the look shared by the Voila pages (imported on use: screen only)
+    keeping = ('Keeping them mixes settings in the database tables.'
+               if keeping_mixes_settings(len(differences), n_processed, n_new)
+               else 'Keeping them leaves the database tables as they are.')
     groups = group_differences(differences)
     lines = []
     for setting, recorded, current, fids in groups[:DIFFERENCES_SHOWN]:
@@ -305,13 +314,21 @@ def other_settings_html(differences, n_processed):
         lines.append(f'<li>… (+{len(groups) - DIFFERENCES_SHOWN} other differences)</li>')
     return UI.box('warn', f'<b>{len(differences)} of the {n_processed} processed participant(s) were made with other '
                   f'settings</b> (recorded → this run). Nothing has run yet.<ul style="margin:4px 0;">'
-                  f'{"".join(lines)}</ul>Keeping them mixes settings in the database tables.')
+                  f'{"".join(lines)}</ul>{keeping}')
 
 
 def other_settings_list(differences):
     """'165 (signal preparation), 176 (flags of C3, flags of O1)', for the log at the end of a run."""
     return ', '.join(f'{fid} ({", ".join(dict.fromkeys(row[0] for row in rows))})'
                      for fid, rows in differences.items())
+
+
+def kept_line(differences, n_processed, n_new):
+    """The line of the log at the end of a run when the participants made with other settings were kept."""
+    names = other_settings_list(differences)
+    if keeping_mixes_settings(len(differences), n_processed, n_new):
+        return f'⚠️ Kept as they are, so the tables mix settings: {names}'
+    return f'ℹ️ Kept as they are, with their recorded settings: {names}'
 
 
 class ParticipantSelector:
@@ -458,7 +475,7 @@ class ParticipantSelector:
         self.btn_redo_other.description = f'Reprocess {n_redo} participant(s)' + (f' + {new_ones}' if n_new else '')
         self.btn_keep_other.description = f'Keep them, {new_ones}' if n_new else 'Keep them, only rebuild the tables'
         self._on_other_answer = on_answer
-        display(HTML(other_settings_html(differences, n_processed)))
+        display(HTML(other_settings_html(differences, n_processed, n_new)))
         display(self._box_other)
 
     def _answer_other(self, answer):

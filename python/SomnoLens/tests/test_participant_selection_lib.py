@@ -165,6 +165,17 @@ def test_the_box_stays_short_on_a_large_database():
     assert box.count('<li>') == P.DIFFERENCES_SHOWN + 1 and '(+3 other differences)' in box
 
 
+def test_keeping_says_mixed_only_if_settings_really_sit_side_by_side():
+    differences = {'p1': [('notch', '50 Hz', 'off')]}
+    # Someone else has this run's settings: already processed, or about to be.
+    for n_processed, n_new in ((2, 0), (1, 1)):
+        assert 'Keeping them mixes settings' in P.other_settings_html(differences, n_processed, n_new)
+        assert P.kept_line(differences, n_processed, n_new) == '⚠️ Kept as they are, so the tables mix settings: p1 (notch)'
+    # Everyone chosen differs and nobody is new: nothing changes in the tables.
+    assert 'Keeping them leaves the database tables as they are' in P.other_settings_html(differences, 1, 0)
+    assert P.kept_line(differences, 1, 0) == 'ℹ️ Kept as they are, with their recorded settings: p1 (notch)'
+
+
 def test_the_answers_say_what_they_do_and_count_once():
     sel = make_selector()
     answers = []
