@@ -4,6 +4,7 @@
 **Contexte** : le portage de Score_EDF dans l'outil 3bis est fait (SPEC §3bis ; plan `plan_score_edf_fixes.md` dans l'historique git). Tu veux
 aussi garder un outil **autonome** pour qui veut seulement de l'autoscoring, sans passer par les outils 1 à 3 de
 SomnoLens (pas de JSON de l'outil 2, pas d'hypnogramme réécrit par l'outil 3).
+==> l'outil devrait aussi tourner sur différent format de données EEG (.edf, .eeg, .cdt etc).
 
 ## Décision à prendre d'abord : corriger Score_EDF, ou le reconstruire sur les bibliothèques de 3bis ?
 
