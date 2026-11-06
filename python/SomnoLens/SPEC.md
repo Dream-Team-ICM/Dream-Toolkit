@@ -3120,7 +3120,7 @@ a section below. Update this list when an item is done.
 3. *Slow-wave and spindle extraction*. The licence waits for it.
 4. Features: *Database organisation inferred by tool 1*, *Tool 6: keep a raw run and a prepared run side by side*,
    *Tool 2: richer context channels*, *Tool 3bis: follow-ups of the Score_EDF port*, *Standalone comparison of
-   hypnograms*, *Simulated recording generator in tool 0*.
+   hypnograms*, *Simulated recording generator in tool 0*, *Task triggers*.
 5. Between larger jobs: *English everywhere*, *Tools 1 to 4: one code cell per section*.
 6. After the extraction: *Clean-up before distribution*, *Distribution and licensing*, the installation tutorial.
 7. Long term: *EDF reading of tools 2, 4, 6, 7 through `edf_io_lib`*, *A Curry twin of tool 0*, *Tool 0: interactive
@@ -3128,6 +3128,26 @@ a section below. Update this list when an item is done.
 
 Still to check by hand, not covered by the tests: a real participant table through tools 5 and 9, tool 2's full *Preview &
 Save* (it writes the channel configuration and the names registry).
+
+Not placed in this order yet: *BrainVision format and one version of each tool* (its plan is under review).
+
+### BrainVision format and one version of each tool (TODO, plan under review)
+
+Read BrainVision recordings (`.vhdr` + `.vmrk` + `.eeg`), first to inspect them and score them automatically, then through
+the whole chain, with **one version of each tool** instead of a third set of twins, and later remove the Curry twins the
+same way. The plan, with what was measured on real recordings, is `tools/plan_brainvision.md`.
+
+### Task triggers: reading, checks, trigger-locked analyses (TODO, after the slow-wave and spindle extraction)
+
+Research protocols run a cognitive task during the recording, and the task's triggers are stored with the signal (e.g. the
+`Stimulus/S n` markers of a BrainVision `.vmrk`). A future direction of the tools, not needed soon (user request,
+2026-11-06). Wanted:
+- read the triggers and check their structure: count per type, positions, intervals (what MNE allows);
+- epoch the signal around a chosen trigger;
+- run analyses on these trigger-locked epochs.
+
+It is a large piece of work, to start once at least the slow waves and spindles are implemented. Until then the triggers are
+ignored: the tools adapted to BrainVision read the `.vmrk` only for the recording start and the recording pauses.
 
 ### Simulated recording generator in tool 0 + rework of the `test_data` defect set (TODO)
 
