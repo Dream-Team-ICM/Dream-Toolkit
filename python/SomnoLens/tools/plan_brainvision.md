@@ -233,7 +233,7 @@ plus sûr sur d'autres jeux de données. Seuls le `[Comment]` et le `.vmrk` sont
 | Trouver | `.edf` | `.vhdr`, jamais `.eeg` (extension aussi utilisée par Nihon Kohden) |
 | En-tête | `read_edf_header_custom` | même dictionnaire, `physical_*` et `digital_*` vides, `transducer_type` calculé |
 | Fréquence, durée | champs de l'en-tête | MNE (`sfreq`, `n_times`) |
-| Type de canal | transducteur ou nom | `EOG`, `EMG`, `ECG` si le nom le dit (IO, SO, LO, HEOG, VEOG inclus) ; sinon `EEG` si MNE le type EEG et que l'unité est en µV ; sinon vide |
+| Type de canal | transducteur ou nom | `EOG`, `EMG`, `ECG` si le nom le dit (IO, SO, LO, HEOG, VEOG inclus) ; sinon `EEG` si MNE le type EEG (position connue, ou unité en µV dans un fichier sans positions) ; sinon vide |
 | Heure de début | octets 168 et 176 | `New Segment` du `.vmrk`, tronqué à la seconde |
 | Signal | `read_raw_edf(include=)`, suffixes `-0` | `read_raw_brainvision`, `pick`, référence en ligne, annotations retirées (les `.fif` ne portent pas les triggers) |
 | Bornes physiques | oui | aucune : `bounds_pct` absent, comme en Curry |
@@ -247,7 +247,9 @@ DC = high-pass coché. Curry en profitera sans rien de spécifique. Pour ce high
 **Cas à traiter dans le lecteur**
 
 - **Le `[Comment]` n'a pas de format garanti** et je ne l'ai vu que pour un amplificateur : référence, filtres, impédances et gradients
-  sont tous optionnels. Absents ou illisibles, ils ne sont pas affichés et rien ne s'arrête ;
+  sont tous optionnels. Absents ou illisibles, ils ne sont pas affichés et rien ne s'arrête. MNE, lui, s'arrête sur un tableau de filtres
+  coupé ou sur un autre nom de canal (mesuré) : l'enregistrement est alors ouvert par une copie de l'en-tête sans le `[Comment]`, et
+  `comment_warning` le dit. Même chemin pour un `.vhdr` qui écrit `$b`, que MNE ne connaît pas ;
 - `.eeg` absent ou nommé autrement que dans `DataFile` : échec clair, l'enregistrement passe dans `failed` ;
 - plusieurs `New Segment` : ⚠ dans l'outil 1, et l'heure n'est plus fiable, donc l'export texte des événements n'est pas converti ;
 - `New Segment` sans date : pas d'heure de début, comme un en-tête EDF illisible ;

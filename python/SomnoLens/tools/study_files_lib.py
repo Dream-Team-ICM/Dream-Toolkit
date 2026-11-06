@@ -48,6 +48,32 @@ def _norm(s):
 
 
 # ---------------------------------------------------------------------------------------------------------
+# Recordings
+# ---------------------------------------------------------------------------------------------------------
+# BrainVision is found by its .vhdr, never by its .eeg: Nihon Kohden uses that extension too.
+RECORDING_SUFFIXES = ('.edf', '.vhdr')
+
+
+def _recordings_on_disk(folder):
+    return [f for f in sorted(Path(folder).rglob('*'))
+            if f.suffix.lower() in RECORDING_SUFFIXES and not f.name.startswith('._')]
+
+
+def list_recordings(folder):
+    """Every recording under `folder` (recursive), sorted, macOS '._' shadow files excluded. The tools identify a recording
+    by its name: a .vhdr with the name of an .edf is left out (recording_name_conflicts names it)."""
+    found = _recordings_on_disk(folder)
+    edf_names = {_norm(f.stem) for f in found if f.suffix.lower() == '.edf'}
+    return [f for f in found if f.suffix.lower() == '.edf' or _norm(f.stem) not in edf_names]
+
+
+def recording_name_conflicts(folder):
+    """The .vhdr files list_recordings leaves out because an .edf has the same name, to warn about at a scan."""
+    kept = {_norm(f) for f in list_recordings(folder)}
+    return [f for f in _recordings_on_disk(folder) if _norm(f) not in kept]
+
+
+# ---------------------------------------------------------------------------------------------------------
 # Names registry: config_param/file_names.json
 # ---------------------------------------------------------------------------------------------------------
 def names_path(study):
