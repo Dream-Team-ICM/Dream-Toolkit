@@ -279,7 +279,7 @@ a test is added or changed).
   bottom without clicking anything (no traceback, no `Import error`). The archived Jupyter notebooks (`tools/jupyter_notebook/`) are not run.
 - **standard** (`-m "not full"`, ~32 min from scratch, ~28 min with the chain reused, measured on 2026-11-06): quick + the chain on the **synthetic** database (golden
   comparison, invariants), the known-answer tests and the small runs of tools 1, 3, 4.
-- **full** (no `-m`, ~24 min from scratch): standard + the chain on the **real** database (skipped on a machine without
+- **full** (no `-m`, ~1 h 20, measured on 2026-11-06): standard + the chain on the **real** database (skipped on a machine without
   `tools/test_data`) + the parameter variants. `full` is put on the `real` parameter of the `chain` fixture
   and on `test_variants.py`.
 
@@ -3144,7 +3144,8 @@ Research protocols run a cognitive task during the recording, and the task's tri
 2026-11-06). Wanted:
 - read the triggers and check their structure: count per type, positions, intervals (what MNE allows);
 - epoch the signal around a chosen trigger;
-- run analyses on these trigger-locked epochs.
+- run analyses on these trigger-locked epochs;
+- use the task's sensor channels recorded with the signal (e.g. finger-pressure channels on the auxiliary inputs).
 
 It is a large piece of work, to start once at least the slow waves and spindles are implemented. Until then the triggers are
 ignored: the tools adapted to BrainVision read the `.vmrk` only for the recording start and the recording pauses.

@@ -51,7 +51,7 @@ Not every change needs every test. The suite has three levels, from the fastest 
 |---|---|---|---|
 | **Quick** | small checks of the shared code, and every Voila notebook (EDF tools and Curry twins) opened and run from top to bottom without clicking anything | about 2 min | a change that touches no tool's results (a test, a text, a Curry generator) |
 | **Standard** | quick + the full chain on the synthetic nights (comparison with the reference run, every check below) + the known answers + tools 1, 3, 4 | about 32 min (28 when the chain is reused, measured on 2026-11-06) | a change to a tool |
-| **Full** | standard + the chain on the real nights + the parameter variants | about 24 min | before merging a branch, or after a change to code shared by several tools |
+| **Full** | standard + the chain on the real nights + the parameter variants | about 1 h 20 (measured on 2026-11-06) | before merging a branch, or after a change to code shared by several tools |
 
 Two things keep the runs short:
 
