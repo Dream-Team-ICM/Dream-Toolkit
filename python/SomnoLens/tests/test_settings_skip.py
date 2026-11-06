@@ -397,7 +397,7 @@ T9_TABLES = ('spectral_stage', 'aperiodic_stage', 'psd_stage', 'spectral_stage_t
 
 @pytest.fixture
 def t9_data(src, tmp_path):
-    data = light_copy(src, tmp_path / 'data', ['reports_features_spectral'])
+    data = light_copy(src, tmp_path / 'data', ['reports_features_spectral', 'reports_rejection_auto'])
     for folder in ('preproc_epo', 'rejection_auto', 'features_spectral'):
         shutil.copytree(src / 'derivatives' / folder, data / 'derivatives' / folder)
     return data
@@ -579,3 +579,184 @@ def test_tool9_outputs_written_before_the_record_compare_only_the_computation(t9
         nb.set('txt_win_s', 2.0)                   # the computation stays compared, through the .npz
         nb.click('btn_run')
         assert 'to recompute: Welch window (s) : 4 → 2' in nb.widget_text()
+
+
+# =====================================================================================  tool 8bis
+T8BIS_OUTPUTS = ('sim*_autoreject_decision.tsv', 'sim*_autoreject_report.html', 'sim*_epoch_decision.tsv',
+                 'sim*_channel_decision.tsv')
+
+
+def epoch_stubs(src, data):
+    """Tool 7's params sidecars + an empty .fif per participant: enough for what finds and compares, nothing reads a signal."""
+    epochs = Path(data) / 'derivatives' / 'preproc_epo'
+    epochs.mkdir(parents=True, exist_ok=True)
+    for f in (Path(src) / 'derivatives' / 'preproc_epo').glob('*_preprocessing_params.json'):
+        shutil.copy2(f, epochs / f.name)
+        (epochs / f.name.replace('_preprocessing_params.json', '_all-epo.fif')).touch()
+
+
+@pytest.fixture
+def t8bis_data(src, tmp_path):
+    data = light_copy(src, tmp_path / 'data', ['reports_preproc', 'reports_rejection_auto'])
+    epoch_stubs(src, data)
+    shutil.copytree(src / 'derivatives' / 'rejection_auto', data / 'derivatives' / 'rejection_auto')
+    return data
+
+
+def t8bis_outputs(data):
+    return {**mtimes(Path(data) / 'derivatives' / 'rejection_auto', *T8BIS_OUTPUTS),
+            **mtimes(Path(data) / 'reports_rejection_auto', *T8BIS_OUTPUTS)}
+
+
+def open_tool8bis(nb, data):
+    nb.pick('fc_raw', Path(data) / 'derivatives' / 'preproc_epo')
+    nb.pick('fc_reports', Path(data) / 'reports_preproc')
+    nb.click('btn_scan')
+
+
+@pytest.mark.tool8bis
+def test_tool8bis_same_settings_are_skipped_without_a_question(t8bis_data, ids):
+    before = t8bis_outputs(t8bis_data)
+    log = pipeline.run_tool8bis(t8bis_data)
+    assert QUESTION not in log, log[-2000:]
+    assert f'skipped={len(ids)}' in log
+    assert t8bis_outputs(t8bis_data) == before
+
+
+@pytest.mark.tool8bis
+def test_tool8bis_other_settings_ask_before_anything_runs_then_keep(t8bis_data, ids):
+    before = t8bis_outputs(t8bis_data)
+    with NotebookSession(pipeline.T8BIS) as nb:
+        open_tool8bis(nb, t8bis_data)
+        nb.set('ft_ch_pct', 50.0)
+        nb.click('btn_run')
+        log = nb.widget_text()
+        assert f'{len(ids)} of the {len(ids)} processed participant(s) {QUESTION}' in log, log[-2000:]
+        assert 'channel reject (%) : 20 → 50' in log
+        assert 'Done.' not in log
+        assert 'just below' in nb.value('participant_selector.run_note.value')
+        assert t8bis_outputs(t8bis_data) == before                     # nothing ran while waiting for the answer
+        assert nb.value('participant_selector.btn_keep_other.description') == 'Keep them, only rebuild the tables'
+        nb.click('participant_selector.btn_keep_other')
+        log = nb.widget_text()
+        assert nb.value('participant_selector.run_note.value') == ''
+    assert f'skipped={len(ids)}' in log, log[-2000:]
+    assert 'Kept as they are, with their recorded settings' in log     # all kept, nobody new: nothing is mixed
+    assert t8bis_outputs(t8bis_data) == before
+
+
+@pytest.mark.tool8bis
+def test_tool8bis_reprocess_decides_again_the_participants_concerned(t8bis_data, ids):
+    target, others = ids[3], ids[:3]
+    with NotebookSession(pipeline.T8BIS) as nb:
+        open_tool8bis(nb, t8bis_data)
+        select_subset(nb, [target], skip=True)
+        nb.set('ft_ch_pct', 50.0)
+        nb.click('btn_run')
+        assert f'1 of the 1 processed participant(s) {QUESTION}' in nb.widget_text()
+        nb.click('participant_selector.btn_redo_other')
+        log = nb.widget_text()
+    assert f'Made again (other settings): {target} (channel reject (%))' in log, log[-2000:]
+    reports = t8bis_data / 'reports_rejection_auto'
+    assert tsv(reports / f'{target}_autoreject_decision.tsv')['channel_reject_pct'].iloc[0] == 50.0
+    for fid in others:
+        assert tsv(reports / f'{fid}_autoreject_decision.tsv')['channel_reject_pct'].iloc[0] == 20.0
+    # The new record reads back the same, the three others are still different.
+    with NotebookSession(pipeline.T8BIS) as nb:
+        open_tool8bis(nb, t8bis_data)
+        nb.set('ft_ch_pct', 50.0)
+        nb.click('btn_run')
+        assert f'3 of the 4 processed participant(s) {QUESTION}' in nb.widget_text()
+
+
+# =====================================================================================  what follows tool 7
+OTHER_NOTCH = {'notch': {'applied': False, 'freq_hz': None}}
+
+
+@pytest.mark.tool8bis
+def test_tool8bis_asks_when_tool7_ran_again_with_other_settings(t8bis_data, ids):
+    fid = ids[0]
+    # The same settings (a rate is not one of them): nothing is out of date.
+    edit_sidecar(t8bis_data, fid, sfreq_hz=128.0)
+    log = pipeline.run_tool8bis(t8bis_data)
+    assert QUESTION not in log and 'decided before tool 7' not in log, log[-2000:]
+
+    edit_sidecar(t8bis_data, fid, **OTHER_NOTCH)
+    with NotebookSession(pipeline.T8BIS) as nb:
+        open_tool8bis(nb, t8bis_data)
+        assert '1 participant(s) decided before tool 7 was run again' in nb.value('lbl_scan.value')
+        nb.click('btn_run')
+        log = nb.widget_text()
+    assert f'1 of the {len(ids)} processed participant(s) {QUESTION}' in log, log[-2000:]
+    assert 'tool 7 settings : as at the last decision → changed since' in log
+
+    # A record written before the column: no alert, no reprocessing after the update.
+    record = t8bis_data / 'reports_rejection_auto' / f'{fid}_autoreject_decision.tsv'
+    tsv(record).drop(columns=['preproc_fingerprint']).to_csv(record, sep='\t', index=False)
+    log = pipeline.run_tool8bis(t8bis_data)
+    assert QUESTION not in log and 'decided before tool 7' not in log, log[-2000:]
+
+
+@pytest.fixture
+def t8_data(src, tmp_path):
+    data = light_copy(src, tmp_path / 'data', ['reports_preproc', 'reports_rejection_manual'])
+    epoch_stubs(src, data)
+    shutil.copytree(src / 'derivatives' / 'rejection_manual', data / 'derivatives' / 'rejection_manual')
+    return data
+
+
+def tool8_badge(data, fid):
+    with NotebookSession(pipeline.T8) as nb:
+        nb.pick('fc_data', data)
+        nb.pick('fc_raw', Path(data) / 'derivatives' / 'preproc_epo')
+        nb.pick('fc_reports', Path(data) / 'reports_preproc')
+        nb.set('dd_part', fid)
+        return nb.value('lbl_done.value')
+
+
+@pytest.mark.tool8
+def test_tool8_only_warns_when_tool7_ran_again_with_other_settings(t8_data):
+    fid = minidb.manual_review_participant('synthetic')
+    record = t8_data / 'reports_rejection_manual' / f'{fid}_manualreject_decision.tsv'
+    before = record.stat().st_mtime_ns
+    badge = tool8_badge(t8_data, fid)
+    assert 'already processed' in badge and 'run again' not in badge
+    edit_sidecar(t8_data, fid, sfreq_hz=128.0)                 # the same settings
+    assert 'run again' not in tool8_badge(t8_data, fid)
+    edit_sidecar(t8_data, fid, **OTHER_NOTCH)
+    assert 'Tool 7 was run again with other settings' in tool8_badge(t8_data, fid)
+    assert record.stat().st_mtime_ns == before                 # a manual review is never made again
+    tsv(record).drop(columns=['preproc_fingerprint']).to_csv(record, sep='\t', index=False)
+    assert 'run again' not in tool8_badge(t8_data, fid)        # a record written before the column
+
+
+@pytest.mark.tool9
+def test_tool9_asks_when_tool7_ran_again_with_other_settings(t9_data, ids):
+    fid = ids[0]
+    edit_sidecar(t9_data, fid, sfreq_hz=128.0)                 # the same settings
+    log = pipeline.run_tool9(t9_data, *t9_folders(t9_data))
+    assert QUESTION not in log and 'decision(s) made before tool 7' not in log, log[-2000:]
+
+    edit_sidecar(t9_data, fid, **OTHER_NOTCH)
+    with NotebookSession(pipeline.T9) as nb:
+        open_tool9(nb, t9_data)
+        assert f'1 decision(s) made before tool 7 was run again with other settings: {fid}' in nb.widget_text()
+        nb.click('btn_run')
+        log = nb.widget_text()
+    assert f'1 of the {len(ids)} processed participant(s) {QUESTION}' in log, log[-2000:]
+    assert 'to recompute: tool 7 settings : as at the last computation → changed since' in log
+    assert 'the full computation (PSD, fit) for 1, a re-aggregation only for 0' in log
+
+    # 'Re-aggregate only' keeps the spectra: they are still those of the former run of tool 7.
+    log = pipeline.run_tool9(t9_data, *t9_folders(t9_data), subset=[fid], reaggregate=True)
+    assert '1 processed' in log, log[-2000:]
+    log = pipeline.run_tool9(t9_data, *t9_folders(t9_data))
+    assert 'to recompute: tool 7 settings' in log, log[-2000:]
+
+    # Outputs written before the key: no alert, no reprocessing after the update.
+    path = feature_file(t9_data, fid, 'spectral_settings.json')
+    settings = json.loads(path.read_text(encoding='utf-8'))
+    del settings['preproc_fingerprint']
+    path.write_text(json.dumps(settings), encoding='utf-8')
+    log = pipeline.run_tool9(t9_data, *t9_folders(t9_data))
+    assert QUESTION not in log, log[-2000:]

@@ -11,7 +11,9 @@ ui_lib. Four things live here:
   in the study folder, and a light read of the file found, for the 'Inputs found' list of the pages;
 - the **runs of tool 7** and the decisions made on them, found from the study folder (tools 8, 8bis, 9).
 """
+import csv
 import datetime
+import hashlib
 import json
 import os
 import re
@@ -456,3 +458,41 @@ def check_decision_folder(path):
     """A light read of a decision folder: ('ok', '11 participants') or ('warn', what is wrong)."""
     n = _count_files(path, '*_epoch_decision.tsv')
     return ('ok', f'{n} participants') if n else ('warn', 'no *_epoch_decision.tsv in this folder')
+
+
+# ---------------------------------------------------------------------------
+# The fingerprint of tool 7's settings (what tools 8, 8bis and 9 were made from)
+# ---------------------------------------------------------------------------
+# The keys of the params sidecar that change the flags and the epochs. A fixed list, so that a key added to the sidecar
+# later does not shift the fingerprints. Left out: sfreq_hz (follows from the resampling) and what only informs.
+PREPROC_SETTINGS = ('epoch_length_s', 'channels', 'bad_channels', 'methods_run', 'resample', 'filter', 'notch',
+                    'rejection_thresholds', 'event_rejection', 'psd_smoothing', 'manual_events', 'reference',
+                    'hypnogram_file')
+
+
+def preproc_fingerprint(sidecar_path):
+    """A short fingerprint of the settings tool 7 ran a participant with, from its {id}_preprocessing_params.json: running
+    tool 7 again with the same settings gives the same one. '' without a readable sidecar: nothing to compare."""
+    try:
+        with open(sidecar_path, encoding='utf-8') as f:
+            sidecar = json.load(f)
+        settings = {key: sidecar[key] for key in PREPROC_SETTINGS if key in sidecar}
+    except (OSError, ValueError, TypeError):
+        return ''
+    return hashlib.sha256(json.dumps(settings, sort_keys=True, ensure_ascii=False).encode('utf-8')).hexdigest()[:16]
+
+
+def recorded_preproc_fingerprint(decision_record):
+    """The preproc_fingerprint column of a decision record of tool 8 / 8bis. '' when the record has none (written before
+    the column existed) or cannot be read."""
+    try:
+        with open(decision_record, encoding='utf-8', newline='') as f:
+            return next(csv.DictReader(f, delimiter='\t')).get('preproc_fingerprint') or ''
+    except (OSError, StopIteration, ValueError, TypeError, csv.Error):
+        return ''
+
+
+def preproc_changed(recorded, current):
+    """Whether tool 7 ran with other settings since a record was written. Both sides must have a fingerprint: an output
+    written before it existed is not made out of date."""
+    return bool(recorded and current and recorded != current)

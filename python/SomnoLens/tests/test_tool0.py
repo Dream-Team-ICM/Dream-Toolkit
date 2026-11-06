@@ -338,7 +338,10 @@ def test_step7_equals_tool8bis(chain, tmp_path):
             for expr, ref in (("STATE['decision']['epoch_df']", next(auto.rglob(f'{fid}_epoch_decision.tsv'))),
                               ("STATE['decision']['channel_df']", next(auto.rglob(f'{fid}_channel_decision.tsv'))),
                               ("STATE['decision']['record']", next(auto_rep.rglob(f'{fid}_autoreject_decision.tsv')))):
-                pd.testing.assert_frame_equal(table(expr), pd.read_csv(ref, sep='\t', dtype={'file_id': str}),
+                # the fingerprint of the tool 7 run: tool 0 decides from its own step 6, it has none
+                pd.testing.assert_frame_equal(table(expr).drop(columns='preproc_fingerprint', errors='ignore'),
+                                              pd.read_csv(ref, sep='\t', dtype={'file_id': str}).drop(
+                                                  columns='preproc_fingerprint', errors='ignore'),
                                               check_dtype=False, obj=f'{fid} {ref.name}')
             assert "Same decision as tool 8bis" in nb.value("''.join(REPORT_BLOCKS['7'])"), fid
             live = nb.value("STATE['decision']['rejected'].tolist()")

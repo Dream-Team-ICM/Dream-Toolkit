@@ -278,3 +278,51 @@ def test_a_path_is_recorded_relative_to_the_study_when_inside_it(tmp_path):
     assert SF.path_to_record(study, study / 'config_param' / 'x.json') == 'config_param/x.json'
     outside = tmp_path / 'out' / 'table.tsv'
     assert SF.path_to_record(study, outside) == str(outside.resolve())
+
+
+SIDECAR = {'file_id': 'p', 'sfreq_hz': 256.0, 'epoch_length_s': 30, 'channels': ['C3', 'O1'], 'bad_channels': ['Fp1'],
+           'custom_stages': [], 'methods_run': ['amplitude'], 'resample': {'applied': False, 'target_freq_hz': None},
+           'filter': {'applied': True, 'l_freq_hz': 0.1, 'h_freq_hz': 50.0}, 'notch': {'applied': True, 'freq_hz': 50.0},
+           'rejection_thresholds': {'flat_ptp_uV': 1.0}, 'event_rejection': {'applied': False, 'event_types': []},
+           'psd_smoothing': {'enabled': True}, 'manual_events': False, 'reference': ['M2'], 'hypnogram_file': 'p_hypno.txt'}
+
+
+def _fingerprint(tmp_path, **changes):
+    path = tmp_path / 'p_preprocessing_params.json'
+    path.write_text(json.dumps(dict(SIDECAR, **changes)), encoding='utf-8')
+    return SF.preproc_fingerprint(path)
+
+
+def test_the_fingerprint_follows_tool_7s_settings(tmp_path):
+    same = _fingerprint(tmp_path)
+    assert len(same) == 16
+    # What only informs, or a key added to the sidecar later, does not shift it.
+    assert _fingerprint(tmp_path, sfreq_hz=128.0, file_id='q', custom_stages=['IS'], a_later_key=1) == same
+    for changes in ({'notch': {'applied': False, 'freq_hz': None}}, {'channels': ['C3']}, {'bad_channels': []},
+                    {'rejection_thresholds': {'flat_ptp_uV': 2.0}}, {'reference': []}, {'hypnogram_file': 'p_other.txt'},
+                    {'epoch_length_s': 10}, {'manual_events': True}):
+        assert _fingerprint(tmp_path, **changes) != same, changes
+
+
+def test_without_a_readable_sidecar_there_is_no_fingerprint(tmp_path):
+    assert SF.preproc_fingerprint(tmp_path / 'absent.json') == ''
+    assert SF.preproc_fingerprint(None) == ''
+    broken = tmp_path / 'broken.json'
+    broken.write_text('{not json', encoding='utf-8')
+    assert SF.preproc_fingerprint(broken) == ''
+
+
+def test_the_fingerprint_is_read_back_from_a_decision_record(tmp_path):
+    record = tmp_path / 'p_autoreject_decision.tsv'
+    record.write_text('file_id\tpreproc_fingerprint\tn\np\tabc\t1\n', encoding='utf-8')
+    assert SF.recorded_preproc_fingerprint(record) == 'abc'
+    record.write_text('file_id\tn\np\t1\n', encoding='utf-8')          # written before the column existed
+    assert SF.recorded_preproc_fingerprint(record) == ''
+    assert SF.recorded_preproc_fingerprint(tmp_path / 'absent.tsv') == ''
+
+
+def test_a_record_is_out_of_date_only_when_both_sides_have_a_fingerprint():
+    assert SF.preproc_changed('abc', 'def')
+    assert not SF.preproc_changed('abc', 'abc')
+    assert not SF.preproc_changed('', 'def')
+    assert not SF.preproc_changed('abc', '')

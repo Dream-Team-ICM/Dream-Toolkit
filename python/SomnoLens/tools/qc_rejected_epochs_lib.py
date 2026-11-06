@@ -1688,7 +1688,7 @@ def build_manual_decision_row(file_id, P, base_reject, final_reject, in_scope, o
                               stages_sel, methods_sel, event_types_sel, thresholds, epoch_length_s=30,
                               dropped_channels=(), epoch_rule='any', epoch_rule_value=20.0,
                               flags_source='', visited=None, epoch_number_offset=1,
-                              n_manual_annotations=0):
+                              n_manual_annotations=0, preproc_fingerprint=''):
     """One-row durable record of a tool-8 manual review — the analogue of tool 8bis's
     `{file_id}_autoreject_decision.tsv`, and the source rebuilt into the global summary. The decision
     covers EVERY epoch, so `n_rejected` / `n_kept` / `pct_rejected` count every epoch; `in_scope` is the
@@ -1701,7 +1701,8 @@ def build_manual_decision_row(file_id, P, base_reject, final_reject, in_scope, o
     `visited` (epoch indices actually displayed), `epoch_number_offset` and `n_manual_annotations` are
     likewise ADDITIVE — they say how thorough the review was and how it was numbered, which a rejection
     percentage alone cannot: 5 % rejected after looking at every flagged epoch is not the same result as
-    5 % rejected without opening one. Returns a one-row DataFrame."""
+    5 % rejected without opening one. `preproc_fingerprint` (additive too) = the settings of the tool 7 run it was
+    reviewed from (study_files_lib), so a later run with other settings can be told. Returns a one-row DataFrame."""
     base = np.asarray(base_reject, dtype=bool)
     fin = np.asarray(final_reject, dtype=bool)
     focus = np.asarray(in_scope, dtype=bool)
@@ -1759,6 +1760,7 @@ def build_manual_decision_row(file_id, P, base_reject, final_reject, in_scope, o
         'n_rejected_ref': n_rej_ref,
         'pct_rejected_ref': round(100.0 * n_rej_ref / n_ref, 2) if n_ref else np.nan,
         'n_flagged_ref': n_to_review,
+        'preproc_fingerprint': preproc_fingerprint,
     }
     # per-stage counts: the selected stages first (their former columns), then every other stage present
     stage_cols = list(stages_sel) + [s for s in dict.fromkeys(stages.astype(str)) if s not in set(stages_sel)]

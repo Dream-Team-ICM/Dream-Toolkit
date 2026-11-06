@@ -16,6 +16,7 @@ import pandas as pd
 from matplotlib.colors import ListedColormap
 
 import qc_rejected_epochs_lib as L          # METHOD_ORDER, custom-stage styling (same folder)
+import study_files_lib as SF                # the fingerprint of tool 7's settings (same folder)
 
 
 # ---------------------------------------------------------------------------------------------------------
@@ -146,12 +147,12 @@ def stages_in_order(dec, soi):
     return list(soi) + others
 
 def decision_summary_row(fid, dec, soi, ch_pct, ep_pct, methods_used='', event_types_used='',
-                         excluded=False, exclude_reason='', event_thresholds=''):
+                         excluded=False, exclude_reason='', event_thresholds='', preproc_fingerprint=''):
     """One-row DataFrame = the durable per-participant record AND the global-summary row source.
     methods_used / event_types_used trace which flagging methods (and event types) drove the decision;
     event_thresholds the per-type exclusion thresholds of the run ('type:n+type:n', see
     event_thresholds_text); excluded / exclude_reason mark a participant dropped by a per-event count
-    threshold."""
+    threshold; preproc_fingerprint the settings of the tool 7 run it was decided from (study_files_lib)."""
     badness = dec['badness']
     badness_str = ';'.join(f'{c}:{float(badness[c]):.2f}' for c in dec['channels'])
     n_all, n_rej = dec['n_epochs'], dec['n_rejected_epochs']
@@ -169,6 +170,7 @@ def decision_summary_row(fid, dec, soi, ch_pct, ep_pct, methods_used='', event_t
         'methods_used': methods_used,
         'event_types_used': event_types_used,
         'event_thresholds': event_thresholds,
+        'preproc_fingerprint': preproc_fingerprint,
         'excluded': bool(excluded),
         'exclude_reason': exclude_reason,
         'n_epochs': n_all,                                # every epoch: the decision covers the night
@@ -188,36 +190,44 @@ def decision_summary_row(fid, dec, soi, ch_pct, ep_pct, methods_used='', event_t
         row[f'n_rejected_{st}'] = int(sum(bool(rej[e]) for e in eps))
     return pd.DataFrame([row])
 
-# The columns of the decision record that hold the run's settings: a participant already decided is skipped
-# only when all of them match the current run (otherwise the new thresholds would silently not apply).
-DECISION_SETTINGS = ('channel_reject_pct', 'epoch_reject_pct', 'stages_of_interest', 'methods_used',
-                     'event_types_used', 'event_thresholds')
+# The columns of the decision record that hold the run's settings, as the question names them: a participant already
+# decided is compared on all of them (otherwise new thresholds would silently not apply).
+DECISION_SETTINGS = {'channel_reject_pct': 'channel reject (%)', 'epoch_reject_pct': 'epoch reject (%)',
+                     'stages_of_interest': 'reference stages', 'methods_used': 'flagging methods',
+                     'event_types_used': 'event types', 'event_thresholds': 'event thresholds',
+                     'preproc_fingerprint': 'tool 7 settings'}
 
 def event_thresholds_text(event_thresholds):
     """{type: n} -> 'type:n+type:n' (sorted), the event_thresholds column of the decision record."""
     return '+'.join(f'{t}:{int(n)}' for t, n in sorted(event_thresholds.items()))
 
-def settings_changed(decision_tsv, settings):
-    """The DECISION_SETTINGS whose value in a participant's decision record differs from `settings` (the
-    values this run would record), [] when the record matches. An unreadable record counts as changed; a
-    record written before the event_thresholds column existed reads as '' there (no threshold)."""
+def settings_differences(decision_tsv, settings):
+    """What separates a participant's decision record from `settings` (the values this run would record), as (setting,
+    recorded, this run) rows. [] when nothing does. An unreadable record counts as different; a record written before
+    the event_thresholds column existed reads as '' there (no threshold). The fingerprint of tool 7's settings is
+    compared only when both sides have one: a record written before it existed is not made out of date."""
     try:
         row = pd.read_csv(decision_tsv, sep='\t', dtype=str, keep_default_na=False).iloc[0]
     except Exception:
-        return ['unreadable decision record']
-    changed = []
-    for key in DECISION_SETTINGS:
+        return [('decision record', 'unreadable', 'this run')]
+    rows = []
+    for key, label in DECISION_SETTINGS.items():
         old, new = str(row.get(key, '')), str(settings.get(key, ''))
+        if key == 'preproc_fingerprint':
+            if SF.preproc_changed(old, new):
+                rows.append((label, 'as at the last decision', 'changed since'))
+            continue
         if key.endswith('_pct'):
             try:
                 same = abs(float(old) - float(new)) < 1e-9
+                old, new = f'{float(old):g}', f'{float(new):g}'
             except ValueError:
                 same = False
         else:
             same = (old == new)
         if not same:
-            changed.append(key)
-    return changed
+            rows.append((label, old or 'none', new or 'none'))
+    return rows
 
 def read_tool7_bad_channels(fif_folder, fid):
     """Channels tool 7 saved in the .fif but marked bad (deselected by the user, e.g. after tool 6):
