@@ -50,7 +50,7 @@ Not every change needs every test. The suite has three levels, from the fastest 
 | Level | What it runs | Duration | When |
 |---|---|---|---|
 | **Quick** | small checks of the shared code, and every Voila notebook (EDF tools and Curry twins) opened and run from top to bottom without clicking anything | about 2 min | a change that touches no tool's results (a test, a text, a Curry generator) |
-| **Standard** | quick + the full chain on the synthetic nights (comparison with the reference run, every check below) + the known answers + tools 1, 3, 4 | about 9 min (5 when the chain is reused) | a change to a tool |
+| **Standard** | quick + the full chain on the synthetic nights (comparison with the reference run, every check below) + the known answers + tools 1, 3, 4 | about 32 min (28 when the chain is reused, measured on 2026-11-06) | a change to a tool |
 | **Full** | standard + the chain on the real nights + the parameter variants | about 24 min | before merging a branch, or after a change to code shared by several tools |
 
 Two things keep the runs short:
@@ -202,8 +202,7 @@ the saved epochs file of tool 7 unreadable for tools 8 and 9. It is fixed, and t
 The tool 6 variant also documents a deliberate choice: tool 6 measures the signal **after** its optional
 filtering (a high-pass can rescue a channel worth keeping). The filtering smooths the flat tops of a clipped
 channel, so with these options the clipped Fp1 of the synthetic set is no longer flagged. The same variant
-checks that this preparation is recorded (tables and report), and that a second run without it, with
-"Skip already processed" ticked, warns on every skipped participant that its tables were made differently.
+checks that this preparation is recorded (tables and report).
 
 ### 10. Moving code into a shared library changes nothing (before / after check)
 
@@ -225,6 +224,28 @@ The checker is itself tested (`test_refactor_check.py`, quick level): it must se
 changed value, setting, report line, figure, array, a missing or an added file, and must not report a mere
 change of date in a report.
 
+### 11. "Skip already processed" does not hide other settings
+
+With *Skip* ticked, tools 6, 7, 8bis and 9 must not silently keep a participant made with other settings, and must not
+overwrite it on their own either. `test_settings_skip.py` opens a **new session** on a study already processed, the real
+case, on a light copy of the test chain's outputs. It checks, for each of the four tools:
+
+- the same settings: nobody is reprocessed, no question, no file touched;
+- other settings: the run stops and asks **before anything is written** (the dates of the files prove it);
+- *Keep* only rebuilds the tables, *Reprocess* makes again only the participants concerned, and the next session finds nothing
+  left to ask about them;
+- *Use the recorded settings* launches nothing and puts the page back, and a new participant is then made like the
+  others, whose files do not move. What cannot be put back is named;
+- a setting without effect asks nothing (a threshold that moves no flag, the bandwidth with Welch, the threshold of a method
+  that did not run);
+- tool 7 run again with other settings: 8bis and 9 ask, 8 only warns, and with the same settings or an older record nothing
+  happens. A re-aggregation of tool 9 does not make old spectra look up to date;
+- tool 9 takes the path each setting needs (full computation or re-aggregation), and a re-aggregation gives the same tables
+  as a full computation.
+
+Tool 7's editor is checked too: a channel unticked by hand comes back unticked, and the reference channel stays ticked, without
+which a reprocessing would change the reference.
+
 ## Smaller checks
 
 | Area | What is checked |
@@ -242,6 +263,7 @@ change of date in a report.
 | Tool 8bis | The decision tables keep exactly the epochs and channels the former cleaned copy held; tool-7 deselected channels are recorded as dropped; an event-count threshold excludes a participant, a re-run without it lifts the exclusion; with *Skip* ticked, a participant decided with the same settings is skipped and one decided with another threshold is decided again |
 | Tool 8 | The decision tables match the former cleaned copy; the *Exclude* / *Remove my exclusion* button writes and deletes the decision |
 | Tool 9 | Every epoch × channel is in the tables with the right decision flags; dropped channels are still computed; the per-epoch spectrum file exists; night-third counts (rejected, out of scope, % rejected) are those of each stage × third cell |
+| The settings of *Skip* | Each comparison, record and fingerprint on small examples: both values reported, older records compared only on what they hold, the most frequent set at equal count (`test_quality_lib.py`, `test_preprocessing_lib.py`, `test_autoreject_settings.py`, `test_spectral_settings.py`, `test_study_files_lib.py`) |
 | Participant selector | Skip applies in both modes; a subset with already-processed participants shows the warning; the add box only offers participants not yet selected; pasted and clicked ids switch to subset mode; unknown ids are refused; a rescan drops vanished ids |
 | Registry details | Ids match regardless of case; no temporary file is left behind; rewriting the same decisions does not touch the file (their dates stay); the orange "registry changed" box compares what the tables say with the registry: a decision of the run shows it, a decision on another run or a decision lifted since then does not |
 | Several runs of tool 7 | Each run reads tool 5bis's decisions and its own; a decision on one run leaves the other's alone; on empty files: tool 7's line of the run, *New version* under Skip, the suffix proposed, typed, refused or already taken, who is already processed followed without a new Scan; tools 8, 8bis and 9 pre-choose the most recent run, tool 9 only its decisions. On the synthetic database (full level): a `_v2` of tool 7 then 8bis, 8 and 9 on it, each writing its own folders, the first run untouched and unaware of its exclusion |

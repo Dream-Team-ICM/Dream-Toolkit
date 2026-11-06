@@ -81,6 +81,13 @@ The "what to do / what not to break" reminders, grouped by theme. Each points to
   put the suffix (`SF.run_suffix`) on every output and on their registry sources (`8bis_auto_v2`), and read
   `PSL.effective_status(reg, run)` (5bis rows + the run's own). A new output folder or a new registry source of these
   tools carries the suffix too.
+- **Skip only what was made with the current settings (→ SPEC *Cross-cutting → Skip + cumulative-merge*)**: with Skip ticked, tools
+  6, 7, 8bis, 9 compare what each participant recorded with the page at Run, **before any analysis and any write**. A difference
+  stops the run and asks (`ParticipantSelector.ask_other_settings`): *Reprocess*, *Keep*, *Use the recorded settings* (puts
+  the widgets back, launches nothing). **A setting added to these tools must be recorded additively and added to its
+  `settings_differences` and `recorded_settings`**, or it is silently skipped again. No record = no difference. What follows
+  tool 7 carries `SF.preproc_fingerprint` (a fixed list of sidecar keys): 8bis and 9 ask, 8 only warns, a re-aggregation of tool 9
+  keeps it.
 - **Companion suffixes + names registry = `tools/study_files_lib.py`** (no EDF reading, imported next to `ui_lib`):
   the hypnogram pre-choice of tools 0, 3, 3bis, 5, 6, 7 is **one function**, `pick_hypno_suffix` (intent `scored`
   for tool 3, `expert` elsewhere): never re-implement it in a notebook. Each tool notes the names it **wrote** in

@@ -277,7 +277,7 @@ a test is added or changed).
 - **quick** (`-m quick`, ~1.5 min): unit tests (registry, selector, chain cache), Curry twins' consistency, and
   `test_notebooks_execute.py`, which runs every `tools/*_voila.ipynb` and `tools_curry/*_voila.ipynb` top to
   bottom without clicking anything (no traceback, no `Import error`). The archived Jupyter notebooks (`tools/jupyter_notebook/`) are not run.
-- **standard** (`-m "not full"`, ~9 min from scratch, ~5 min with the chain reused): quick + the chain on the **synthetic** database (golden
+- **standard** (`-m "not full"`, ~32 min from scratch, ~28 min with the chain reused, measured on 2026-11-06): quick + the chain on the **synthetic** database (golden
   comparison, invariants), the known-answer tests and the small runs of tools 1, 3, 4.
 - **full** (no `-m`, ~24 min from scratch): standard + the chain on the **real** database (skipped on a machine without
   `tools/test_data`) + the parameter variants. `full` is put on the `real` parameter of the `chain` fixture
@@ -395,9 +395,13 @@ test must point it at a copied `preproc_epo`.
   may cross the 3.5 % flat limit); tool 9 multitaper (< 3 dB from Welch per band) and `knee`; tool 8 a
   rescue in the navigator (`manual_rescued`) and a manual annotation re-read by tool 7 (`cb_manual_events`).
 - the exclusion-refactor invariants: `test_participant_selection_lib.py`, `test_exclusion_5bis.py`,
-  `test_exclusion_tools.py` (also: tool 8bis with *Skip* ticked skips a participant decided with the same
-  settings and decides again one decided with another channel threshold), `test_exclusion_tools_5_6.py`,
+  `test_exclusion_tools.py`, `test_exclusion_tools_5_6.py`,
   `test_subset_selection.py`, `test_tool9.py`, `test_curry_twins.py`; `test_chaincache.py` for the chain reuse.
+- *Skip* and the settings (*Cross-cutting → Skip + cumulative-merge*): `test_settings_skip.py` (standard, tools 6, 7, 8bis, 8, 9, each
+  scenario in a **new session** on a light copy of the chain's outputs: same settings skipped, other settings stop before
+  anything is written, the three answers, what follows tool 7, a new participant made like the others),
+  `test_quality_lib.py`, `test_preprocessing_lib.py`, `test_autoreject_settings.py`, `test_spectral_settings.py` and
+  `test_study_files_lib.py` (quick: the comparisons, the records, the fingerprint).
 - `refactor_check.py` (a script, not a test) + `test_refactor_check.py` (quick): the **before / after check**
   of the tool-0 redesign, which moves code into shared libraries. `save <label>` copies every output of the
   chain folders (`%TEMP%/dtk_tests/<dataset>/data`, recordings excluded) to `%TEMP%/dtk_refactor/<label>/`;
@@ -698,6 +702,51 @@ instead of restating them. Only tool-specific deltas are kept inline.
     `global_rejection_by_stage.tsv`, excluding the global file itself since it shares the
     `_epoch_rejection.tsv` suffix, and the per-file `_epoch_channel_rejection.tsv` is *not* concatenated
     globally) per-file only).
+  - **Only what was made with the current settings (tools 6, 7, 8bis, 9, 2026-11-06)**: with *Skip* ticked, a participant
+    already processed with other settings is not skipped silently, and is not reprocessed on its own either: a Voila page
+    restarts at its defaults at each launch, so that would overwrite a study. At the click on Run, **before any analysis and
+    any output**, the tool compares what each participant chosen recorded with the page (candidates from the disk: the
+    selector's list may date from the Scan). The comparison reads what the tools wrote, never the signal, and is done again
+    at each click.
+    - **A difference stops the run and asks, in its log** (`ParticipantSelector.ask_other_settings`): a box
+      (`other_settings_html`) lists `(setting, recorded, this run)` rows grouped by identical values (`group_differences`,
+      `DIFFERENCES_SHOWN` lines, `UI.MISSING_SHOWN` names), then three answers, each valid for this run only:
+      `btn_redo_other` *Reprocess N participant(s)* (`+ run the K new one(s)`), `btn_keep_other` *Keep them, run the K new
+      one(s)* (without a new one: *only rebuild the tables*, Run with Skip stays the way to carry a registry decision into
+      the tables), `btn_use_recorded` *Use the recorded settings*. The box sits under the progress bars, possibly below the
+      window: `run_note`, beside Run, says an answer is needed. Each page empties it and resets its bars at the start of a
+      Run (`Done.` and a full bar stayed above *Nothing has run yet*).
+    - **The end of the log** names those made again (`Made again (other settings): …`, `other_settings_list`) or kept
+      (`kept_line`). It says *the tables mix settings* (and the box *Keeping them mixes settings*) only when someone else has
+      this run's settings, already processed or about to be (`keeping_mixes_settings`); otherwise *with their recorded
+      settings*.
+    - **No record to compare is no difference**: an output written before its record stays skipped, without a box, and the
+      log counts it in an `ℹ️` line. An unreadable record does appear in the box. The comparison never fails the run: a
+      failure on one participant is an unreadable row, a failure of the whole pass a `⚠`.
+    - **Unchanged**: *Skip* unticked and tool 9's *Re-aggregate only* are explicit requests, they ask nothing. The `R will
+      run` of the selector does not count the settings, which can still change after the Scan.
+    - **Each tool's comparison is in its library**: `quality_lib.settings_differences` (§6), `preprocessing_lib.settings_differences`
+      (§7), `autoreject_lib.settings_differences` (§8bis), `spectral_lib.computation_differences` + `aggregation_differences`
+      (§9). **A new setting of these tools must be recorded additively and added there**, or it is silently skipped again.
+    - **Use the recorded settings** launches nothing: it puts the widgets back to the recorded values
+      (`PSL.put_back`), says what changed and what could not be put back (`recorded_settings_html`, `show_recorded_settings`,
+      a note beside Run), and the user clicks Run again; the comparison remains the safeguard. Typical case: reopening a
+      study made with non-default settings to add participants. Among mixed participants, the **most frequent set**
+      (`PSL.most_frequent_settings`, at equal count the first in participant order, the message says `27 of the 30`). Each
+      tool reads its record with its `recorded_settings` and sets its own widgets (`put_back_recorded_settings`, in the
+      notebook). Three things do not follow the vote, because a record does not keep all that was ticked: the stages of 8bis
+      and 9, the event method and event types of 8bis (their **union**: a record only keeps what the participant has in
+      its file; what no processed participant has stays as it is on the page), and the resampling of tool 6 (put back as
+      soon as one participant used it: `none` may only mean that the file was already at the target rate). No filling at the
+      Scan (the widgets would change unasked, erasing what was just typed), no permanent button.
+    - **What follows tool 7**: `SF.preproc_fingerprint(sidecar_path)`, a short SHA-256 of a **fixed list** of the sidecar's
+      keys (`PREPROC_SETTINGS`: without `sfreq_hz`, `file_id`, `custom_stages`, so that a key added later does not shift
+      the fingerprints). Running tool 7 again with the same settings gives the same one: same flags, nothing out of date.
+      Recorded by 8 and 8bis (column `preproc_fingerprint` of their decision record, `SF.recorded_preproc_fingerprint`) and by 9
+      (key of `_spectral_settings.json`). `SF.preproc_changed` needs a fingerprint on both sides, so no alert and no massive
+      reprocessing after the update. 8bis and 9 ask, 8 only warns. Limits: it follows the settings, so an EDF or a
+      hypnogram replaced under the same name is not detected; a record written from a sidecar older than the keys
+      `reference` / `manual_events` / `hypnogram_file` differs once when tool 7 is run again with the same settings.
 - **Lenient JSON loader**: every read of a config JSON parses strictly first and, on failure, repairs a
   single trailing comma before a closing `}`/`]` (a common hand-edit mistake) before retrying. Shared by
   the config readers of tools 2 and 4.
@@ -935,7 +984,8 @@ instead of restating them. Only tool-specific deltas are kept inline.
   (reported); the dropped channels are those of the channel table plus the `.fif` bads. Without a decision
   folder every epoch is kept, or only those tool 7 did not flag (`cb_exclude_flagged`), with an amber warning.
   The origin is recorded in a `source` column of every output (`manual` / `auto` / `raw` / `raw_tool7flags`).
-  Tool 7's `{file_id}_preprocessing_params.json` sits beside the `.fif`, used for **provenance only**, its
+  Tool 7's `{file_id}_preprocessing_params.json` sits beside the `.fif`, used for **provenance only** (and the
+  fingerprint of its settings, *Skip + cumulative-merge*), its
   absence is **never fatal** (the epoch length then comes from the `.fif` itself). Outputs follow the
   data/reports split: data → `derivatives/features_<name>/<subtree>/`, reports →
   `reports_features_<name>/<subtree>/`. The database-level tables are **padded to the union of channels**
@@ -1459,7 +1509,7 @@ p_R, source` primary/tail, full precision) and `{id}_sleepfm_features.npz` (`fea
 `start_s`). **Skip**: per model (a participant counts as processed when every ticked model's outputs are complete,
 recomputed when the ticks change; at Run, a model already complete for a participant is skipped, the others run);
 complete = hypnogram + hypnodensity + report (+ SleepFM's 5-s table and features). **A scoring kept by Skip although
-made with other settings** (2026-10-28) is still skipped (as in tool 6, the warning only names the change): its
+made with other settings** (2026-10-28) is still skipped (the warning only names the change): its
 `already scored, skipped.` line gets `⚠ made with other settings (then → this run): EEG C3, C4 → C3; EOG L − R bipolar → None (untick
 Skip to redo it)` and the run ends with a count. The participants every ticked model already scored, left out by the
 participant selector, are checked before the loop. The settings compared, read back from the night's
@@ -2029,13 +2079,22 @@ or a failed step, is not in it). It fills:
   `none (the EEG as recorded) · analysed at 256 Hz, no re-reference`;
 - a *Signal preparation* line in the `dataset_overview.html` header counting the participants per label, with an
   amber ⚠ *Mixed signal preparations* note when there is more than one (empty labels shown as `not recorded`);
-- the Skip check: a skipped participant whose stored label differs from the run's settings gets
-  `⚠ made with …, this run: … (untick Skip to redo it)` on its `⤼` line (`signal_preparation_mismatch`). The
-  high-pass is always compared, the resampling only when the stored file was resampled (a file that was not may
-  already have been at or below the target rate, which only its header would tell). The participant is still
-  skipped (user decision, 2026-10-16): the warning only names the mix.
+- the Skip check (*Cross-cutting → Skip + cumulative-merge*, 2026-11-06, replaces the warning-only decision of 2026-10-16):
+  `quality_lib.settings_differences` compares the label with the run (`signal_preparation_mismatch`): the high-pass and a
+  stored resampling always; a file stored without resampling counts when this run would really resample it, the rate
+  coming from the header (`acq_rates`, `native_sf`, an unknown rate counts as different, which only costs a question). An
+  empty cell is not compared (`ℹ️` line).
 
-The column is additive (the golden comparison allows added columns): every existing value is unchanged. Keeping a
+**The flag thresholds** count **only through the flags**: `flag_channel` runs again on the stored metrics, and the criteria
+triggered per channel are compared (`flag_criteria`), not the text of `suspect_reason`, which holds the threshold. A
+threshold that moves no flag makes no difference, and the report keeps the former threshold in its text (accepted limit).
+The additive column **`flag_thresholds`** (`bounds_pct:1+flat_pct:3.5+…`, `flag_thresholds_text`) triggers nothing: it gives
+the former thresholds in the box when a flag moves, and lets *Use the recorded settings* put them back (`recorded_settings`:
+resampling, high-pass, the five thresholds; the twin's generator removes `thresh_bounds`). Tool 0 inherits the column.
+Not compared: the hypnogram suffix, the custom stages, the channel configuration, not recorded and without effect on the
+flags of the whole signal.
+
+The columns are additive (the golden comparison allows added columns): every existing value is unchanged. Keeping a
 raw run and a prepared run side by side (an output-folder suffix) is a planned follow-up.
 
 **Per-participant pipeline progress bar**: below the participants bar (`i/N`) a second bar spans the *current participant's whole pipeline* in arbitrary "time-cost" units (`COST_LOAD_DATA` + optional `COST_HIGHPASS`/`COST_RESAMPLE`, `COST_ANALYSE_CH`×channels, `COST_RENDER_CH`×channels). It advances continuously (no per-channel reset) through three phases, **Load** (data, then one tick once the optional resampling + high-pass are done), **Per-channel** (one tick per analysed channel), **Report** (one tick per rendered channel), with a 3-segment legend **glued directly under the bar** (`VBox([progress_ch, phase_legend])`, the legend drawn with no top border and square top corners so it reads as the bar's own labelled track) whose segment widths are proportional to those costs (≈ each phase's share of the run time). The `progress_ch_label` also names the current activity (`loading EDF signal…`, `high-pass 0.5 Hz…`, `analysing C3…`, `building report…`).
@@ -2151,7 +2210,8 @@ only if a notebook block it matches changed.
 **participant selector** (*Cross-cutting → Participant selector*; done = report + `_epoch_channel_rejection.tsv`
 on disk; `skip_existing` is the selector's tick, no longer a Section-1 widget) and a **per-participant editor**
 instead of one block of checkboxes per participant: a `dd_edit` dropdown shows the chosen participant's
-**channel checkboxes** (pre-filled from `quality_summary.tsv`'s `exclude`, state kept in
+**channel checkboxes** (pre-filled from `quality_summary.tsv`'s `exclude`, or, for a participant already processed in the
+run chosen, from its params sidecar: see *Skip and the settings* below; state kept in
 `participant_channels`, *Tick all* / *Untick all* for the participant shown, `Reset channels to defaults`
 restores the loaded state of every participant) and an **`Exclude this
 participant`** checkbox + reason + *Save exclusion decision* (writes / removes the registry's `7_manual` row
@@ -2350,14 +2410,33 @@ over. **Reprocessing an existing run stays *Skip* unticked**: no *Overwrite* cho
 is not a folder name, or a run with epochs: a ⚠ under the field, Run and the manual exclusion refuse (a new version
 interrupted before its first epochs is in no menu: its suffix can be typed again). `chosen_run()` is read
 wherever the tool reads or writes the run's folders; `run_preprocessing` fixes it at its start. **Changing the run needs no
-new Scan** (`_on_run_changed` → `show_run_counts`): who is already processed or excluded follows, the channels ticked in
-the editor stay. After a run, the run written becomes the run chosen and the next suffix is proposed (`refresh_runs`). The
+new Scan** (`_on_run_changed` → `show_run_counts`): who is already processed or excluded follows, and so do the channels of
+the editor, except for a participant modified in this session (`start_channels`). After a run, the run written becomes the run chosen and the next suffix is proposed (`refresh_runs`). The
 `raw_epo` migration and the removal of stale copies of former layouts are for the first run only. A manual exclusion
 (`7_manual` + suffix) belongs to the run: one that holds for every run goes in tool 5bis.
 
+**Skip and the settings (2026-11-06, *Cross-cutting → Skip + cumulative-merge*)**: `preprocessing_lib.settings_differences(sidecar,
+current)` compares the sidecar with the page: `epoch_length_s` (absent = 30), `resample` and `filter` (the values asked for),
+`notch` and `psd_smoothing` (absent = off: they did not exist), the methods (`methods_run` without `event`, which varies with
+each file's annotations: the events are compared through `event_rejection`), the thresholds only if their method ran on both
+sides (the 1/f ones, the fit range and the smoothing with the 1/f method; amplitude: only the stages both sides know, a custom
+stage declared later does not concern this participant), `manual_events`, the channels kept (only those the sidecar names:
+a reference channel has left the epochs before it is written), `reference` and `hypnogram_file` (absent in an older sidecar = not
+compared). `run_settings` is built once before the loop: the question compares it, the sidecar writes it.
+**The editor starts from the sidecar** of a participant already processed in the run chosen (`start_channels`,
+`recorded_channels`), the others from tool 6's flags, and *Reset channels to defaults* goes back to that state. A channel the
+sidecar does not name keeps its value (`M2`, the reference, must stay ticked: unticked, it would no longer be the
+reference, `preprocess_raw`). Accepted limits: a new flag of tool 6 no longer unticks anything for a participant already
+processed; unticking by hand a reference channel of a participant already processed is not detected; with a sidecar without
+`bad_channels`, a channel unticked by hand comes back ticked if tool 6 does not flag it. *Use the recorded settings*
+(`recorded_settings`, `put_back_recorded_settings`) puts back all of Section 2 and the hypnogram suffix, and names what it cannot:
+the reference (tool 2's configuration, a file, the question comes back if it differs), the channels changed in the editor,
+an event type absent from the menu, the threshold of a stage not declared on the page. The mixed-method warning reads the run
+chosen only (a run `_v2` raised a false alert), without those about to be made again.
+
 **Outputs per participant**: the `.fif` + its params sidecar + the optional context companion under `<output_folder>/derivatives/preproc_epo/<edf_subtree>/` (a **sibling of the `rejection_manual/`** decision tables written by tool 8 and **`rejection_auto/`** written by tool 8bis, so the epochs and their decisions sit side by side under `derivatives/`). The per-file TSV/HTML reports under `<output_folder>/reports_preproc/<edf_subtree>/`, **both mirror the EDF subfolder tree** (as `6_quality_overview` does for `reports_quality_overview/<edf_subtree>/`, an EDF sitting in the data-folder root has `<edf_subtree> == '.'` so its reports collapse back to the flat root, keeping subfolder-less datasets byte-identical to the pre-mirror tool). The skip-checks and the global-table rebuild therefore search **recursively** (`reports_dir.rglob(...)`), so a report written in a subfolder is still found. When a file previously processed by the old **flat** layout is reprocessed into its subfolder, tool 7 first deletes any stale **root-level** copies of that file_id's three report files (only when `<edf_subtree> != '.'`) so the globbed globals never double-count it:
 - `{file_id}_all-epo.fif`, all epochs **and every montage channel** (the deselected ones included, listed in `info['bads']`, never flagged) with `epochs.metadata` DataFrame (columns: `epoch_idx`, `stage`, `reject_flag`, `reject_method`, `flag_amplitude`, `flag_flat`, `flag_gradient`, `flag_1f_error`, `flag_1f_r2`, plus `flag_event` **when event flagging ran**, and one `evt_<canonical>` bool per canonical event type **when event flagging ran**, a per-epoch flag naming *which* event type flagged the epoch, since `flag_event` is only the OR, read by **tool 8**'s per-epoch inspector to show the culprit event(s)). The `flag_<method>` columns are **per-epoch "any channel" booleans** (the naive epoch-level decision, read by tool 8). The full per-(epoch, channel) mask **is** now persisted separately, in `{file_id}_epoch_channel_rejection.tsv` (below). The per-epoch/per-stage TSVs and `global_rejection_by_stage.tsv` gain the matching `flag_event` / `event` entries the same way: additively, so event-free runs stay byte-compatible with earlier outputs.
-- `{file_id}_preprocessing_params.json`: `channels` (the flagged ones) + the additive `bad_channels` (deselected: in the `.fif` marked bad, never flagged) + the resampling / notch / bandpass filter settings (the notch as an additive `notch: {applied, freq_hz}` key, provenance only) + the additive `epoch_length_s` (the selected epoch length, **30 assumed when absent**, so older sidecars stay compatible) + the per-stage rejection thresholds actually used (amplitude p-p per stage, flat, gradient, 1/f MAE/R²) + `methods_run` + the optional additive `psd_smoothing` block (see above, omitted-safe on older sidecars). Read back by **tool 8** (QC of rejected epochs) to draw threshold reference lines, recompute per-channel margins, label the epoch length (`qc_rejected_epochs_lib.load_params → info['epoch_length_s']`), and honour the PSD smoothing when recomputing PSDs (`info['psd_smoothing']`). Written non-fatally.
+- `{file_id}_preprocessing_params.json`: `channels` (the flagged ones) + the additive `bad_channels` (deselected: in the `.fif` marked bad, never flagged) + the resampling / notch / bandpass filter settings (the notch as an additive `notch: {applied, freq_hz}` key, provenance only) + the additive `epoch_length_s` (the selected epoch length, **30 assumed when absent**, so older sidecars stay compatible) + the per-stage rejection thresholds actually used (amplitude p-p per stage, flat, gradient, 1/f MAE/R²) + `methods_run` + the optional additive `psd_smoothing` block (see above, omitted-safe on older sidecars) + the additive `manual_events`, `reference` (tool 2's `ref_channels`) and `hypnogram_file`, for the Skip check. Read back by **tool 8** (QC of rejected epochs) to draw threshold reference lines, recompute per-channel margins, label the epoch length (`qc_rejected_epochs_lib.load_params → info['epoch_length_s']`), and honour the PSD smoothing when recomputing PSDs (`info['psd_smoothing']`). Written non-fatally.
 
   *Why `preproc_epo`*: these epochs are **preprocessed** (re-referenced, notch, band-pass, optional resampling) and all kept: nothing is rejected in them (the decisions are tables in `rejection_manual/` / `rejection_auto/`). The folder was called `raw_epo/` ("before rejection") when tools 8/8bis still wrote `clean-epo.fif` files; the reports folder was `reports_preprocessing/`.
 
@@ -2384,6 +2463,7 @@ Manual quality control of the epochs that `7_preprocessing_voila` flagged: inspe
 
 **Section 1: Load + selection** (2026-11-04): the **Study folder** (`fc_data`, holds `derivatives/` + `reports_preproc/`) and the *Inputs found* list: the **Preprocessed-epochs folder** (`fc_raw`, the tool-7 `*_all-epo.fif`, found by `study_files_lib.epoch_folders`: the `derivatives/preproc_epo*` of the study and of the output folder tool 7 noted) and the **Reports folder** (`fc_reports`, paired by name, `preproc_epo_v2` → `reports_preproc_v2`, **optional** here, used only for the per-channel flags, see below). Several runs: a menu (`run_menu`) with their number of participants; *Choose another…* for a run elsewhere. One epochs folder at a time (instead of one derivatives root scanned recursively) keeps renamed/versioned tool-7 runs apart on the participant dropdown. Without a study folder the pickers still work by hand (the tests). `find_participants(raw_root)` fills the dropdown. The params JSON + custom stages are read from the fif's folder / the study folder. **Output derivation** (data vs reports split, precomputed at load): decision tables → `raw_root.parent/rejection_manual/<subtree>/` (beside the raw folder), reports → `<data_root>/reports_rejection_manual/<subtree>/` (beside `reports_preproc/`), where `<subtree>` is the participant path relative to the raw folder and `data_root` is the selected Study folder or, if unset, derived by finding the `derivatives/` ancestor of the raw folder (its parent). Two additions on top of the pickers:
 - **"Already processed" badge**: the scan counts, and the participant dropdown annotates, the files already reviewed manually: "done" = **both** the `rejection_manual/` `_epoch_decision.tsv` **and** a review record (`_epoch_rejection_reviewed.tsv` or `_manualreject_decision.tsv`) on disk, the same data-and-report gate as the toolkit's skip convention. Purely **informative**: it never blocks reloading or re-saving (tool 8 is interactive and handles one participant at a time, re-saving overwrites, which the load summary states explicitly).
+- **Tool 7 run again with other settings** (2026-11-06, *Cross-cutting → Skip + cumulative-merge*): under the badge, a warning when the `preproc_fingerprint` of the decision record differs from the sidecar's (`SF.recorded_preproc_fingerprint`, `SF.preproc_fingerprint`). It **only warns**: a manual review is never made again in the user's place, and a record without a fingerprint is never out of date. Saving a review refreshes the badge.
 - **Sections 2–4 are cleared on every participant load and every "Apply selection"** (`_reset_sections`, fed by one `_RESET_HOOKS[<section>]` entry per section, keyed so a re-run Jupyter cell replaces its entry): the report output, the navigator (list, slider, labels, `Show` back to `flagged`, filters, a pending Apply-to-all confirmation) and the review output, each with a `Participant X loaded: click "…"` line. Before this, a navigator list built for the previous participant survived until "Start navigator" was clicked again, so a Keep/Reject toggle in between acted on the **wrong epochs** of the new participant. **Unsaved-changes guard** (`_unsaved_guard`): manual Keep/Reject changes live in memory until Section 4 saves them (`S['dirty']`, cleared once the decision record is written), so a Load or Apply that would discard them first only prints `⚠ Unsaved manual changes on X (n epoch(s) changed…)` and a second click goes ahead. Annotations are written immediately and never count as unsaved.
 - **Selection = what counts as "rejected"** (the manual analogue of 8bis's Section 2): checkbox rows for **stages to review** (AASM + custom, all ticked: the review **focus**, not a part of the decision, see below) and **flagging methods** (`METHOD_ORDER`, all ticked, methods absent from the `.fif` are disabled at load), plus (revealed by the `event` method checkbox, per the *checkbox-revealed widgets* rule) one checkbox per **canonical event type**, populated at load from the `.fif`'s `evt_<type>` metadata columns (all ticked). See *Rejection redefinition* below.
 - **Optional reports folder** (`fc_reports`, paired with the epochs folder): the **only** thing tool 8 reads from `reports_preproc/`, `{file_id}_epoch_channel_rejection.tsv`, located by `rglob` **within that folder only** (so versioned tool-7 runs never mix). It gives the **exact** per-(epoch, channel) flags including the per-channel 1/f ones, which tool 8 would otherwise have to refit (~8 min on a 32-channel night). Absent → automatic fallback to `recompute_channel_flags` (time-domain only) with a visible ⚠ in the badness line. This narrows the former "tool 8 never reads `reports_preproc/`" invariant, exactly as anticipated above.
@@ -2455,7 +2535,7 @@ annotations are listed in `{file_id}_manualreject_report.html`.
   *Cross-cutting → Runs of tool 7*).
 - **DATA** → **`derivatives/rejection_manual/<edf_subtree>/`** (sibling of tool 8bis's `rejection_auto/`, mirrors the tool-7 subtree, stripping a leading `preproc_epo/`): `{file_id}_epoch_decision.tsv` (every epoch: `in_scope` = always True, `rejected` = final decision, `reject_reason` = the recomputed method(s) / `manual_added` / `manual_rescued`, `manual_override`, `seen`) and `{file_id}_channel_decision.tsv` (every channel: `dropped` = unticked in the Section-1 triage (`unticked in tool 8`) or deselected in tool 7 (`tool7_deselected`), `badness_pct`). The former `clean_epo_manual/*_clean-epo.fif` is no longer written.
 - **REPORTS** → **`reports_rejection_manual/<edf_subtree>/`** (beside `reports_preproc/`, sibling of 8bis's `reports_rejection_auto/`): `{file_id}_epoch_rejection_reviewed.tsv` (per-epoch metadata + the decision columns, `in_scope` always True, + the additive `review_focus` / `seen` / `epoch_number` / `onset_s` / `clock_time`), `{file_id}_qc2b_review_log.tsv` (one row per overridden epoch: `epoch_idx`, `stage`, `orig_reject`, `final_reject`, `action` ∈ rescued/added), the Section-2 `{file_id}_qc2b_report.html`, and (mirroring 8bis's decision record) **`{file_id}_manualreject_decision.tsv`** + **`{file_id}_manualreject_report.html`**.
-- **Decision record** (`build_manual_decision_row`): one durable row per participant, `n_epochs`, `n_in_scope` / `n_out_of_scope` (kept for schema continuity: = `n_epochs` / 0), `n_rejected`, `n_kept`, `pct_rejected` (of **every** epoch), `n_flagged_by_selection` (every epoch), the additive focus counts `n_epochs_ref` / `n_rejected_ref` / `pct_rejected_ref` / `n_flagged_ref` (the review set), `n_overrides` / `n_rescued` / `n_added`, the additive `n_seen` / `pct_seen` / `n_manual_annotations` / `epoch_number_offset` (how thorough the review was and how it was numbered, 5 % rejected after opening every flagged epoch is not the same result as 5 % rejected without opening one), `stages_used` (= the focus stages) / `methods_used` / `event_types_used`, channels, sfreq, `epoch_length_s`, the thresholds used, `reviewed_at`, plus `n_<stage>` / `n_rejected_<stage>` for the selected stages then every other stage present. Written **before** the report, exactly like 8bis's `_autoreject_decision.tsv`, and it is what the "already processed" badge looks for.
+- **Decision record** (`build_manual_decision_row`): one durable row per participant, `n_epochs`, `n_in_scope` / `n_out_of_scope` (kept for schema continuity: = `n_epochs` / 0), `n_rejected`, `n_kept`, `pct_rejected` (of **every** epoch), `n_flagged_by_selection` (every epoch), the additive focus counts `n_epochs_ref` / `n_rejected_ref` / `pct_rejected_ref` / `n_flagged_ref` (the review set), `n_overrides` / `n_rescued` / `n_added`, the additive `n_seen` / `pct_seen` / `n_manual_annotations` / `epoch_number_offset` (how thorough the review was and how it was numbered, 5 % rejected after opening every flagged epoch is not the same result as 5 % rejected without opening one), `stages_used` (= the focus stages) / `methods_used` / `event_types_used`, channels, sfreq, `epoch_length_s`, the thresholds used, `reviewed_at`, the additive `preproc_fingerprint` (the settings of the tool 7 run it was reviewed from), plus `n_<stage>` / `n_rejected_<stage>` for the selected stages then every other stage present. Written **before** the report, exactly like 8bis's `_autoreject_decision.tsv`, and it is what the "already processed" badge looks for.
 - **Decision report** (`manual_decision_html`): the headline counts + parameters used, the stage × method table computed on the **final** decision, and the review strip.
 - **Global summary**: `global_manualreject_summary.tsv` at the root of `reports_rejection_manual/`, **rebuilt at every save by globbing the per-file `_manualreject_decision.tsv` on disk** (interruption-safe, never from an in-memory list, same convention as 8bis), with a compact table echoed in the notebook.
 
@@ -2588,7 +2668,7 @@ suffix of the run, *Cross-cutting → Runs of tool 7*):
 - **REPORTS**: `<reports_root.parent>/reports_rejection_auto/<subtree>/`: `reports_rejection_auto/` beside
   the chosen reports folder (i.e. next to `reports_preproc/`). Per participant:
   - `{file_id}_autoreject_decision.tsv`: one-row durable record **and** the global-summary row source
-    (thresholds, stages, `methods_used`, `event_types_used`, `event_thresholds`, `excluded`, `exclude_reason`,
+    (thresholds, stages, `methods_used`, `event_types_used`, `event_thresholds`, `preproc_fingerprint`, `excluded`, `exclude_reason`,
     `rejected_channels`, per-channel `channel_badness_pct` (over the reference stages), `n_epochs` /
     `n_epochs_rejected` / `n_epochs_kept` / `pct_epochs_rejected` over **every** epoch (over the reference
     stages before 2026-10-05), the additive `n_epochs_ref` / `n_epochs_rejected_ref` /
@@ -2611,14 +2691,17 @@ the title) and the **full** table (+
 `autoreject_failed.tsv`. The end-of-run line tallies `decided / all-rejected / excluded / skipped / failed`.
 **Skip + cumulative-merge**: a participant is skipped when **both** its `_epoch_decision.tsv` (in
 `rejection_auto/`) and its decision TSV (in `reports_rejection_auto/`) exist **and** that decision TSV was made
-with the current settings (uncheck *Skip* to reprocess everyone). Since 2026-11-02 (user report: a re-run with
-other thresholds silently kept the old decisions): the run computes the settings it would record
-(`autoreject_lib.DECISION_SETTINGS`: `channel_reject_pct`, `epoch_reject_pct`, `stages_of_interest`,
-`methods_used`, `event_types_used`, `event_thresholds`) and `settings_changed(decision_tsv, settings)` lists the
-ones that differ; a participant with any difference is decided again, and the log names it with the changed
-settings. The additive **`event_thresholds`** column (`type:n+type:n`, `event_thresholds_text`, empty when the
-`event` method is off) records the per-type exclusion thresholds; a record written before it reads as empty
-there. A participant whose reports TSV is gone keeps its decision (nothing to compare).
+with the current settings (uncheck *Skip* to reprocess everyone). User report of 2026-11-02: a re-run with other
+thresholds silently kept the old decisions. Since 2026-11-06 (*Cross-cutting → Skip + cumulative-merge*) a pass before the
+loop computes the settings the run would record (`read_flags`, shared with the loop:
+`autoreject_lib.DECISION_SETTINGS`: `channel_reject_pct`, `epoch_reject_pct`, `stages_of_interest`, `methods_used`,
+`event_types_used`, `event_thresholds`, `preproc_fingerprint`), and `settings_differences(decision_tsv, settings)` gives the
+rows of the box: the run stops before any decision and asks, like the other tools. The Scan says how many participants were
+decided before tool 7 was run again with other settings. The additive **`event_thresholds`** column (`type:n+type:n`,
+`event_thresholds_text`, empty when the `event` method is off) records the per-type exclusion thresholds; a record written
+before it reads as empty there. A participant whose reports TSV is gone keeps its decision (nothing to compare, `ℹ️` line).
+*Use the recorded settings* (`recorded_settings`, `put_back_recorded_settings`) puts back the two percentages, the
+reference stages, the methods, the event types and their thresholds, and names the settings of tool 7, which belong to tool 7.
 
 **Curry twin of tool 8 (`tools_curry/_make_tool8_curry.py`)**: like 8bis, tool 8 is format-agnostic, it
 reads only the tool-7 `.fif` + its optional companions + the optional `_epoch_channel_rejection.tsv`, all
@@ -2754,7 +2837,24 @@ tools read tool 7's epochs + a decision* for the decision tables, the sidecar lo
 
 **Section 3: Participants**: the shared **participant selector** (*Cross-cutting → Participant selector*: all
 or a subset, `Skip already processed` ON). Skip gate = **both** `{file_id}_spectral_stage.tsv` and
-`{file_id}_spectral_report.html` on disk.
+`{file_id}_spectral_report.html` on disk, and the settings below.
+
+**Skip and the settings (2026-11-06, *Cross-cutting → Skip + cumulative-merge*)**: two categories, because the settings do not
+cost the same. **Computation** (`computation_differences`, against the `cfg_json` of the `.npz`, row `to recompute: …`): PSD, fit,
+smoothing, bands, measures, and the settings of tool 7, all of which take the full computation. **Aggregation and decision**
+(`aggregation_differences`, against `{file_id}_spectral_settings.json`, row `to re-aggregate: …`): stages, averaging space,
+minimum of epochs, night thirds, exclusion of poor fits, the source and the content of the decision, for which a re-aggregation
+is enough. *Reprocess* takes the path each participant needs, and a line under the buttons says how many of each. No false
+alert from a widget without effect: the bandwidth with Welch, the window and the overlap with multitaper, the fit and
+its smoothing when one side has no fit; bands and measures are compared as sets, `n_jobs` never. `stages` = the stages the
+participant has kept epochs in (`participant_tables`' `stages_sel`): a stage of the rest of the database does not concern it.
+`decision_fingerprint` covers what the decision says (epochs kept, channels dropped), so a reason reworded by tool 8 / 8bis
+changes nothing; the Scan keeps each file's metadata (`p['meta']`, `p['bads']`) so that Run reads the decision again
+without opening a `.fif`. **`preproc_fingerprint` is noted at the full computation only** (`p['computed_from']`): a re-aggregation
+keeps the spectra, so it keeps the fingerprint. The Scan warns when the decision chosen is itself older than tool 7's
+settings. An output without the file: computation compared through the `.npz`, the rest not (`ℹ️` line, *Re-aggregate only*
+records it). *Use the recorded settings* (`recorded_settings`, `put_back_recorded_settings`) puts back all of Section 2, and
+names the decision (chosen in Section 1), the settings of tool 7 and the aggregation of an output without the file.
 
 **Section 4: Run**: two progress bars (participants + a 5-segment pipeline bar *Load / PSD / 1-f fit /
 Bands / Report*). Per participant, each step in its own `try/except`. The `.fif`'s bads are cleared before the
@@ -2788,7 +2888,8 @@ epochs, every channel, with `n_epochs`, `n_fit_ok`, mean/median/sd of every meas
 `{file_id}_psd_stage.tsv` (mean PSD per stage × channel × frequency **with its `_sd` columns**, so the
 report's ± SEM band is reproducible as `sd / sqrt(n_epochs)`, every report figure can be redrawn from the
 tables), and `{file_id}_spectral_stage_third.tsv` when the thirds option is on (the stage tables carry the
-same three decision columns), plus `{file_id}_psd_epoch.npz` (above).
+same three decision columns; thirds switched off, a former table is deleted), plus `{file_id}_psd_epoch.npz` (above) and the
+additive `{file_id}_spectral_settings.json` (what the aggregates were made with, written before the skip marker, non-fatal).
 
 **Outputs (reports → `reports_features_spectral/<subtree>/{file_id}_spectral_report.html`)**, drawn from the
 kept epochs of the kept channels (an excluded participant's report opens with the red banner; the parameters
@@ -3012,19 +3113,17 @@ Modules still in development. The quality-overview (6), preprocessing (7) and QC
 What can silently give a wrong result comes first, then what forces a full reprocess, then the features. Each item is
 a section below. Update this list when an item is done.
 
-1. **Next: *Skip only what was made with the current settings*** (tools 6, 7, 9). It could also warn that the decisions
-   of tools 8 / 8bis and the features of tool 9 are out of date after a reprocess.
-2. *Code review of 2026-10-24*, first #10 (`load_events` skips a broken file silently).
-3. *Tool 7: band-pass phase* and *Lighter conda environments* (the version refresh goes with the split, decided on
-   2026-10-29), together, between two studies: every output is reprocessed. Before item 4: slow waves sit near the low
+1. **Next: *Code review of 2026-10-24***, first #10 (`load_events` skips a broken file silently).
+2. *Tool 7: band-pass phase* and *Lighter conda environments* (the version refresh goes with the split, decided on
+   2026-10-29), together, between two studies: every output is reprocessed. Before item 3: slow waves sit near the low
    cut-off of the band-pass.
-4. *Slow-wave and spindle extraction*. The licence waits for it.
-5. Features: *Database organisation inferred by tool 1*, *Tool 6: keep a raw run and a prepared run side by side*,
+3. *Slow-wave and spindle extraction*. The licence waits for it.
+4. Features: *Database organisation inferred by tool 1*, *Tool 6: keep a raw run and a prepared run side by side*,
    *Tool 2: richer context channels*, *Tool 3bis: follow-ups of the Score_EDF port*, *Standalone comparison of
    hypnograms*, *Simulated recording generator in tool 0*.
-6. Between larger jobs: *English everywhere*, *Tools 1 to 4: one code cell per section*.
-7. After the extraction: *Clean-up before distribution*, *Distribution and licensing*, the installation tutorial.
-8. Long term: *EDF reading of tools 2, 4, 6, 7 through `edf_io_lib`*, *A Curry twin of tool 0*, *Tool 0: interactive
+5. Between larger jobs: *English everywhere*, *Tools 1 to 4: one code cell per section*.
+6. After the extraction: *Clean-up before distribution*, *Distribution and licensing*, the installation tutorial.
+7. Long term: *EDF reading of tools 2, 4, 6, 7 through `edf_io_lib`*, *A Curry twin of tool 0*, *Tool 0: interactive
    canvas for the epoch explorer*, *Event-epoch visualizer (Phase B)*, tool 8's per-(epoch, channel) override.
 
 Still to check by hand, not covered by the tests: a real participant table through tools 5 and 9, tool 2's full *Preview &
@@ -3045,7 +3144,7 @@ test datasets: the goldens must be regenerated (`tests/make_golden.py`).
 
 Follow-up of the recorded signal preparation (§6, *Recommended first run and recorded preparation*, 2026-10-18).
 Today every tool-6 run writes to `reports_quality_overview/`, so a second run with a high-pass replaces the raw one
-(or, with *Skip already processed* ticked, skips every participant with a ⚠ naming the mix). Idea: an optional
+(with *Skip already processed* ticked, Run first asks: reprocess, keep or use the recorded settings). Idea: an optional
 output-folder suffix (e.g. `reports_quality_overview_hp0.5`), pre-filled from the signal preparation, like tool 7's
 optional output folder. To decide: whether the suffix is free text or derived from the preparation, and who reads
 which folder: tool 7 picks `quality_summary.tsv` through a file chooser (any folder works), but tool 0 looks for
@@ -3073,17 +3172,6 @@ companion files present per recording, and the files that break the convention. 
 code assumes and where it fails on real databases; the inferred structure could then pre-fill a participant table
 for the later tools.
 this part could also checks the companion files (hypno, events etc), and gives warning if some are missing
-
-### Skip only what was made with the current settings: tools 6, 7 and 9 (TODO)
-
-Tool 8bis now decides again a participant whose decision record was made with other settings, even with *Skip*
-ticked (§8bis, 2026-11-02; user report: new thresholds were silently not applied). The same trap exists in the
-other tools whose *Skip already processed* is ticked by default: tool 6 (thresholds and signal preparation; a
-threshold changes the flags, not the metrics), tool 7 (thresholds, filters, epoch length, smoothing: recorded in
-`{file_id}_preprocessing_params.json`, but the tool only warns when the set of methods differs), tool 9 (PSD, fit,
-bands and measures: recorded in `_psd_epoch.npz`, compared only by *Re-aggregate only*). For each tool: decide
-which settings must force a reprocess, compare them with what the outputs record, reprocess (or at least warn) and
-say so in the log. A setting not recorded yet first needs an additive column or key.
 
 ### Tool 7: band-pass phase (TODO, to decide)
 
