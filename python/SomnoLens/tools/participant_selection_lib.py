@@ -22,6 +22,7 @@ this code is used by tools 5, 5bis, 6, 7, 8, 8bis, 9 and their Curry twins, and 
 """
 import datetime
 import html
+import json
 import os
 import re
 from pathlib import Path
@@ -331,6 +332,49 @@ def kept_line(differences, n_processed, n_new):
     return f'ℹ️ Kept as they are, with their recorded settings: {names}'
 
 
+def most_frequent_settings(records):
+    """The set of settings most participants were made with. records = [(file_id, settings dict)], in participant order.
+    Returns (settings, number of participants with it). At equal count, the first in participant order."""
+    counts, sets = {}, {}
+    for _fid, settings in records:
+        key = json.dumps(settings, sort_keys=True, default=str)
+        counts[key] = counts.get(key, 0) + 1
+        sets.setdefault(key, settings)
+    best = max(counts, key=counts.get)      # max keeps the first of equal counts, and a dict keeps its order
+    return sets[best], counts[best]
+
+
+def _setting_text(value):
+    if isinstance(value, bool):
+        return 'on' if value else 'off'
+    return f'{value:g}' if isinstance(value, (int, float)) else str(value)
+
+
+def put_back(changes, setting, widget, value):
+    """Put a widget of the page back to a recorded value. A change is noted in `changes` as (setting, value on the page,
+    recorded value)."""
+    if widget.value != value:
+        changes.append((setting, _setting_text(widget.value), _setting_text(value)))
+        widget.value = value
+
+
+def recorded_settings_html(changes, not_put_back, n_same, n_records):
+    """What the answer 'Use the recorded settings' did: nothing ran, the page changed."""
+    import ui_lib as UI      # the look shared by the Voila pages (imported on use: screen only)
+    text = (f'<b>Recorded settings put back</b> (the most frequent set: {n_same} of the {n_records} processed '
+            'participant(s)). Nothing has run yet: click Run again.')
+    if changes:
+        lines = ''.join(f'<li><b>{html.escape(setting)}</b>: {html.escape(page)} → {html.escape(recorded)}</li>'
+                        for setting, page, recorded in changes)
+        text += f'<ul style="margin:4px 0;">{lines}</ul>'
+    else:
+        text += '<br>Nothing to change on this page.'
+    if not_put_back:
+        lines = ''.join(f'<li>{html.escape(item, quote=False)}</li>' for item in not_put_back)
+        text += f'<br>Not put back, left as they are on this page:<ul style="margin:4px 0;">{lines}</ul>'
+    return UI.box('ok', text)
+
+
 class ParticipantSelector:
     """'All participants / Subset only' + 'Skip already processed', with a summary line and a
     prominent warning box. Usage in a tool:
@@ -381,12 +425,17 @@ class ParticipantSelector:
         # The answers when participants were made with other settings (ask_other_settings): shown in the run's log.
         self.btn_redo_other = ui_lib.button('Reprocess them', 'caution')
         self.btn_keep_other = ui_lib.button('Keep them', 'run')
-        self._box_other = w.HBox([self.btn_redo_other, self.btn_keep_other])
+        self.btn_use_recorded = ui_lib.button('Use the recorded settings', 'helper',
+                                              tooltip='Put the settings of this page back to what these participants '
+                                                      'were made with. Nothing runs.',
+                                              layout=w.Layout(width='auto'))
+        self._box_other = w.HBox([self.btn_redo_other, self.btn_keep_other, self.btn_use_recorded])
         self._on_other_answer = None
         # Beside the page's Run button: the question sits under the progress bars, possibly below the window.
         self.run_note = w.HTML('')
         self.btn_redo_other.on_click(lambda _: self._answer_other('reprocess'))
         self.btn_keep_other.on_click(lambda _: self._answer_other('keep'))
+        self.btn_use_recorded.on_click(lambda _: self._answer_other('use_recorded'))
         self.dd_mode.observe(self._on_mode, names='value')
         self.tags.observe(self._on_tags, names='value')
         self.cmb_add.observe(self._on_add, names='value')
@@ -463,9 +512,9 @@ class ParticipantSelector:
                       'participants</b> to reprocess them.')
 
     def ask_other_settings(self, differences, n_processed, n_new, on_answer):
-        """Skip met participants made with other settings: show the differences and the two answers in the output
-        area this is called from (the tool's run log), then return. on_answer('reprocess' or 'keep') runs when a
-        button is clicked. The tool calls it before any analysis, and finds the differences again on the answer. It
+        """Skip met participants made with other settings: show the differences and the answers in the output area
+        this is called from (the tool's run log), then return. on_answer('reprocess', 'keep' or 'use_recorded') runs
+        when a button is clicked. The tool calls it before any analysis, and finds the differences again on the answer. It
         shows run_note beside its Run button and empties it at the start of each Run."""
         from IPython.display import HTML, display
         import ui_lib as UI      # the look shared by the Voila pages (imported on use: screen only)
@@ -477,6 +526,14 @@ class ParticipantSelector:
         self._on_other_answer = on_answer
         display(HTML(other_settings_html(differences, n_processed, n_new)))
         display(self._box_other)
+
+    def show_recorded_settings(self, changes, not_put_back, n_same, n_records):
+        """The tool has answered 'use_recorded' by putting its widgets back: say what changed, in the output area this is
+        called from, and beside Run that the next step is to click it."""
+        from IPython.display import HTML, display
+        import ui_lib as UI      # the look shared by the Voila pages (imported on use: screen only)
+        self.run_note.value = UI.msg('ok', 'Recorded settings put back: click Run again')
+        display(HTML(recorded_settings_html(changes, not_put_back, n_same, n_records)))
 
     def _answer_other(self, answer):
         on_answer, self._on_other_answer = self._on_other_answer, None     # one answer per question

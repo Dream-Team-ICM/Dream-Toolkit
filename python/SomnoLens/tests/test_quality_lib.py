@@ -97,3 +97,13 @@ def test_a_table_written_before_the_records_compares_only_its_flags():
     assert QL.recorded_preparation(old) == ''
     assert differences(old, do_highpass=True, hp=0.5) == []
     assert differences(old, dict(THRESHOLDS, flat_pct=6.0)) == [('flags of C3', 'flat_pct', 'none')]
+
+
+def test_the_recorded_settings_read_back():
+    table = stored_table(signal_preparation='resampled to 128 Hz, high-pass 0.5 Hz')
+    assert QL.recorded_settings(table) == {'preparation_known': True, 'highpass': 0.5, 'resampled_to': 128.0,
+                                           'thresholds': THRESHOLDS}
+    assert QL.recorded_settings(stored_table()) == {'preparation_known': True, 'highpass': None, 'resampled_to': None,
+                                                    'thresholds': THRESHOLDS}
+    old = stored_table().drop(columns=['signal_preparation', 'flag_thresholds'])
+    assert QL.recorded_settings(old) == {'preparation_known': False, 'highpass': None, 'resampled_to': None, 'thresholds': {}}

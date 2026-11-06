@@ -137,3 +137,19 @@ def test_the_channels_the_editor_starts_with():
         'C3': True, 'O1': True, 'F4': True, 'F3': False}
     # Nothing recorded: `start` stays.
     assert PL.recorded_channels({}, start) == start
+
+
+def test_the_recorded_settings_leave_out_what_belongs_to_the_participant():
+    settings = PL.recorded_settings(SIDECAR, 'p')
+    assert settings['methods'] == ['amplitude', 'gradient', 'flat', '1f_r2', '1f_error']       # no event method
+    assert settings['hypnogram_suffix'] == '_hypno.txt'
+    assert not {'file_id', 'sfreq_hz', 'channels', 'bad_channels', 'reference', 'custom_stages'} & set(settings)
+    # Two participants made with the same settings give the same set.
+    other = dict(SIDECAR, file_id='q', channels=['C3'], bad_channels=['O1'], reference=['M1'], hypnogram_file='q_hypno.txt',
+                 methods_run=[m for m in SIDECAR['methods_run'] if m != 'event'])
+    assert PL.recorded_settings(other, 'q') == settings
+
+
+def test_the_recorded_settings_of_an_older_sidecar_hold_what_it_has():
+    old = {'file_id': 'p', 'methods_run': ['amplitude'], 'filter': SIDECAR['filter']}
+    assert PL.recorded_settings(old, 'p') == {'filter': SIDECAR['filter'], 'methods': ['amplitude']}

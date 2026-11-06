@@ -934,6 +934,20 @@ def psd_smoothing_label(block):
     return f"LOWESS {block['lowess_span_hz']:g} Hz"
 
 
+def recorded_settings(sidecar, file_id):
+    """What a participant's params sidecar records of the settings of tool 7's page, without what belongs to the participant
+    alone, so that participants can be compared: the methods without the event one (it varies with each file's
+    annotations), the hypnogram as its suffix, no channels (the editor starts from them) and no reference (tool 2)."""
+    keys = ('epoch_length_s', 'resample', 'filter', 'notch', 'rejection_thresholds', 'event_rejection', 'psd_smoothing',
+            'manual_events')
+    settings = {key: sidecar[key] for key in keys if key in sidecar}
+    settings['methods'] = [m for m in METHOD_ORDER if m in (sidecar.get('methods_run') or []) and m != 'event']
+    name = sidecar.get('hypnogram_file')
+    if name and os.path.normcase(name).startswith(os.path.normcase(file_id)):
+        settings['hypnogram_suffix'] = name[len(file_id):]
+    return settings
+
+
 def settings_differences(sidecar, current):
     """What separates a participant's params sidecar from this run's settings (`current`: the sidecar's keys, methods_run
     without the event method), as (setting, recorded, this run) rows. [] when nothing does.

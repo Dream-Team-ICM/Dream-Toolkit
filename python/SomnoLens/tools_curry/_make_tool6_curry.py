@@ -336,6 +336,13 @@ replace_in_cell(cell4,
     "cell4 remove bounds_pct from thresholds",
 )
 
+# 4b bis. Remove thresh_bounds from what 'Use the recorded settings' puts back
+replace_in_cell(cell4,
+    "                            ('bounds_pct', thresh_bounds),\n",
+    "",
+    "cell4 remove thresh_bounds from the recorded settings",
+)
+
 # 4c. Remove 'At EDF bounds (%)' from interpretations.update
 replace_in_cell(cell4,
     "            'At EDF bounds (%)': f'flag if&nbsp;&gt;&nbsp;{thresholds[\"bounds_pct\"]:g}%&nbsp;&mdash; threshold defined manually in the notebook ; typical threshold is ??',\n",

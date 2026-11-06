@@ -124,3 +124,15 @@ def test_the_decision_counts_through_what_it_says():
         ('decision', 'auto', 'manual')]
     # The order of the channels dropped changes nothing.
     assert settings(dropped=('O1', 'Fp1'))['decision_fingerprint'] == settings(dropped=('Fp1', 'O1'))['decision_fingerprint']
+
+
+def test_the_recorded_settings_read_back():
+    recorded = settings()
+    both = SL.recorded_settings(computed(), recorded)
+    assert both['aggregation'] == {'spaces': ['log'], 'min_epochs': 20, 'thirds': False, 'exclude_bad_fit': False}
+    assert both['psd'] == computed()['psd'] and both['do_fit'] is True
+    # Bands and measures in a fixed order: two participants with the same settings are the same set.
+    reordered = computed(bands=list(reversed(computed()['bands'])), measures=['power_rel', 'power_db'])
+    assert SL.recorded_settings(reordered, recorded) == both
+    # Written before _spectral_settings.json: the computation is known, not the aggregation.
+    assert SL.recorded_settings(computed(), None)['aggregation'] is None

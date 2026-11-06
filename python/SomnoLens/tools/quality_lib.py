@@ -836,6 +836,22 @@ def recorded_preparation(stored):
     return label.strip() if isinstance(label, str) else ''
 
 
+def recorded_settings(stored):
+    """What a participant's table records of the settings of tool 6's page. preparation_known False: a table written
+    before the column, which says nothing of the high-pass and of the resampling. thresholds {}: before its own column."""
+    prepared = recorded_preparation(stored)
+    settings = {'preparation_known': bool(prepared), 'highpass': None, 'resampled_to': None, 'thresholds': {}}
+    for part in prepared.split(','):
+        words = part.split()
+        if part.strip().startswith('high-pass'):
+            settings['highpass'] = float(words[1])
+        elif part.strip().startswith('resampled to'):
+            settings['resampled_to'] = float(words[2])
+    if 'flag_thresholds' in stored.columns and not stored.empty:
+        settings['thresholds'] = parse_flag_thresholds(stored['flag_thresholds'].iloc[0])
+    return settings
+
+
 def settings_differences(stored, do_resample, target_freq, do_highpass, hp_freq_val, thresholds, native_sf=None):
     """What separates a participant's {file_id}_quality_metrics.tsv (`stored`) from this run's settings, as
     (setting, recorded, this run) rows. [] when nothing does.

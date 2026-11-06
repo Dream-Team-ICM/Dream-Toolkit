@@ -52,3 +52,20 @@ def test_a_fingerprint_missing_on_one_side_is_no_difference(record, tmp_path):
 
 def test_an_unreadable_record_counts_as_different(tmp_path):
     assert AR.settings_differences(tmp_path / 'absent.tsv', SETTINGS) == [('decision record', 'unreadable', 'this run')]
+
+
+def test_the_recorded_settings_read_back(tmp_path):
+    path = tmp_path / 'p_autoreject_decision.tsv'
+    pd.DataFrame([dict(SETTINGS, file_id='p', event_types_used='plm+hypopnea', event_thresholds='hypopnea:5+plm:10',
+                       methods_used='amplitude+event')]).to_csv(path, sep='\t', index=False)
+    assert AR.recorded_settings(path) == {
+        'channel_reject_pct': 20.0, 'epoch_reject_pct': 20.0, 'stages': ['N2', 'N3', 'R'], 'methods': ['amplitude', 'event'],
+        'event_types': ['plm', 'hypopnea'], 'event_thresholds': {'hypopnea': 5, 'plm': 10}}
+
+
+def test_the_recorded_settings_of_an_older_record_have_no_event_threshold(tmp_path):
+    path = tmp_path / 'p_autoreject_decision.tsv'
+    pd.DataFrame([dict(SETTINGS, file_id='p', methods_used='(none)')]).drop(columns=['event_thresholds']).to_csv(
+        path, sep='\t', index=False)
+    settings = AR.recorded_settings(path)
+    assert settings['event_thresholds'] == {} and settings['methods'] == []

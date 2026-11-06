@@ -1688,6 +1688,19 @@ def computation_differences(computed, cfg):
     return rows
 
 
+def recorded_settings(computed, recorded):
+    """What a participant records of the settings of tool 9's page: `computed` the cfg_json of its _psd_epoch.npz, `recorded`
+    its _spectral_settings.json (None: written before that file, so no aggregation). Bands and measures in a fixed order,
+    so that participants can be compared. The stages stay apart: each record only keeps those the participant has."""
+    settings = {key: computed[key] for key in ('psd', 'fit', 'do_fit', 'smooth')}
+    settings['bands'] = sorted(([name, float(low), float(high)] for name, low, high in computed['bands']),
+                               key=lambda band: (band[1], band[2], band[0]))
+    settings['measures'] = sorted(computed['measures'])
+    settings['aggregation'] = ({key: recorded[key] for key in ('spaces', 'min_epochs', 'thirds', 'exclude_bad_fit')}
+                               if recorded else None)
+    return settings
+
+
 def decision_fingerprint(meta, in_scope, rejected, dropped):
     """A short fingerprint of what a decision says for the aggregates (the epochs kept, the channels dropped), not of its
     files: a reason or a badness percentage reworded by tool 8 / 8bis changes no aggregate."""

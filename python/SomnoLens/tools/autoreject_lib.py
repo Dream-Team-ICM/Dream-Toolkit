@@ -229,6 +229,23 @@ def settings_differences(decision_tsv, settings):
             rows.append((label, old or 'none', new or 'none'))
     return rows
 
+def recorded_settings(decision_tsv):
+    """What a participant's decision record holds of the settings of tool 8bis's page. stages, methods and event_types: only
+    what this participant has (a stage, a type of event absent from its file is not in its record)."""
+    row = pd.read_csv(decision_tsv, sep='\t', dtype=str, keep_default_na=False).iloc[0]
+
+    def parts(key):
+        return [part for part in str(row.get(key, '')).split('+') if part and part != '(none)']
+
+    thresholds = {}
+    for item in parts('event_thresholds'):
+        event_type, _, count = item.rpartition(':')
+        thresholds[event_type] = int(count)
+    return {'channel_reject_pct': float(row['channel_reject_pct']), 'epoch_reject_pct': float(row['epoch_reject_pct']),
+            'stages': parts('stages_of_interest'), 'methods': parts('methods_used'),
+            'event_types': parts('event_types_used'), 'event_thresholds': thresholds}
+
+
 def read_tool7_bad_channels(fif_folder, fid):
     """Channels tool 7 saved in the .fif but marked bad (deselected by the user, e.g. after tool 6):
     read from its sidecar {id}_preprocessing_params.json (key bad_channels; absent = none)."""

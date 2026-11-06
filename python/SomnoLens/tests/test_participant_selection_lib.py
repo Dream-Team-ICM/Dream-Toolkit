@@ -176,6 +176,48 @@ def test_keeping_says_mixed_only_if_settings_really_sit_side_by_side():
     assert P.kept_line(differences, 1, 0) == 'ℹ️ Kept as they are, with their recorded settings: p1 (notch)'
 
 
+def test_the_most_frequent_settings_win_and_the_first_at_equal_count():
+    a, b = {'notch': 50, 'flat': [1, 2]}, {'notch': 60, 'flat': [1, 2]}
+    assert P.most_frequent_settings([('p1', a), ('p2', b), ('p3', b)]) == (b, 2)
+    assert P.most_frequent_settings([('p1', a), ('p2', b)]) == (a, 1)
+    assert P.most_frequent_settings([('p1', b), ('p2', a)]) == (b, 1)
+    # The order of the keys is not a difference.
+    assert P.most_frequent_settings([('p1', {'x': 1, 'y': 2}), ('p2', {'y': 2, 'x': 1})])[1] == 2
+
+
+def test_putting_a_widget_back_notes_only_what_changes():
+    class Widget:
+        def __init__(self, value):
+            self.value = value
+
+    changes, widget, tick = [], Widget(0.5), Widget(False)
+    P.put_back(changes, 'high-pass (Hz)', widget, 0.5)
+    assert changes == []
+    P.put_back(changes, 'high-pass (Hz)', widget, 1.0)
+    P.put_back(changes, 'notch', tick, True)
+    assert changes == [('high-pass (Hz)', '0.5', '1'), ('notch', 'off', 'on')]
+    assert widget.value == 1.0 and tick.value is True
+
+
+def test_the_recorded_settings_box_says_what_changed_and_what_did_not():
+    box = P.recorded_settings_html([('notch', 'off', '50 Hz')], ["the reference: it comes from tool 2's configuration"], 27, 30)
+    assert '27 of the 30 processed participant(s)' in box and 'Nothing has run yet: click Run again' in box
+    assert '<b>notch</b>: off → 50 Hz' in box
+    assert "Not put back" in box and "tool 2's configuration" in box
+    box = P.recorded_settings_html([], [], 4, 4)
+    assert 'Nothing to change on this page' in box and 'Not put back' not in box
+
+
+def test_the_third_answer_goes_through_the_same_way():
+    sel = make_selector()
+    answers = []
+    sel.ask_other_settings({'p1': [('notch', '50 Hz', 'off')]}, 1, 0, answers.append)
+    sel.btn_use_recorded.click()
+    assert answers == ['use_recorded']
+    sel.show_recorded_settings([('notch', 'off', '50 Hz')], [], 1, 1)
+    assert 'click Run again' in sel.run_note.value
+
+
 def test_the_answers_say_what_they_do_and_count_once():
     sel = make_selector()
     answers = []

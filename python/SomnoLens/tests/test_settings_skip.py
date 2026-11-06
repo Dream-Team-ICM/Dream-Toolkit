@@ -8,6 +8,7 @@ import json
 import shutil
 from pathlib import Path
 
+import numpy as np
 import pandas as pd
 import pytest
 
@@ -760,3 +761,257 @@ def test_tool9_asks_when_tool7_ran_again_with_other_settings(t9_data, ids):
     path.write_text(json.dumps(settings), encoding='utf-8')
     log = pipeline.run_tool9(t9_data, *t9_folders(t9_data))
     assert QUESTION not in log, log[-2000:]
+
+
+# =====================================================================================  Use the recorded settings
+USE_RECORDED = 'participant_selector.btn_use_recorded'
+PUT_BACK = 'Recorded settings put back'
+
+
+def only(outputs, fids):
+    """The dates of the outputs of these participants."""
+    return {name: date for name, date in outputs.items() if name.startswith(tuple(fids))}
+
+
+def forget(folder, fid):
+    """A participant not processed yet: the study got one more."""
+    for path in Path(folder).rglob(f'{fid}_*'):
+        path.unlink()
+
+
+T6_THRESHOLDS = 'bounds_pct:1+flat_pct:4+hist_extreme_pct:1+n_peaks:2+std_low:5'
+
+
+def rewrite_table(reports, fid, **columns):
+    path = reports / f'{fid}_quality_metrics.tsv'
+    tsv(path).assign(**columns).to_csv(path, sep='\t', index=False)
+
+
+@pytest.mark.tool6
+def test_tool6_use_the_recorded_settings_for_a_new_participant(t6_data, ids):
+    new, old = ids[3], ids[:3]
+    reports = t6_data / 'reports_quality_overview'
+    for fid in old:
+        rewrite_table(reports, fid, signal_preparation='high-pass 1 Hz', flag_thresholds=T6_THRESHOLDS)
+    forget(reports, new)
+    before = only(mtimes(reports, *T6_OUTPUTS), old)
+    with NotebookSession(pipeline.T6) as nb:
+        open_tool6(nb, t6_data)
+        nb.click('btn_run')
+        assert f'3 of the 3 processed participant(s) {QUESTION}' in nb.widget_text()
+        nb.click(USE_RECORDED)
+        log = nb.widget_text()
+        assert PUT_BACK in log and '3 of the 3 processed participant(s)' in log, log[-2000:]
+        assert 'high-pass : off → on' in log and 'high-pass (Hz) : 0.5 → 1' in log and 'threshold flat_pct : 3.5 → 4' in log
+        assert 'Analysis complete' not in log                          # it launches nothing
+        assert nb.value('hp_check.value') is True and nb.value('hp_freq.value') == 1.0 and nb.value('thresh_flat.value') == 4.0
+        assert 'click Run again' in nb.value('participant_selector.run_note.value')
+        assert only(mtimes(reports, *T6_OUTPUTS), old) == before
+        nb.click('btn_run')                                            # no difference left: the new one is made like the others
+        log = nb.widget_text()
+        assert nb.value('participant_selector.run_note.value') == ''
+    assert QUESTION not in log and 'Participants processed     : 1' in log, log[-2000:]
+    made = tsv(reports / f'{new}_quality_metrics.tsv').iloc[0]
+    assert made['signal_preparation'] == 'high-pass 1 Hz' and made['flag_thresholds'] == T6_THRESHOLDS
+    assert only(mtimes(reports, *T6_OUTPUTS), old) == before
+
+
+@pytest.mark.tool6
+def test_tool6_mixed_tables_put_back_the_most_frequent_set(t6_data, ids):
+    """The high-pass of three participants against one, and the resampling as soon as one used it: 'none' in a table may only
+    mean that the file was already at the target rate. What a table does not record is named."""
+    reports = t6_data / 'reports_quality_overview'
+    rewrite_table(reports, ids[0], signal_preparation='resampled to 128 Hz, high-pass 1 Hz')
+    rewrite_table(reports, ids[1], signal_preparation='high-pass 1 Hz')
+    rewrite_table(reports, ids[2], signal_preparation='high-pass 1 Hz')
+    for fid in ids:
+        path = reports / f'{fid}_quality_metrics.tsv'
+        tsv(path).drop(columns=['flag_thresholds']).to_csv(path, sep='\t', index=False)
+    with NotebookSession(pipeline.T6) as nb:
+        open_tool6(nb, t6_data)
+        nb.click('btn_run')
+        nb.click(USE_RECORDED)
+        log = nb.widget_text()
+        assert '3 of the 4 processed participant(s)' in log, log[-2000:]
+        assert nb.value('hp_check.value') is True and nb.value('hp_freq.value') == 1.0
+        assert nb.value('cb_resample.value') is True and nb.value('txt_target_freq.value') == 128
+    assert 'Not put back' in log and 'the flag thresholds: tables written before they were recorded' in log
+
+
+@pytest.mark.tool7
+def test_tool7_use_the_recorded_settings_for_a_new_participant(t7_data, ids):
+    new, old = ids[3], ids[:3]
+    for fid in old:
+        sidecar = json.loads(sidecar_path(t7_data, fid).read_text(encoding='utf-8'))
+        edit_sidecar(t7_data, fid, notch={'applied': False, 'freq_hz': None},
+                     rejection_thresholds=dict(sidecar['rejection_thresholds'], flat_ptp_uV=2.0))
+    forget(t7_data / 'reports_preproc', new)
+    forget(t7_data / 'derivatives' / 'preproc_epo', new)
+    before = only(t7_outputs(t7_data), old)
+    with NotebookSession(pipeline.T7) as nb:
+        open_tool7(nb, t7_data)
+        nb.set('cb_event_reject', False)
+        nb.click('btn_run')
+        assert f'3 of the 3 processed participant(s) {QUESTION}' in nb.widget_text()
+        nb.click(USE_RECORDED)
+        log = nb.widget_text()
+        assert PUT_BACK in log, log[-2000:]
+        assert 'notch : on → off' in log and 'flat threshold (µV) : 1 → 2' in log and 'event flagging : off → on' in log
+        assert 'Run complete' not in log                               # it launches nothing
+        assert nb.value('cb_notch.value') is False and nb.value('txt_flat.value') == 2.0
+        assert nb.value('cb_event_reject.value') is True
+        assert not nb.value('btn_run.disabled')
+        assert only(t7_outputs(t7_data), old) == before
+        nb.click('btn_run')                                            # no difference left: the new one is made like the others
+        log = nb.widget_text()
+    assert QUESTION not in log and 'Processed this run    : 1' in log, log[-2000:]
+    made = json.loads(sidecar_path(t7_data, new).read_text(encoding='utf-8'))
+    assert made['notch']['applied'] is False and made['rejection_thresholds']['flat_ptp_uV'] == 2.0
+    assert made['event_rejection']['applied'] is True
+    assert only(t7_outputs(t7_data), old) == before
+
+
+@pytest.mark.tool7
+def test_tool7_what_cannot_be_put_back_is_named(t7_data, ids):
+    fid = ids[0]
+    edit_sidecar(t7_data, fid, reference=['Fp1'])             # tool 2's configuration, a file
+    with NotebookSession(pipeline.T7) as nb:
+        open_tool7(nb, t7_data)
+        nb.run('event_type_checkboxes.clear()')               # no event_remap.json chosen
+        nb.click('btn_run')
+        nb.click(USE_RECORDED)
+        log = nb.widget_text()
+        assert PUT_BACK in log and f'{len(ids)} of the {len(ids)} processed participant(s)' in log     # the reference is no part of the set
+        assert "the reference: it comes from tool 2's channel configuration" in log, log[-2000:]
+        assert 'event types not in the menu' in log
+        nb.click('btn_run')                                   # the question comes back and says it
+        assert 'reference : Fp1 → M2' in nb.widget_text()
+
+
+@pytest.mark.tool7
+def test_tool7_the_hypnogram_suffix_is_put_back(t7_data, ids):
+    recorded = json.loads(sidecar_path(t7_data, ids[0]).read_text(encoding='utf-8'))['hypnogram_file'][len(ids[0]):]
+    with NotebookSession(pipeline.T7) as nb:
+        open_tool7(nb, t7_data)
+        nb.set('hypno_suffix', '_other.txt')
+        nb.click('btn_run')
+        nb.click(USE_RECORDED)
+        assert nb.value('hypno_suffix.value') == recorded
+        nb.click('btn_run')
+        assert QUESTION not in nb.widget_text()
+
+
+@pytest.mark.tool8bis
+def test_tool8bis_use_the_recorded_settings_for_a_new_participant(t8bis_data, ids):
+    new, old = ids[3], ids[:3]
+    reports, decisions = t8bis_data / 'reports_rejection_auto', t8bis_data / 'derivatives' / 'rejection_auto'
+    for fid in old:
+        path = reports / f'{fid}_autoreject_decision.tsv'
+        tsv(path).assign(channel_reject_pct=50.0, stages_of_interest='N2+N3').to_csv(path, sep='\t', index=False)
+    forget(reports, new)
+    forget(decisions, new)
+    before = only(t8bis_outputs(t8bis_data), old)
+    with NotebookSession(pipeline.T8BIS) as nb:
+        open_tool8bis(nb, t8bis_data)
+        assert nb.value("S['stage_checks']['R'].value") is True
+        nb.click('btn_run')
+        assert f'3 of the 3 processed participant(s) {QUESTION}' in nb.widget_text()
+        nb.click(USE_RECORDED)
+        log = nb.widget_text()
+        assert PUT_BACK in log and 'channel reject (%) : 20 → 50' in log and 'reference stage R : on → off' in log, log[-2000:]
+        assert 'Done.' not in log                                      # it launches nothing
+        assert nb.value('ft_ch_pct.value') == 50.0 and nb.value("S['stage_checks']['R'].value") is False
+        assert only(t8bis_outputs(t8bis_data), old) == before
+        nb.click('btn_run')                                            # no difference left: the new one is made like the others
+        log = nb.widget_text()
+    assert QUESTION not in log and 'decided=1' in log and 'skipped=3' in log, log[-2000:]
+    made = tsv(reports / f'{new}_autoreject_decision.tsv').iloc[0]
+    assert made['channel_reject_pct'] == 50.0 and made['stages_of_interest'] == 'N2+N3'
+    assert only(t8bis_outputs(t8bis_data), old) == before
+
+
+def edit_computed(data, fid, **psd_changes):
+    """The cfg_json of a _psd_epoch.npz, as if the participant had been computed with these PSD settings."""
+    path = feature_file(data, fid, 'psd_epoch.npz')
+    with np.load(path, allow_pickle=False) as z:
+        arrays = {key: z[key] for key in z.files}
+    computed = json.loads(str(arrays['cfg_json']))
+    computed['psd'].update(psd_changes)
+    arrays['cfg_json'] = np.array(json.dumps(computed))
+    np.savez_compressed(path, **arrays)
+
+
+@pytest.mark.tool9
+def test_tool9_use_the_recorded_settings_for_a_new_participant(t9_data, ids):
+    new, old = ids[3], ids[:3]
+    for fid in old:
+        edit_computed(t9_data, fid, win_s=2.0)
+        path = feature_file(t9_data, fid, 'spectral_settings.json')
+        settings = json.loads(path.read_text(encoding='utf-8'))
+        settings.update(min_epochs=5, stages=[s for s in settings['stages'] if s != 'R'])
+        path.write_text(json.dumps(settings), encoding='utf-8')
+    forget(t9_data / 'derivatives' / 'features_spectral', new)
+    forget(t9_data / 'reports_features_spectral', new)
+    before = only(t9_outputs(t9_data), old)
+    with NotebookSession(pipeline.T9) as nb:
+        open_tool9(nb, t9_data)
+        nb.set('cb_avg_lin', False)
+        nb.set('cb_thirds', False)
+        nb.click('btn_run')
+        assert f'3 of the 3 processed participant(s) {QUESTION}' in nb.widget_text()
+        nb.click(USE_RECORDED)
+        log = nb.widget_text()
+        assert PUT_BACK in log and 'Welch window (s) : 4 → 2' in log and 'min epochs per cell : 20 → 5' in log, log[-2000:]
+        assert 'stage R : on → off' in log and 'night thirds : off → on' in log
+        assert 'processed</b>' not in log and ' processed, ' not in log  # it launches nothing
+        assert nb.value('txt_win_s.value') == 2.0 and nb.value('txt_min_epochs.value') == 5
+        assert nb.value('cb_avg_lin.value') is True and nb.value('cb_thirds.value') is True
+        assert nb.value("stage_checkboxes['R'].value") is False
+        assert only(t9_outputs(t9_data), old) == before
+        nb.click('btn_run')                                            # no difference left: the new one is made like the others
+        log = nb.widget_text()
+    assert QUESTION not in log and '1 processed' in log, log[-2000:]
+    with np.load(feature_file(t9_data, new, 'psd_epoch.npz'), allow_pickle=False) as z:
+        assert json.loads(str(z['cfg_json']))['psd']['win_s'] == 2.0
+    made = json.loads(feature_file(t9_data, new, 'spectral_settings.json').read_text(encoding='utf-8'))
+    assert made['min_epochs'] == 5 and 'R' not in made['stages']
+    assert only(t9_outputs(t9_data), old) == before
+
+
+@pytest.mark.tool9
+def test_tool9_bands_are_put_back_and_what_is_not_recorded_is_named(t9_data, ids):
+    for fid in ids:
+        path = feature_file(t9_data, fid, 'psd_epoch.npz')
+        with np.load(path, allow_pickle=False) as z:
+            arrays = {key: z[key] for key in z.files}
+        computed = json.loads(str(arrays['cfg_json']))
+        computed['bands'] = [band for band in computed['bands'] if band[0] != 'gamma']
+        arrays['cfg_json'] = np.array(json.dumps(computed))
+        np.savez_compressed(path, **arrays)
+        feature_file(t9_data, fid, 'spectral_settings.json').unlink()
+    with NotebookSession(pipeline.T9) as nb:
+        open_tool9(nb, t9_data)
+        nb.click('btn_run')
+        assert 'to recompute: bands' in nb.widget_text()
+        nb.click(USE_RECORDED)
+        log = nb.widget_text()
+        assert 'bands : ' in log and 'written before they were recorded' in log, log[-2000:]
+        assert [band[0] for band in nb.value('get_bands()[0]')] == ['delta', 'theta', 'alpha', 'sigma', 'beta']
+        nb.click('btn_run')
+        assert QUESTION not in nb.widget_text()
+
+
+@pytest.mark.tool9
+def test_tool9_night_thirds_switched_off_leave_no_former_table(t9_data, ids):
+    fid, other = ids[0], ids[1]
+    assert feature_file(t9_data, fid, 'spectral_stage_third.tsv').exists()
+    with NotebookSession(pipeline.T9) as nb:
+        open_tool9(nb, t9_data)
+        select_subset(nb, [fid], skip=True)
+        nb.set('cb_thirds', False)
+        nb.click('btn_run')
+        assert 'to re-aggregate: night thirds : on → off' in nb.widget_text()
+        nb.click('participant_selector.btn_redo_other')
+        assert '1 processed' in nb.widget_text()
+    assert not feature_file(t9_data, fid, 'spectral_stage_third.tsv').exists()
+    assert feature_file(t9_data, other, 'spectral_stage_third.tsv').exists()
