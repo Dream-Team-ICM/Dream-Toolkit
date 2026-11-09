@@ -78,14 +78,19 @@ def lagged_cross_correlation(
 def _load_edf_channels(
     edf_path: str | Path,
     rename: dict[str, str] | None = None,
+    include: list[str] | None = None,
 ) -> tuple[dict[str, np.ndarray], float]:
     """Load EDF channels in SI units, matching SleepFM's current MNE reader.
 
     *rename* maps ``{edf_name: standard_name}`` — when provided, every loaded
     channel whose EDF name appears as a key is emitted under the standard name
     instead.  Channels not in the dict keep their original name.
+
+    *include* — FIX #9: optional list of channel names to load (avoids loading
+    the entire EDF into memory for full PSGs with many unused channels).
     """
-    raw = mne.io.read_raw_edf(edf_path, preload=True, verbose="ERROR")
+    raw = mne.io.read_raw_edf(edf_path, preload=True, verbose="ERROR",
+                               **({'include': include} if include else {}))
     signals = {
         name: raw.get_data(picks=[name])[0].astype(float, copy=False)
         for name in raw.ch_names

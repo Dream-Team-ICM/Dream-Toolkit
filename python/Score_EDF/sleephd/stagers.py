@@ -37,7 +37,8 @@ import pandas as pd
 from .io import NapWindow
 from .signals import EEG_DERIVATIONS, _load_edf_channels
 
-PROBABILITY_COLUMNS = ["Wake", "N1", "N2", "N3", "REM"]
+# FIX #13: import shared constant instead of redefining it in every file
+from .io import PROBABILITY_COLUMNS
 GSSC_EEG = ("C3-M2", "C4-M1", "F3-M2", "F4-M1")
 GSSC_EOG = ("hEOG",)
 YASA_EEG, YASA_EOG, YASA_EMG = "C4-M1", "hEOG", "EMG"
@@ -109,14 +110,16 @@ def infer_gssc(
     def _capturing_vote(logits):
         _captured["logits"] = logits
         return _orig_vote(logits)
+    # FIX #4: wrap monkey-patch in try/finally so original is restored even on exception
     _gssc_mod.loudest_vote = _capturing_vote
-
-    with warnings.catch_warnings(), redirect_stdout(io.StringIO()):
-        warnings.simplefilter("ignore")
-        model = EEGInfer(use_cuda=False)
-        _, times = model.mne_infer(raw, eeg=list(eeg), eog=list(eog), filter=True)
-
-    _gssc_mod.loudest_vote = _orig_vote
+    try:
+        with warnings.catch_warnings(), redirect_stdout(io.StringIO()):
+            warnings.simplefilter("ignore")
+            model = EEGInfer(use_cuda=False)
+            # FIX #14: use a proper variable name instead of _ (which is fragile)
+            labels, times = model.mne_infer(raw, eeg=list(eeg), eog=list(eog), filter=True)
+    finally:
+        _gssc_mod.loudest_vote = _orig_vote
 
     raw_logits = _captured.get("logits")
     if raw_logits is not None and np.ndim(raw_logits) == 3:
@@ -130,7 +133,6 @@ def infer_gssc(
         min_logits = np.array(raw_logits)[min_inds, np.arange(raw_logits.shape[1])]
         probabilities = softmax(min_logits, axis=-1)
     else:
-        labels = _
         n = len(labels)
         probabilities = np.zeros((n, 5))
         probabilities[np.arange(n), labels.astype(int)] = 1.0

@@ -91,7 +91,11 @@ for file in files:
         hypno_name=path_data+os.sep+'Hypno'+os.sep+'HYP '+group_info+os.sep+sub_ID+"P.TXT"
     elif group_info=='VS':
         hypno_name=path_data+os.sep+'Hypno'+os.sep+'HYP '+group_info+os.sep+sub_ID+"S.TXT"
-        
+    else:
+        # FIX #15: hypno_name was undefined for unrecognized groups, causing NameError
+        print(f"... Unknown group '{group_info}' for {file_name}, skipping ...")
+        continue
+
     if os.path.exists(hypno_name):
         expert_hypno = np.loadtxt(hypno_name, dtype=str)
     else:

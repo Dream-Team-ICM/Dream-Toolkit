@@ -134,7 +134,9 @@ def read_curry_header(cdt_path: str) -> dict:
 
 def _read_text(path: str) -> str:
     """Read a file, auto-detecting encoding (UTF-8-BOM, UTF-16, latin-1 fallback)."""
-    raw_bytes = open(path, "rb").read()
+    # FIX #16: use Path.read_bytes() to avoid file handle leak
+    from pathlib import Path as _Path
+    raw_bytes = _Path(path).read_bytes()
     # BOM detection first (faster and more reliable than chardet for these files)
     if raw_bytes[:3] == b"\xef\xbb\xbf":
         return raw_bytes[3:].decode("utf-8")

@@ -130,7 +130,9 @@ def load_events_curry(txt_path: str,
 def _parse_events_txt(txt_path: str,
                       rec_start_dt: datetime.datetime) -> pd.DataFrame:
     # Decode UTF-16 (with or without BOM)
-    raw_bytes = open(txt_path, "rb").read()
+    # FIX #16: use Path.read_bytes() to avoid file handle leak
+    from pathlib import Path as _Path
+    raw_bytes = _Path(txt_path).read_bytes()
     if raw_bytes[:2] in (b"\xff\xfe", b"\xfe\xff"):
         text = raw_bytes.decode("utf-16")
     else:

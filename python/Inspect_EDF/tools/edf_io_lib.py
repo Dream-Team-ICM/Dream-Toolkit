@@ -461,7 +461,8 @@ def _events_df_from_txt(txt_path, rec_start):
         HH:MM:SS , epoch# , stage_FR , event_label_FR , M:SS[.s] , - , - , position
     Encoding varies (UTF-16 with BOM on some exports, UTF-8/ANSI on others) -> the BOM is sniffed.
     Clock times are converted to seconds-from-recording-start (with midnight rollover) using rec_start."""
-    raw = open(txt_path, 'rb').read()
+    # FIX #8: use Path.read_bytes() to avoid file handle leak
+    raw = Path(txt_path).read_bytes()
     if raw[:2] in (b'\xff\xfe', b'\xfe\xff'):
         text = raw.decode('utf-16')
     else:
@@ -577,6 +578,7 @@ def load_events(edf_path, txt_suffix='_ScoredEvents_Export.txt', csv_suffix='_ev
     pre-annotation tool."""
     txt, csv, xml = event_companion_paths(edf_path, txt_suffix, csv_suffix)
     df, source = None, None
+    # FIX #10: log exceptions instead of silently swallowing them
     if txt is not None:
         rec_start = read_edf_start_datetime(edf_path)
         if rec_start is not None:
@@ -584,22 +586,25 @@ def load_events(edf_path, txt_suffix='_ScoredEvents_Export.txt', csv_suffix='_ev
                 d = _events_df_from_txt(txt, rec_start)
                 if d is not None:
                     df, source = d, 'txt'
-            except Exception:
-                pass  # fall through to the CSV
+            except Exception as exc:
+                import logging
+                logging.getLogger(__name__).warning("TXT event parsing failed for %s: %s", edf_path, exc)
     if df is None and csv is not None:
         try:
             d = _events_df_from_csv(csv)
             if d is not None:
                 df, source = d, 'csv'
-        except Exception:
-            pass  # fall through to the XML
+        except Exception as exc:
+            import logging
+            logging.getLogger(__name__).warning("CSV event parsing failed for %s: %s", edf_path, exc)
     if df is None and xml is not None:
         try:
             d = _events_df_from_xml(xml)
             if d is not None:
                 df, source = d, 'xml'
-        except Exception:
-            pass
+        except Exception as exc:
+            import logging
+            logging.getLogger(__name__).warning("XML event parsing failed for %s: %s", edf_path, exc)
     if include_manual:
         # Tool-8 annotations are ADDED to whatever the chain above found (never a replacement).
         manual_path = Path(edf_path).with_name(f'{Path(edf_path).stem}{manual_suffix}')

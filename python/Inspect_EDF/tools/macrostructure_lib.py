@@ -369,7 +369,7 @@ def load_lights_from_summary_txt(path, col='Luminosité'):
     French header, UTF-16 with BOM or UTF-8). Column `col` (accent/case-insensitive match):
     1 = lights ON, 0 = lights OFF. Returns a boolean array (True = ON). Raises when the column
     is missing (the caller falls through to the next source)."""
-    raw = open(path, 'rb').read()
+    raw = Path(path).read_bytes()
     if raw[:2] in (b'\xff\xfe', b'\xfe\xff'):
         text = raw.decode('utf-16')
     else:
@@ -1174,13 +1174,17 @@ def plot_metric_distributions(wide, groups, title):
     return fig
 
 
-def _clock_to_hours(text):
-    """'23:15:00' -> 23.25; after-midnight times shifted by +24 so the night reads left to right."""
+def _clock_to_hours(text, rec_start_hour=None):
+    """'23:15:00' -> 23.25; after-midnight times shifted by +24 so the night reads left to right.
+    FIX #11: when rec_start_hour is provided, rollover is anchored to the recording start
+    instead of assuming all times before noon are post-midnight (which breaks daytime naps)."""
     try:
         hh, mm, ss = (int(x) for x in str(text).split(':'))
     except Exception:
         return np.nan
     h = hh + mm / 60 + ss / 3600
+    if rec_start_hour is not None:
+        return h + 24 if h < rec_start_hour else h
     return h + 24 if h < 12 else h
 
 
