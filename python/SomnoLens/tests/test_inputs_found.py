@@ -1,0 +1,621 @@
+"""Section 1 of the tools: the study folder is the only thing to pick. Each tool
+finds its input files in it (the 'Inputs found' list), each line says where its file comes from, and 'Choose another…'
+picks another one by hand. The Advanced box (output folder, custom stages, output names) says when a default was changed.
+
+Picking the study folder only reads it: only the test that runs tool 5 writes, on a copy."""
+import json
+import os
+import shutil
+from pathlib import Path
+
+import pandas as pd
+import pytest
+
+import pipeline
+from nbdriver import NotebookSession
+
+T0 = 'tools/0_live_explore_1file_voila.ipynb'
+T2 = 'tools/2_select&remap_channels_edf_voila.ipynb'
+T3 = 'tools/3_remap_hypno_voila.ipynb'
+T3BIS = 'tools/3bis_autoscoring_voila.ipynb'
+T4 = 'tools/4_remap_events_edf_voila.ipynb'
+IDS = ('s1', 's2')
+
+
+def line(nb, row):
+    """The text of an input's line in the list (the first child of its row)."""
+    return nb.value(f'{row}.children[0].children[0].value')
+
+
+def shown(nb):
+    """Is the list shown? (its box, after the grey line that waits for the study folder)"""
+    return nb.value('inputs_list.children[1].layout.display') != 'none'
+
+
+def make_study(folder, config='remap_reref_persubject.json', events=True):
+    folder.mkdir()
+    for fid in IDS:
+        (folder / f'{fid}.edf').write_bytes(b'')
+        (folder / f'{fid}_Hypnogram_remapped.txt').write_text('W\n', encoding='utf-8')
+    cp = folder / 'config_param'
+    cp.mkdir()
+    if config:
+        cfg = {fid: {'config': 'config. 1', 'remap': {'C3': 'C3'}, 'ref_channels': ['M2']} for fid in IDS}
+        (cp / config).write_text(json.dumps(cfg), encoding='utf-8')
+    if events:
+        (cp / 'event_remap.json').write_text('{"Arousal": "arousal", "Eveil": "arousal"}', encoding='utf-8')
+    (cp / 'custom_stages.json').write_text('{"custom_stages": ["N4"]}', encoding='utf-8')
+    return folder
+
+
+def write_names(study, **keys):
+    """Names as the tools record them in config_param/file_names.json: key=(value, tool)."""
+    names = {k: {'value': v, 'tool': t, 'saved_at': '2026-11-04 10:00:00'} for k, (v, t) in keys.items()}
+    (study / 'config_param' / 'file_names.json').write_text(json.dumps(names), encoding='utf-8')
+
+
+# ----------------------------------------------------------------------------------------------- tool 7
+def summary(nb):
+    return nb.value('participant_selector.lbl_summary.value')
+
+
+@pytest.mark.tool7
+def test_tool7_first_run_has_no_new_version(tmp_path):
+    study = make_study(tmp_path / 'study')
+    with NotebookSession(pipeline.T7) as nb:
+        nb.pick('fc_edf', study)
+        assert 'preproc_epo (first run): writes <code>derivatives/preproc_epo/</code>' in nb.value('run_line.value')
+        assert nb.value('new_version_box.layout.display') == 'none' and nb.value('run_menu.layout.display') == 'none'
+        assert nb.value('chosen_run()') == ''
+
+
+@pytest.mark.tool7
+def test_tool7_new_version_beside_skip(tmp_path):
+    study = make_study(tmp_path / 'study')
+    make_run(study)
+    (study / 'reports_preproc' / f'{IDS[0]}_preprocessing_report.html').write_text('x', encoding='utf-8')
+    with NotebookSession(pipeline.T7) as nb:
+        nb.pick('fc_edf', study)
+        assert 'preproc_epo (2 participants): continues' in nb.value('run_line.value')
+        assert nb.value('new_version_box.layout.display') == '' and nb.value('run_menu.layout.display') == 'none'
+        assert 'keep the outputs of <code>preproc_epo</code>' in nb.value('new_version_help.value')
+        assert nb.value('box_run_suffix.layout.display') == 'none'
+        nb.click('btn_load')
+        assert '1 already processed' in nb.value('load_info.value') and '<b>1</b> will run' in summary(nb)
+        children = nb.value('[type(c).__name__ for c in participant_selector.widget.children]')
+        assert children[children.index('Checkbox') + 1] == 'VBox'         # right under Skip
+        nb.run("participant_channels['s2']['C3'] = False")                # a channel unticked in the editor
+
+        # ticked: nothing is processed in the new run yet, with no new Scan, and the channels ticked stay
+        nb.set('cb_new_version', True)
+        assert nb.value('txt_run_suffix.value') == '_v2' and nb.value('chosen_run()') == '_v2'
+        assert 'preproc_epo_v2 (new version)' in nb.value('run_line.value')
+        assert 'Writes <code>derivatives/preproc_epo_v2/</code> and <code>reports_preproc_v2/</code>' in nb.value('new_version_info.value')
+        assert '0 already processed' in nb.value('load_info.value') and '<b>2</b> will run' in summary(nb)
+        assert nb.value("participant_channels['s2']['C3']") is False
+        assert 'existing preprocessing report in reports_preproc_v2' in nb.value('existing_reports_info.value')
+
+        # a suffix typed by hand
+        nb.set('txt_run_suffix', 'nonotch')
+        assert nb.value('chosen_run()') == '_nonotch'
+        assert '<code>reports_preproc_nonotch/</code>' in nb.value('new_version_info.value')
+        # refused: not a folder name, or a run that exists; nothing is written
+        for typed, why in (('no notch', 'letters, digits'), ('', 'letters, digits')):
+            nb.set('txt_run_suffix', typed)
+            assert why in nb.value('new_version_info.value') and nb.value('run_line.value') == ''
+        nb.click('btn_run')
+        assert 'letters, digits' in nb.widget_text() and not (study / 'reports_preproc_').exists()
+        make_run(study, 'preproc_epo_v7')
+        nb.set('txt_run_suffix', '_v7')
+        assert 'preproc_epo_v7 already exists' in nb.value('new_version_info.value')
+        nb.click('btn_run')
+        assert 'preproc_epo_v7 already exists' in nb.widget_text()
+        assert not (study / 'derivatives' / 'preproc_epo_v7' / f'{IDS[0]}_preprocessing_params.json').exists()
+        (study / 'reports_preproc_v8').mkdir()                            # interrupted before its first epochs: in no
+        nb.set('txt_run_suffix', '_v8')                                   # menu, so its suffix can be typed again
+        assert nb.value('run_problem()') == '' and 'Writes' in nb.value('new_version_info.value')
+
+        # unticked: back to the run chosen
+        nb.set('cb_new_version', False)
+        assert nb.value('chosen_run()') == '' and '1 already processed' in nb.value('load_info.value')
+
+
+@pytest.mark.tool7
+def test_tool7_exclusions_belong_to_the_run(tmp_path):
+    study = make_study(tmp_path / 'study')
+    make_run(study)
+    registry = study / 'config_param' / 'participant_exclusions.tsv'
+    registry.write_text('file_id\tsource\tdecision\treason\tcomment\tdecided_at\n'
+                        's1\t7_manual\texclude\tfirst run\t\t2026-11-04 10:00:00\n'
+                        's2\t8bis_auto_v2\texclude\tformer second run\t\t2026-11-04 10:00:00\n', encoding='utf-8')
+    with NotebookSession(pipeline.T7) as nb:
+        nb.pick('fc_edf', study)
+        nb.click('btn_load')
+        assert '<b>1</b> excluded' in summary(nb)
+        nb.set('cb_new_version', True)
+        assert nb.value('txt_run_suffix.value') == '_v3'                  # _v2 is still named in the registry
+        assert 'Not carried over: the manual exclusions of <code>preproc_epo</code> (s1)' in nb.value('new_version_info.value')
+        assert 'excluded' not in summary(nb)                              # nobody excluded in the new run
+        nb.set('dd_edit', 's2')
+        nb.set('cb_edit_exclude', True)
+        nb.set('txt_edit_reason', 'new run')
+        nb.click('btn_edit_save')
+        assert '<b>1</b> excluded' in summary(nb)
+        nb.set('cb_new_version', False)
+        assert 's1' in nb.value('participant_selector._excluded') and 's2' not in nb.value('participant_selector._excluded')
+    assert 's2\t7_manual_v3\texclude\tnew run' in registry.read_text(encoding='utf-8')
+
+
+@pytest.mark.tool7
+def test_tool7_several_runs_a_menu_the_most_recent_first(tmp_path):
+    study = make_study(tmp_path / 'study')
+    first = make_run(study, date=1000)
+    second = make_run(study, 'preproc_epo_v2', date=2000)
+    (study / 'reports_preproc_v2' / f'{IDS[0]}_preprocessing_report.html').write_text('x', encoding='utf-8')
+    with NotebookSession(pipeline.T7) as nb:
+        nb.pick('fc_edf', study)
+        assert nb.value('run_menu.layout.display') == '' and nb.value('run_menu.value') == str(second)
+        assert nb.value('chosen_run()') == '_v2' and 'The most recent run is pre-chosen' in nb.value('run_line.value')
+        assert nb.value('txt_run_suffix.value') == '_v3'
+        nb.click('btn_load')
+        assert '1 already processed' in nb.value('load_info.value')
+        nb.set('run_menu', str(first))
+        assert nb.value('chosen_run()') == '' and '0 already processed' in nb.value('load_info.value')
+        assert 'pre-chosen' not in nb.value('run_line.value')
+        assert 'keep the outputs of <code>preproc_epo</code>' in nb.value('new_version_help.value')
+        nb.set('cb_new_version', True)
+        assert nb.value('run_menu.layout.display') == 'none'              # the menu has no effect on a new version
+
+
+@pytest.mark.tool7
+def test_tool7_finds_its_inputs_and_follows_a_file_chosen_by_hand(tmp_path):
+    study = make_study(tmp_path / 'study')
+    with NotebookSession(pipeline.T7) as nb:
+        assert not shown(nb)                                            # nothing to see before the study folder
+        assert nb.value('fc_edf.layout.display') != 'none'              # but its picker
+        nb.pick('fc_edf', study)
+        assert shown(nb)
+        assert nb.value('fc_edf.layout.display') != 'none' and nb.value('fc_out.layout.display') != 'none'
+        assert Path(nb.value('fc_config.selected')) == study / 'config_param' / 'remap_reref_persubject.json'
+        assert Path(nb.value('fc_events.selected')) == study / 'config_param' / 'event_remap.json'
+        assert nb.value('fc_quality.selected') is None
+        assert '(default location)' in line(nb, 'config_row') and '2 participants' in line(nb, 'config_row')
+        assert '2 labels → 1 event types' in line(nb, 'events_row')
+        assert 'not found: no channel is pre-deselected (run tool 6 first)' in line(nb, 'quality_row')
+        assert 'N4' in nb.value('custom_stages_line.value')
+        assert nb.value('advanced.get_title(0)') == 'Advanced'
+
+        # a file chosen by hand wins, and the line says what it holds
+        wrong = study / 'not_a_config.json'
+        wrong.write_text('{"Arousal": "arousal"}', encoding='utf-8')
+        nb.pick('fc_config', wrong)
+        assert '(chosen by hand)' in line(nb, 'config_row') and "no 'remap' key" in line(nb, 'config_row')
+
+        # the Advanced box says when a default was changed
+        nb.set('custom_stages_box', 'N4, N5')
+        assert 'default changed: custom stages' in nb.value('advanced.get_title(0)')
+        assert 'changed in Advanced' in nb.value('custom_stages_line.value')
+        elsewhere = tmp_path / 'elsewhere'
+        elsewhere.mkdir()
+        nb.pick('fc_out', elsewhere)
+        assert 'default changed: output folder, custom stages' in nb.value('advanced.get_title(0)')
+
+
+@pytest.mark.tool7
+def test_tool7_refuses_to_scan_without_a_channel_configuration(tmp_path):
+    study = make_study(tmp_path / 'study', config=None)
+    with NotebookSession(pipeline.T7) as nb:
+        nb.pick('fc_edf', study)
+        assert 'not found: run tool 2 first' in line(nb, 'config_row')
+        nb.click('btn_load')
+        assert 'run tool 2 first' in nb.value('load_info.value')
+
+
+@pytest.mark.tool7
+def test_tool7_finds_the_new_name_and_the_recorded_name(tmp_path):
+    study = make_study(tmp_path / 'study', config='channel_config.json')
+    with NotebookSession(pipeline.T7) as nb:
+        nb.pick('fc_edf', study)
+        assert Path(nb.value('fc_config.selected')) == study / 'config_param' / 'channel_config.json'
+    mine = study / 'config_param' / 'mine.json'
+    mine.write_text('{"s1": {"remap": {}}}', encoding='utf-8')
+    write_names(study, channel_config=('config_param/mine.json', '2'))
+    with NotebookSession(pipeline.T7) as nb:
+        nb.pick('fc_edf', study)
+        assert Path(nb.value('fc_config.selected')) == mine
+        assert '(recorded by tool 2)' in line(nb, 'config_row') and '1 participants' in line(nb, 'config_row')
+
+
+# ----------------------------------------------------------------------------------------------- tool 6
+@pytest.mark.tool6
+def test_tool6_finds_the_channel_configuration(tmp_path):
+    study = make_study(tmp_path / 'study')
+    with NotebookSession(pipeline.T6) as nb:
+        assert not shown(nb)
+        nb.pick('fc_folder', study)
+        assert shown(nb) and nb.value('fc_folder.layout.display') != 'none'
+        assert Path(nb.value('fc_config.selected')) == study / 'config_param' / 'remap_reref_persubject.json'
+        assert '2 participants' in line(nb, 'config_row')
+        assert 'Selected channels' in nb.value('acq_info.value')        # the line that needs the configuration
+        assert 'N4' in nb.value('custom_stages_line.value')
+        nb.set('custom_stages_box', '')
+        assert 'default changed: custom stages' in nb.value('advanced.get_title(0)')
+    study2 = make_study(tmp_path / 'study2', config=None)
+    with NotebookSession(pipeline.T6) as nb:
+        nb.pick('fc_folder', study2)
+        assert 'not found: run tool 2 first' in line(nb, 'config_row')
+        nb.click('btn_run')
+        assert 'run tool 2 first' in nb.widget_text()
+
+
+# ----------------------------------------------------------------------------------------------- tool 5
+@pytest.mark.tool5
+def test_tool5_finds_the_event_remap_and_the_participant_table(tmp_path):
+    study = make_study(tmp_path / 'study')
+    (study / 'participants.tsv').write_text('participant_id\tage\ns1\t30\ns2\t40\n', encoding='utf-8')
+    with NotebookSession(pipeline.T5) as nb:
+        assert not shown(nb)
+        nb.pick('fc_data', study)
+        assert shown(nb) and nb.value('fc_out.layout.display') != 'none'
+        assert Path(nb.value('fc_remap.selected')) == study / 'config_param' / 'event_remap.json'
+        assert Path(nb.value('fc_subj.selected')) == study / 'participants.tsv'
+        assert '2 rows' in line(nb, 'subj_row')
+        assert nb.value('dd_join_col.value') == 'participant_id' and nb.value('dd_join_col.layout.display') == ''
+        assert 'N4' in nb.value('custom_stages_line.value')
+        elsewhere = tmp_path / 'elsewhere'
+        elsewhere.mkdir()
+        nb.pick('fc_out', elsewhere)
+        assert 'default changed: output folder' in nb.value('advanced.get_title(0)')
+    study2 = make_study(tmp_path / 'study2', events=False)
+    with NotebookSession(pipeline.T5) as nb:
+        nb.pick('fc_data', study2)
+        assert nb.value('fc_remap.selected') is None and nb.value('fc_subj.selected') is None
+        assert 'not found: the event indices' in line(nb, 'remap_row')
+        assert nb.value('dd_join_col.layout.display') == 'none'
+
+
+@pytest.mark.tool5
+@pytest.mark.tool5bis
+def test_tool5_notes_its_table_outside_the_study_and_tool5bis_finds_it(chain, tmp_path):
+    """An output folder other than the study folder: tool 5 notes where the table is, and tool 5bis finds it from the
+    study folder alone. Without an output folder nothing is noted (the default place)."""
+    study, out = tmp_path / 'study', tmp_path / 'out'
+    shutil.copytree(chain['data'], study)
+    out.mkdir()
+    names_file = study / 'config_param' / 'file_names.json'
+    assert not names_file.exists()
+    with NotebookSession(pipeline.T5) as nb:
+        nb.pick('fc_data', study)
+        nb.pick('fc_out', out)
+        nb.set('dd_join_col', 'participant_id')
+        nb.click('btn_scan')
+        nb.click('btn_run')
+    table = out / 'reports_features_macrostructure' / 'global_sleep_metrics.tsv'
+    assert table.is_file()
+    assert json.loads(names_file.read_text(encoding='utf-8'))['sleep_metrics_table']['value'] == str(table.resolve())
+    with NotebookSession(pipeline.T5BIS) as nb:
+        nb.pick('fc_data', study)
+        assert Path(nb.value('fc_table.selected')) == table.resolve()
+        assert '(recorded by tool 5)' in line(nb, 'table_row')
+
+
+# --------------------------------------------------------------------------------------------- tool 5bis
+@pytest.mark.tool5bis
+def test_tool5bis_finds_the_table_or_says_to_run_tool_5(tmp_path):
+    study = make_study(tmp_path / 'study')
+    with NotebookSession(pipeline.T5BIS) as nb:
+        assert not shown(nb)
+        nb.pick('fc_data', study)
+        assert 'not found: run tool 5 first' in line(nb, 'table_row')
+        nb.click('btn_load')
+        assert 'Run tool 5 first' in nb.value('lbl_load.value')
+    reports = study / 'reports_features_macrostructure'
+    reports.mkdir()
+    table = reports / 'global_sleep_metrics.tsv'
+    table.write_text('file_id\tTST\ns1\t400\ns2\t420\n', encoding='utf-8')
+    with NotebookSession(pipeline.T5BIS) as nb:
+        nb.pick('fc_data', study)
+        assert Path(nb.value('fc_table.selected')) == table
+        assert '(default location)' in line(nb, 'table_row') and '2 participants' in line(nb, 'table_row')
+
+
+# --------------------------------------------------------------------------------------------- tool 3bis
+@pytest.mark.tool3bis
+def test_tool3bis_finds_the_channel_configuration_and_keeps_the_outputs_in_advanced(tmp_path):
+    study = make_study(tmp_path / 'study', config='channel_config.json')
+    with NotebookSession(T3BIS) as nb:
+        assert not shown(nb)
+        nb.pick('fc_data', study)
+        assert Path(nb.value('fc_config.selected')) == study / 'config_param' / 'channel_config.json'
+        assert nb.value('advanced.get_title(0)') == 'Advanced'
+        nb.set('out_suffix', '_mine.txt')
+        assert 'default changed: GSSC output suffix' in nb.value('advanced.get_title(0)')
+        nb.click('btn_scan')
+        assert 'configured in tool 2' in nb.value('scan_info.value')
+    study2 = make_study(tmp_path / 'study2', config=None)
+    with NotebookSession(T3BIS) as nb:
+        nb.pick('fc_data', study2)
+        nb.click('btn_scan')
+        assert 'run tool 2' in nb.value('scan_info.value')
+
+
+# ----------------------------------------------------------------------------------------------- tool 3
+@pytest.mark.tool3
+def test_tool3_keeps_the_output_suffix_in_advanced(tmp_path):
+    study = make_study(tmp_path / 'study')
+    with NotebookSession(T3) as nb:
+        nb.pick('chooser', study)
+        assert nb.value('output_suffix_box.value') == '_Hypnogram_remapped.txt'     # a study keeps its name
+        assert nb.value('advanced.get_title(0)') == 'Advanced'
+        assert 'custom_stages.json: N4' in nb.value('custom_stages_info.value')   # the field is in the box, the line stays
+        nb.set('output_suffix_box', '_mine.txt')
+        assert 'default changed: output suffix' in nb.value('advanced.get_title(0)')
+        nb.set('custom_stages_box', 'N4, N5')
+        assert 'default changed: output suffix, custom stages' in nb.value('advanced.get_title(0)')
+        assert 'N4, N5 (changed in the Advanced box' in nb.value('custom_stages_info.value')
+
+
+# ----------------------------------------------------------------------------------------------- tool 4
+@pytest.mark.tool4
+def test_tool4_finds_the_mapping_and_keeps_its_name(tmp_path):
+    study = make_study(tmp_path / 'study')
+    with NotebookSession(T4) as nb:
+        assert not shown(nb)
+        nb.pick('chooser', study)
+        assert Path(nb.value('fc_mapping.selected')) == study / 'config_param' / 'event_remap.json'
+        assert '2 labels → 1 event types' in line(nb, 'mapping_row')
+        assert nb.value('fname_text.value') == 'event_remap.json'
+        assert '2 label(s) already mapped' in nb.value('existing_info.value')
+    mine = study / 'config_param' / 'my_events.json'
+    mine.write_text('{"Arousal": "arousal"}', encoding='utf-8')
+    write_names(study, event_remap=('config_param/my_events.json', '4'))
+    with NotebookSession(T4) as nb:
+        nb.pick('chooser', study)
+        assert nb.value('fname_text.value') == 'my_events.json'
+        assert Path(nb.value('fc_mapping.selected')) == mine and '(recorded by tool 4)' in line(nb, 'mapping_row')
+        nb.set('fname_text', 'other.json')
+        assert 'default changed: file name' in nb.value('advanced.get_title(0)')
+    study2 = make_study(tmp_path / 'study2', events=False)
+    with NotebookSession(T4) as nb:
+        nb.pick('chooser', study2)
+        assert nb.value('fc_mapping.selected') is None and 'a new mapping is started' in line(nb, 'mapping_row')
+
+
+# ----------------------------------------------------------------------------------------------- tool 2
+@pytest.mark.tool2
+def test_tool2_names_its_file_channel_config_and_a_study_keeps_its_name(tmp_path):
+    new, old = make_study(tmp_path / 'new', config=None), make_study(tmp_path / 'old')
+    with NotebookSession(T2) as nb:
+        nb.pick('chooser', new)
+        assert nb.value('fname_text.value') == 'channel_config.json'
+        assert Path(nb.value('str(config_json_path(chooser.selected_path))')) == new / 'config_param' / 'channel_config.json'
+        assert '0 / 2 participant(s) already configured' in nb.value('existing_config_info.value')
+        nb.pick('chooser', old)
+        assert nb.value('fname_text.value') == 'remap_reref_persubject.json'
+        assert '2 / 2 participant(s) already configured' in nb.value('existing_config_info.value')
+        assert nb.value('advanced.get_title(0)') == 'Advanced'
+        nb.set('fname_text', 'other.json')
+        assert 'default changed: file name' in nb.value('advanced.get_title(0)')
+        assert '0 / 2 participant(s) already configured' in nb.value('existing_config_info.value')
+    write_names(old, channel_config=('config_param/mine.json', '2'))
+    with NotebookSession(T2) as nb:
+        nb.pick('chooser', old)
+        assert nb.value('fname_text.value') == 'mine.json'
+
+
+# ----------------------------------------------------------------------------------------------- tool 0
+@pytest.mark.tool0
+def test_tool0_finds_the_new_name_like_the_other_tools(tmp_path):
+    study = make_study(tmp_path / 'study', config='channel_config.json')
+    with NotebookSession(T0) as nb:
+        nb.pick('fc_data', study)
+        assert 'channel configuration of tool 2 read (2 participant(s))' in nb.value('html_study.value')
+        assert 'custom stages: N4' in nb.value('html_study.value')
+        assert nb.value('advanced.get_title(0)') == 'Advanced'
+
+
+# --------------------------------------------------------------------------------- tools 8, 8bis and 9
+def make_run(study, run='preproc_epo', reports=True, date=None):
+    """A run of tool 7, as these tools find it: only the file names (and their date) matter until the scan."""
+    folder = study / 'derivatives' / run
+    folder.mkdir(parents=True)
+    for fid in IDS:
+        (folder / f'{fid}_all-epo.fif').write_bytes(b'')
+        if date is not None:
+            os.utime(folder / f'{fid}_all-epo.fif', (date, date))
+    if reports:
+        rep = study / run.replace('preproc_epo', 'reports_preproc')
+        rep.mkdir()
+        for fid in IDS:
+            (rep / f'{fid}_epoch_channel_rejection.tsv').write_text('file_id\n', encoding='utf-8')
+    return folder
+
+
+def make_decision(study, name, date):
+    folder = study / 'derivatives' / name
+    folder.mkdir(parents=True)
+    table = folder / f'{IDS[0]}_epoch_decision.tsv'
+    table.write_text('epoch_idx\n', encoding='utf-8')
+    os.utime(table, (date, date))
+    return folder
+
+
+@pytest.mark.tool8bis
+def test_tool8bis_finds_the_run_and_its_reports(tmp_path):
+    study = make_study(tmp_path / 'study')
+    with NotebookSession(pipeline.T8BIS) as nb:
+        assert not shown(nb)
+        nb.pick('fc_data', study)
+        assert 'not found: run tool 7 first' in line(nb, 'raw_row')       # no run yet
+        nb.click('btn_scan')
+        assert 'run tool 7 first' in nb.value('lbl_scan.value')
+    first = make_run(study)
+    with NotebookSession(pipeline.T8BIS) as nb:
+        nb.pick('fc_data', study)
+        assert nb.value('fc_data.layout.display') != 'none'
+        assert Path(nb.value('fc_raw.selected_path')) == first
+        assert Path(nb.value('fc_reports.selected_path')) == study / 'reports_preproc'
+        assert '(the only run found)' in line(nb, 'raw_row') and '2 participants' in line(nb, 'raw_row')
+        assert '(paired with the epochs folder)' in line(nb, 'reports_row')
+        assert nb.value('run_menu.layout.display') == 'none'
+    second = make_run(study, 'preproc_epo_v2', date=2000)
+    third = make_run(study, 'preproc_epo_v3', reports=False, date=1000)
+    with NotebookSession(pipeline.T8BIS) as nb:
+        nb.pick('fc_data', study)
+        assert nb.value('run_menu.layout.display') == ''
+        assert Path(nb.value('fc_raw.selected_path')) == first and '(the most recent run)' in line(nb, 'raw_row')
+        assert 'derivatives/preproc_epo_v2  (2 participants)' in [o[0] for o in nb.value('list(run_menu.options)')]
+        nb.set('run_menu', str(second))
+        assert Path(nb.value('fc_raw.selected_path')) == second and '(chosen in the menu)' in line(nb, 'raw_row')
+        assert Path(nb.value('fc_reports.selected_path')) == study / 'reports_preproc_v2'
+        nb.click('btn_scan')                                              # the outputs carry the suffix of the run
+        assert 'rejection_auto_v2' in nb.value('lbl_scan.value') and 'reports_rejection_auto_v2' in nb.value('lbl_scan.value')
+        nb.set('run_menu', str(third))                                    # never another run's reports
+        assert nb.value('fc_reports.selected_path') is None and 'not found' in line(nb, 'reports_row')
+        nb.click('btn_scan')
+        assert 'run tool 7 first' in nb.value('lbl_scan.value')
+
+
+@pytest.mark.tool8
+def test_tool8_finds_the_run_and_lists_its_participants(tmp_path):
+    study = make_study(tmp_path / 'study')
+    make_run(study, reports=False)
+    with NotebookSession(pipeline.T8) as nb:
+        assert not shown(nb)
+        nb.pick('fc_data', study)
+        assert nb.value('list(dd_part.options)') == list(IDS)
+        assert '(the only run found)' in line(nb, 'raw_row')
+        assert 'not found: the per-channel flags are recomputed' in line(nb, 'reports_row')   # optional here
+    second = make_run(study, 'preproc_epo_v2')
+    (second / f'{IDS[0]}_all-epo.fif').unlink()
+    with NotebookSession(pipeline.T8) as nb:
+        nb.pick('fc_data', study)
+        nb.set('run_menu', str(second))
+        assert nb.value('list(dd_part.options)') == [IDS[1]]              # the participants follow the run
+        assert Path(nb.value('fc_reports.selected_path')) == study / 'reports_preproc_v2'
+        assert 'rejection_manual_v2' in nb.value('lbl_scan.value')        # the outputs carry the suffix of the run
+        assert 'reports_rejection_manual_v2' in nb.value('lbl_scan.value')
+
+
+@pytest.mark.tool9
+def test_tool9_preselects_the_most_recent_decision(tmp_path):
+    study = make_study(tmp_path / 'study')
+    (study / 'participants.tsv').write_text('participant_id\tage\ns1\t30\ns2\t40\n', encoding='utf-8')
+    raw = make_run(study)
+    with NotebookSession(pipeline.T9) as nb:
+        assert not shown(nb)
+        nb.pick('fc_data', study)
+        assert Path(nb.value('fc_raw.selected_path')) == raw
+        assert nb.value('fc_decision.selected_path') is None
+        assert 'not found: no rejection is applied (run tool 8 or 8bis)' in line(nb, 'decision_row')
+        assert nb.value('decision_menu.layout.display') == 'none'         # nothing to choose but 'none'
+        assert Path(nb.value('fc_subj.selected')) == study / 'participants.tsv'
+        assert nb.value('dd_join_col.value') == 'participant_id'
+        assert 'N4' in nb.value('custom_stages_line.value') and nb.value('advanced.get_title(0)') == 'Advanced'
+        nb.set('txt_custom', 'N4, N5')
+        assert 'default changed: custom stages' in nb.value('advanced.get_title(0)')
+    auto, manual = make_decision(study, 'rejection_auto', 1000), make_decision(study, 'rejection_manual', 2000)
+    with NotebookSession(pipeline.T9) as nb:
+        nb.pick('fc_data', study)
+        assert Path(nb.value('fc_decision.selected_path')) == manual
+        assert '(the most recent decision)' in line(nb, 'decision_row') and '1 participants' in line(nb, 'decision_row')
+        assert nb.value('decision_menu.layout.display') == ''
+        nb.set('decision_menu', str(auto))
+        assert Path(nb.value('fc_decision.selected_path')) == auto and '(chosen in the menu)' in line(nb, 'decision_row')
+        nb.set('decision_menu', '')
+        assert nb.value('fc_decision.selected_path') is None and 'none chosen' in line(nb, 'decision_row')
+        nb.pick('fc_decision', manual)                                    # by hand
+        assert Path(nb.value('fc_decision.selected_path')) == manual and '(chosen by hand)' in line(nb, 'decision_row')
+    with NotebookSession(pipeline.T9) as nb:                              # no study folder: both picked by hand
+        nb.pick('fc_raw', raw)
+        assert nb.value('fc_decision.selected_path') is None
+
+
+@pytest.mark.tool9
+def test_tool9_lists_the_decisions_of_the_run_chosen(tmp_path):
+    study = make_study(tmp_path / 'study')
+    first, second = make_run(study, date=1000), make_run(study, 'preproc_epo_v2', date=2000)
+    auto = make_decision(study, 'rejection_auto', 3000)
+    with NotebookSession(pipeline.T9) as nb:
+        nb.pick('fc_data', study)
+        assert Path(nb.value('fc_raw.selected_path')) == second and '(the most recent run)' in line(nb, 'raw_row')
+        assert nb.value('fc_decision.selected_path') is None              # never the decisions of another run
+        nb.set('run_menu', str(first))
+        assert Path(nb.value('fc_decision.selected_path')) == auto
+    auto_v2 = make_decision(study, 'rejection_auto_v2', 500)
+    with NotebookSession(pipeline.T9) as nb:
+        nb.pick('fc_data', study)
+        assert Path(nb.value('fc_decision.selected_path')) == auto_v2     # older than the other run's: still this one
+        nb.pick('fc_decision', auto)                                      # 'Choose another…' stays possible
+        assert Path(nb.value('fc_decision.selected_path')) == auto
+
+
+# ------------------------------------------------------------------------- the chain's study folder
+@pytest.mark.tool7
+def test_tool7_finds_in_the_chain_study_the_files_the_chain_picks(chain):
+    """With the study folder only, tool 7 selects exactly the files the chain picks by hand (pipeline.run_tool7):
+    its run reads only these selections, so its outputs are the chain's."""
+    data = Path(chain['data'])
+    with NotebookSession(pipeline.T7) as nb:
+        nb.pick('fc_edf', data)
+        assert Path(nb.value('fc_config.selected')) == data / 'config_param' / 'remap_reref_persubject.json'
+        assert Path(nb.value('fc_quality.selected')) == data / 'reports_quality_overview' / 'quality_summary.tsv'
+        assert Path(nb.value('fc_events.selected')) == data / 'config_param' / 'event_remap.json'
+        assert Path(nb.value('str(out_root_path())')) == data
+        for row in ('config_row', 'quality_row', 'events_row'):
+            assert '(default location)' in line(nb, row)
+
+
+@pytest.mark.tool6
+def test_tool6_finds_in_the_chain_study_the_file_the_chain_picks(chain):
+    data = Path(chain['data'])
+    with NotebookSession(pipeline.T6) as nb:
+        nb.pick('fc_folder', data)
+        assert Path(nb.value('fc_config.selected')) == data / 'config_param' / 'remap_reref_persubject.json'
+
+
+@pytest.mark.tool5
+def test_tool5_finds_in_the_chain_study_the_files_the_chain_picks(chain):
+    data = Path(chain['data'])
+    with NotebookSession(pipeline.T5) as nb:
+        nb.pick('fc_data', data)
+        assert Path(nb.value('fc_subj.selected')) == data / 'participants.tsv'
+        assert Path(nb.value('fc_remap.selected')) == data / 'config_param' / 'event_remap.json'
+
+
+@pytest.mark.tool8bis
+def test_tool8bis_finds_in_the_chain_study_the_folders_the_chain_picks(chain):
+    data = Path(chain['data'])
+    with NotebookSession(pipeline.T8BIS) as nb:
+        nb.pick('fc_data', data)
+        assert Path(nb.value('fc_raw.selected_path')) == data / 'derivatives' / 'preproc_epo'
+        assert Path(nb.value('fc_reports.selected_path')) == data / 'reports_preproc'
+
+
+@pytest.mark.tool8
+def test_tool8_finds_in_the_chain_study_the_folders_the_chain_picks(chain):
+    data = Path(chain['data'])
+    with NotebookSession(pipeline.T8) as nb:
+        nb.pick('fc_data', data)
+        assert Path(nb.value('fc_raw.selected_path')) == data / 'derivatives' / 'preproc_epo'
+        assert Path(nb.value('fc_reports.selected_path')) == data / 'reports_preproc'
+
+
+@pytest.mark.tool9
+def test_tool9_finds_in_the_chain_study_the_run_and_a_decision(chain):
+    data = Path(chain['data'])
+    with NotebookSession(pipeline.T9) as nb:
+        nb.pick('fc_data', data)
+        assert Path(nb.value('fc_raw.selected_path')) == data / 'derivatives' / 'preproc_epo'
+        assert Path(nb.value('fc_decision.selected_path')).parent == data / 'derivatives'
+        assert Path(nb.value('fc_subj.selected')) == data / 'participants.tsv'
+
+
+@pytest.mark.tool5bis
+def test_tool5bis_finds_in_the_chain_study_the_table_it_reads(chain):
+    data = Path(chain['data'])
+    table = data / 'reports_features_macrostructure' / 'global_sleep_metrics.tsv'
+    assert len(pd.read_csv(table, sep='\t', dtype={'file_id': str})) > 0
+    with NotebookSession(pipeline.T5BIS) as nb:
+        nb.pick('fc_data', data)
+        assert Path(nb.value('fc_table.selected')) == table
