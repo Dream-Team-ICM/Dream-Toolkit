@@ -246,6 +246,28 @@ case, on a light copy of the test chain's outputs. It checks, for each of the fo
 Tool 7's editor is checked too: a channel unticked by hand comes back unticked, and the reference channel stays ticked, without
 which a reprocessing would change the reference.
 
+### 12. BrainVision recordings
+
+A BrainVision recording is three files (`.vhdr`, `.vmrk`, `.eeg`). The tests write such recordings themselves, with invented
+values, so no real recording is needed. `test_brainvision_lib.py` checks the reader: the signal comes back at the right scale in
+every data format, and a `[Comment]` that is missing, cut short or written differently never costs the recording.
+`test_brainvision_tools.py` runs the inspection tools:
+
+- **Same signal, same result**: the same two synthetic nights go through tool 6 as EDF and as BrainVision. Every metric agrees
+  within 0.1 %, and the same channels are flagged for the same reasons. Only the *at EDF bounds* metric differs, as it should: the
+  format declares no physical range, so it is blank rather than 0 %;
+- **Tool 1** reads the filters, the resolution and the impedances, flags an electrode above the threshold or without a measure (as the
+  file says it: *Out of Range!*, *not connected*), names the online reference and a recording pause, and says *not applicable* for what
+  the format does not have instead of reporting that all is well;
+- **A broken recording stops nothing**: with its `.eeg` gone, it is listed as failed with a clear message, and the others are read
+  (tools 1 and 2);
+- **Tool 2** goes through its whole page: the online reference is listed, a warning appears when it would stay flat, and the JSON test
+  recreates it on the signal;
+- **Tool 6** ticks its high-pass only when the header says the recording has no high-pass at all, and leaves out the online reference.
+
+These tests do not replace a look at real data: at each phase the tools were also run on real recordings, which never enter the
+repository.
+
 ## Smaller checks
 
 | Area | What is checked |
@@ -280,7 +302,8 @@ which a reprocessing would change the reference.
   where the before / after check of section 10 compares the figures too).
 - **Curry recordings.** The Curry twins are checked for consistency with their EDF original and opened in a
   kernel (quick level), but never run on a recording (the Curry test data is 17 GB).
-- **Tool 2** is only opened (too interactive for a useful run), **tool 1bis** checks itself. Tool 0 is
+- **Tool 2** on an EDF study is only opened (too interactive for a useful run; section 12 goes through its page on BrainVision),
+  **tool 1bis** checks itself. Tool 0 is
   checked step by step as its steps are built (tool-0 redesign).
 - **Every option.** The variants cover the main options of tools 6 to 9, not every combination.
 - **The science of the methods.** The tests prove the tools compute what they computed before, or what a

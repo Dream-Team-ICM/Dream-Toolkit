@@ -182,6 +182,36 @@ def test_filters_hardware_and_software_together(tmp_path):
     assert EIO.extract_filter_value(by_name['Respi'], 'HP') is None
 
 
+def test_dc_coupled_needs_the_header_to_say_so(tmp_path):
+    """DC in the hardware and no software high-pass: said by the [Comment]. No [Comment] says nothing about it."""
+    path, _ = full_recording(tmp_path / 'a')
+    header = BV.read_vhdr_header(path)
+    # Respi has its software filter off. The channels with one are not DC-coupled, nor is the online reference (Cz).
+    assert [ch for ch, dc in zip(header['channel'], header['dc_coupled']) if dc] == ['Respi']
+    assert BV.read_vhdr_acquisition(path) == ('500 Hz', '0.01 Hz / none/DC', False)
+    assert BV.read_vhdr_acquisition(path, {'C3', 'Cz'}) == ('500 Hz', '0.01 Hz', False)
+    assert BV.read_vhdr_acquisition(path, {'Respi'}) == ('500 Hz', 'none/DC', True)
+
+    names = ['C3', 'C4']
+    comment = recorder_comment(names, [0.1, 0.1], ['µV', 'µV'], software_low=None)
+    path = write_brainvision(tmp_path / 'b', 'rec', stored_values(2), names, comment=comment)
+    assert BV.read_vhdr_header(path)['dc_coupled'] == [True, True, False]       # the online reference is not a channel
+    assert BV.read_vhdr_acquisition(path) == ('500 Hz', 'none/DC', True)
+
+    path = write_brainvision(tmp_path / 'c', 'rec', stored_values(2), names)
+    assert BV.read_vhdr_header(path)['dc_coupled'] == [False, False]
+    assert BV.read_vhdr_acquisition(path) == ('500 Hz', 'not stated', False)
+
+
+def test_the_binary_format_and_the_channel_table(tmp_path):
+    path, _ = full_recording(tmp_path)
+    header = BV.read_vhdr_header(path)
+    assert header['binary_format'] == 'IEEE_FLOAT_32'
+    table = REC.channel_table(header)
+    assert table['channel'].tolist() == header['channel']
+    assert 'impedance_kohm' not in table.columns
+
+
 def test_a_low_cutoff_in_hz_is_not_converted(tmp_path):
     names = ['C3', 'C4']
     comment = recorder_comment(names, [0.1, 0.1], ['µV', 'µV'], software_low=0.3, low_unit='Hz')
@@ -200,6 +230,7 @@ def test_impedances_and_gradients(tmp_path):
     path, _ = full_recording(tmp_path)
     header = BV.read_vhdr_header(path)
     assert header['impedance_kohm'] == {'Fp1': 4.0, 'C3': None, 'TP9': 11.0, 'Cz': 3.0, 'Gnd': 1.0}
+    assert header['impedance_text'] == {'C3': 'Out of Range!'}
     assert header['impedance_time'] == '12:00:00'
     gradient = dict(zip(header['channel'], header['gradient']))
     assert gradient['ECG'] == (1.0, 'mV/mV') and gradient['Respi'] == (1.0, 'mV/UA') and gradient['C3'] is None
@@ -427,3 +458,9 @@ def test_a_name_in_two_formats_keeps_the_edf_and_says_so(tmp_path):
     touch(tmp_path, 'a.edf', 'data/a.vhdr', 'data/b.vhdr')
     assert [f.name for f in SF.list_recordings(tmp_path)] == ['a.edf', 'b.vhdr']
     assert [f.name for f in SF.recording_name_conflicts(tmp_path)] == ['a.vhdr']
+    assert 'a.vhdr' in SF.recording_conflicts_text(tmp_path)
+
+
+def test_no_conflict_no_text(tmp_path):
+    touch(tmp_path, 'a.edf', 'b.vhdr')
+    assert SF.recording_conflicts_text(tmp_path) == ''

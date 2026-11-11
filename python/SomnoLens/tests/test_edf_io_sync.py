@@ -23,8 +23,7 @@ LIB = ROOT / 'tools' / 'edf_io_lib.py'
 # tool file -> the names it still defines, each a copy of edf_io_lib's
 COPIES = {
     'tools/1bis_anonymize_edf_voila.ipynb': ['detect_encoding'],
-    'tools/2_select&remap_channels_edf_voila.ipynb': ['detect_encoding', 'read_edf_header_custom',
-                                                      'extract_filter_value'],
+    'tools/2_select&remap_channels_edf_voila.ipynb': ['extract_filter_value'],
     'tools/4_remap_events_edf_voila.ipynb': ['_TXT_DUR_RE', 'read_edf_start_datetime', 'event_companion_paths'],
     'tools/6_quality_overview_voila.ipynb': ['drop_suffix_duplicates', 'adapt_remap_dict_to_suffixes',
                                              'get_phys_bounds_uV'],

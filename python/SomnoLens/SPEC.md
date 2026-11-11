@@ -27,8 +27,8 @@ SomnoLens/
 ├── tools/
 │   ├── 0_live_explore_1file_voila.ipynb         # One participant through the whole pipeline (Voila GUI, being rebuilt)
 │   ├── edf_io_lib.py                            # Shared EDF reading (header, channel types, hypnogram, events, context) + custom stages: tools 0, 1, 1bis, 3 and the libraries
-│   ├── brainvision_lib.py                       # BrainVision reading (.vhdr + .vmrk + .eeg), in the shape of the EDF header (being connected to the tools, tools/plan_brainvision.md)
-│   ├── recording_lib.py                         # One way to read a recording, EDF or BrainVision: header, start, signal (being connected to the tools)
+│   ├── brainvision_lib.py                       # BrainVision reading (.vhdr + .vmrk + .eeg), in the shape of the EDF header: tools 1, 2, 3, 6 so far (tools/plan_brainvision.md)
+│   ├── recording_lib.py                         # One way to read a recording, EDF or BrainVision: header, channel table, start, signal: tools 1, 2, 6 so far
 │   ├── study_files_lib.py                       # Names registry (config_param/file_names.json), choice of the companion suffixes, where each input is found: tools 0, 2, 3, 3bis, 4, 5, 5bis, 6, 7 (no EDF reading)
 │   ├── autoscoring_lib.py                       # Tool 3bis step 1 (GSSC, YASA, SleepFM scoring + figures), shared with tool 0
 │   ├── sleepfm_lib.py                           # SleepFM-Clinical for tool 3bis: model download/locate, montage, inference
@@ -319,6 +319,13 @@ test must point it at a copied `preproc_epo`.
   a silent signal, every epoch with ≥ 1 s of burst flagged on Fp1 and no other. Tool 9: alpha W > N2 on O1
   and O1 > Fp1 in W, the N2 spindle peak on C3 (12–14 Hz above 9–11 and 16–20 Hz, dropped channels skipped),
   aperiodic exponent N3 > W. Thresholds sit well under the measured margins (commented in the file).
+- `test_brainvision_lib.py` (quick, recordings written by hand, `tests/brainvision_files.py`): the reader. `test_brainvision_tools.py`
+  (standard, markers `tool1`, `tool2`, `tool3`, `tool6`): the tools on BrainVision. Tool 1: filters, resolution, impedances, the
+  checks *not applicable*, Section 1.3, a recording whose `.eeg` is gone goes to the failed list and the others are read, a pause.
+  Tool 2: the whole page with its default choices (scan, online reference, context menus, *Preview & Save*, Section 7) and a
+  recording it cannot read. Tool 3: hypnograms beside `.vhdr`. Tool 6: the same two nights in EDF and in BrainVision give the same
+  metrics and flags; the high-pass of a DC-coupled recording. They write their recordings themselves, **never `synthetic.py`**:
+  it belongs to `BASE_DEPS`, and changing it would rerun the chain.
 - `test_tools_1_3_4.py` (standard): on a fresh synthetic database. Tool 1: 4 files × 4 channels at 256 Hz,
   the ±50 µV Fp1 of sim01 as bad dynamic range, headers anonymous. Tool 3: a raw Compumedics-style export
   (`0-5 / W / R / ?`, N3 coded `3` or `4`) remaps back to the generated stages, the mid-night `?` listed in
@@ -1315,6 +1322,25 @@ Files where the check cannot be performed (read failures) are already captured i
 
 **Skip + incremental workflow (`1_inspect_edf_voila.ipynb`)**: the Voila inspector decouples folder selection from running. Selecting the study folder only refreshes an info line ("N / M EDF file(s) already inspected": counted against `FULL_summary_table_edf.tsv`). The scan runs on an explicit **Run inspection** button. A **"Skip files already inspected"** checkbox (checked by default) limits the run to EDF files not already in `FULL_summary_table_edf.tsv` (matched on the `path` column, normalized with `os.path.normcase`). All output tables use **merge/replace** semantics instead of being overwritten: rows for files processed this run replace their previous rows and rows for other files are kept, so the tables stay the full cumulative dataset across runs (`FULL_summary_table_edf.tsv` and `failed_edf_read.tsv` merge on file path, the per-channel summary, polarity, dynamic-range, resolution and missing/suspect tables merge on `subject`). The in-notebook **display** (file/EEG counts, channel/sampling-frequency/unit configs, polarity/range/resolution sections) reflects only the files read this run, so a full re-run (skip off) shows everything while an incremental run shows only the new files. TSV outputs are written with `index=False`. The batch `.py` scripts are unchanged.
 
+**BrainVision recordings (2026-11-06, `tools/plan_brainvision.md`)**: the page also lists the `.vhdr`
+(`study_files_lib.list_recordings`) and reads them through `recording_lib.read_header`. The output names keep their `_edf`.
+- The online reference is not inspected as a channel (`in_file` False): Section 1.3 names it.
+- `FULL_summary_table_edf.tsv` gains `resolution`, `impedance_kohm` and `gradient` only when the study holds such a recording,
+  so an EDF study keeps its columns.
+- **Not applicable**, said on the page and flagging nothing: inverted polarity and dynamic range (no physical bounds declared),
+  the resolution when samples are floats (`res_theoretical` is the declared resolution for integer samples only: a float32
+  recording has no fixed step, and its auxiliary channels declare 1 mV), the anonymization check (no patient field, no row in
+  `anonymization_check_edf.tsv`; the page recalls that the `.vmrk` holds the date and the `[Comment]` the amplifier's serial number).
+- **Section 1.3 BrainVision recordings** (only when the study holds some): the online reference (in the file, not in the file,
+  not named), recording pauses (several `New Segment`: the samples no longer follow the clock), no start date, a `[Comment]` MNE
+  stops on, the line on the gain of ECG / EMG on an auxiliary input at `1 mV/mV` (the header does not know an adapter), the
+  impedances (threshold 20 kΩ by default; a text instead of a number, `Out of Range!` or `not connected`, is always listed, as the
+  file writes it, `impedance_text`). Outputs: `recording_notes.tsv`, `impedance_flags.tsv`, merged on `subject`.
+- **A recording that fails is recorded and the run goes on**, as announced: in tools 1 and 2, `except ... as e` deleted the loop
+  counter `e` (and tool 1 did not import `clear_output`), so the first unreadable file stopped the run. Fixed 2026-11-06.
+- The file list is now sorted (`list_recordings`): `FULL_summary_table_edf.tsv` changes its row order only for a study with
+  recordings both in the study folder and in a subfolder.
+
 The `EOG_suspect_edf.tsv` / `ECG_suspect_edf.tsv` tables were renamed from `.csv` for consistency. The archived Jupyter version (`tools/jupyter_notebook/1_inspect_edf.ipynb`, frozen) had the same skip + cumulative-merge behaviour, adapted to its cell-by-cell model, when it was archived.
 
 ### 1bis. EDF Anonymizer (`1bis_anonymize_edf_voila.ipynb`)
@@ -1356,6 +1382,13 @@ the JSON file, 7. Test the JSON file. The sections build themselves (*Cross-cutt
 the scan builds 2, 3 and 7; *Save selection* builds 4; *Save remapping* builds 5; *Save re-reference* builds 6.
 Until then a section shows *Complete section n first.*; a new selection, remapping or re-reference puts the
 sections after it back on hold. The context channels (3) depend on the scan only: a new selection keeps them.
+
+**BrainVision recordings (2026-11-06)**: the scan reads the `.vhdr` through `recording_lib.read_header`, its `transducer_type`
+filling the rule below (`IO` is EOG, the sensors of the auxiliary inputs have no type and stay out of the list). An **online
+reference** the file does not hold (`Reference Channel Name` of the `[Comment]`) is listed as a channel of the configuration, with
+a line saying so: it is recreated (`recording_lib.read_raw`, Section 7 too) when the JSON names it. *Save re-reference* warns
+when it is kept with the method *None*, since it then stays flat. The local copies of `read_edf_header_custom` and
+`detect_encoding` are gone (`tests/test_edf_io_sync.py` adapted).
 
 **Channel detection robustness**: The EDF scan section uses a 3-condition mask to identify EEG/EOG channels:
 1. `transducer_type` contains `EEG`, `AGAGCL ELECTRODE`, or `EOG` (standard acquisition systems)
@@ -2042,6 +2075,21 @@ a value keeps it, `Missing value excludes` behaves, and the notebook executes cl
 
 *(Stable tool: formerly “Phase 1” of the preprocessing pipeline.)*
 Implemented as `tools/6_quality_overview_voila.ipynb`. Produces one `mne.Report` HTML per participant. For each EEG channel: signal amplitude histogram with Savitzky-Golay smooth + peak detection, time series, metrics table, and a YASA hypnospectrogram (0.1–40 Hz bandpass applied per-channel just before plotting). Flags suspect channels for priority inspection. At the end of each run, generates `dataset_overview.html`: a single-page dataset-level summary with statistics and distribution plots per electrode, consumed by Phase 2 to identify channels to exclude.
+
+**BrainVision recordings (2026-11-06)**: three rules, deduced from what the recording says and not from its format, so Curry will
+follow them without anything of its own.
+- **No physical bounds declared** (`phys_bounds_by_name` empty): `bounds_pct` does not exist, blank in the tables rather than 0 %,
+  absent from the metrics and the report, and its threshold row is hidden when the study holds no EDF. The figures are capped at
+  ±500 µV (`quality_lib.DISPLAY_YLIM_UV`, `display_limits(cap_uV=)`), since nothing clips drifts and artefacts.
+- **The header says DC-coupled** (`dc_coupled`: `DC` in the hardware table and no software high-pass, on all the selected channels
+  of a recording): the high-pass starts ticked at 0.1 Hz, its box shown, and a line says why. A blank filter field says nothing:
+  an EDF that leaves it empty, or a `.vhdr` without `[Comment]` (`not stated`), stays unticked. Going back to a study that is not
+  DC-coupled unticks it.
+- **The online reference is left out** (`add_online_reference=False`): this tool does not re-reference, so it would be a flat channel,
+  falsely flagged. The log says so.
+
+Same signal, same metrics: `tests/test_brainvision_tools.py` runs the tool on the same two nights in EDF and in BrainVision (every
+metric within 0.1 %, same `n_peaks`, same flags except `bounds_pct`).
 
 **Shared library (`tools/quality_lib.py`, tool-0 redesign phase 4)**: the computation and the figures live in
 the library, **moved verbatim** and shared with tool 0's step 5 (same code, same numbers). It holds (a) the
@@ -3128,16 +3176,17 @@ a section below. Update this list when an item is done.
 7. Long term: *EDF reading of tools 2, 4, 6, 7 through `edf_io_lib`*, *A Curry twin of tool 0*, *Tool 0: interactive
    canvas for the epoch explorer*, *Event-epoch visualizer (Phase B)*, tool 8's per-(epoch, channel) override.
 
-Still to check by hand, not covered by the tests: a real participant table through tools 5 and 9, tool 2's full *Preview &
-Save* (it writes the channel configuration and the names registry).
+Still to check by hand, not covered by the tests: a real participant table through tools 5 and 9.
 
-Not placed in this order yet: *BrainVision format and one version of each tool* (its plan is under review).
+Not placed in this order yet: *BrainVision format and one version of each tool* (under way).
 
-### BrainVision format and one version of each tool (TODO, plan under review)
+### BrainVision format and one version of each tool (under way)
 
 Read BrainVision recordings (`.vhdr` + `.vmrk` + `.eeg`), first to inspect them and score them automatically, then through
 the whole chain, with **one version of each tool** instead of a third set of twins, and later remove the Curry twins the
-same way. The plan, with what was measured on real recordings, is `tools/plan_brainvision.md`.
+same way. The plan, with what was measured on real recordings, is `tools/plan_brainvision.md`. Done: the reader (phase 1),
+tools 1, 2, 3, 6 (phase 2). **The Curry twins are frozen until their removal (phase 6)**: their notebooks stay as they are and
+their generators are no longer re-run (their match strings no longer apply), so a fix to an EDF tool does not reach them.
 
 ### Task triggers: reading, checks, trigger-locked analyses (TODO, after the slow-wave and spindle extraction)
 

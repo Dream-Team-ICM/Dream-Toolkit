@@ -12,6 +12,7 @@ import datetime
 import math
 import re
 import tempfile
+import warnings
 from pathlib import Path
 
 import mne
@@ -130,11 +131,15 @@ def _table_header_index(lines, pattern, after=0):
 def read_comment_info(text, ch_names):
     """What the [Comment] of a .vhdr says, as a dict: online_reference (name or None), highpass / lowpass / notch (one
     value in Hz or None per channel of `ch_names`: the setting that really limits the signal, hardware and software
-    together), gradient (one (value, unit) or None per channel), impedance_kohm ({electrode: kOhm, None when not
-    measured, e.g. 'Out of Range!'}, from the last measure in the file), impedance_time. Never raises."""
+    together), dc_coupled (one bool per channel: the [Comment] says the hardware has no high-pass and no software filter
+    adds one; False when it says nothing, which is not the same), gradient (one (value, unit) or None per channel),
+    impedance_kohm ({electrode: kOhm, None without a measure}, from the last measure in the file), impedance_text
+    ({electrode: what the file says instead of a number, e.g. 'Out of Range!', 'not connected'}), impedance_time.
+    Never raises."""
     n_ch = len(ch_names)
     info = {'online_reference': None, 'highpass': [None] * n_ch, 'lowpass': [None] * n_ch, 'notch': [None] * n_ch,
-            'gradient': [None] * n_ch, 'impedance_kohm': {}, 'impedance_time': None}
+            'dc_coupled': [False] * n_ch, 'gradient': [None] * n_ch, 'impedance_kohm': {}, 'impedance_text': {},
+            'impedance_time': None}
     if '[Comment]' not in text:
         return info
     comment = text.split('[Comment]', 1)[1]
@@ -158,6 +163,7 @@ def read_comment_info(text, ch_names):
                 if len(tokens) < shift + 3:
                     continue
                 info['highpass'][k] = _in_hz(tokens[shift], low_s)
+                info['dc_coupled'][k] = tokens[shift].upper() == 'DC' or _value_or_none(tokens[shift]) == 0
                 info['lowpass'][k] = _in_hz(tokens[shift + 1], high_s)
                 info['notch'][k] = _value_or_none(tokens[shift + 2])
                 for token in tokens[shift + 3:]:
@@ -180,6 +186,7 @@ def read_comment_info(text, ch_names):
                 low, high = _in_hz(tokens[0], low_s), _in_hz(tokens[1], high_s)
                 if low is not None:
                     info['highpass'][k] = max(low, info['highpass'][k] or 0.0)
+                    info['dc_coupled'][k] = False
                 if high is not None:
                     info['lowpass'][k] = min(high, info['lowpass'][k] or math.inf)
                 if _value_or_none(tokens[2]) is not None:
@@ -189,15 +196,17 @@ def read_comment_info(text, ch_names):
             found = re.match(r'\s*Impedance\s*\[(k?)Ohm\]\s*(?:at\s*(\S+))?', line, re.IGNORECASE)
             if not found:
                 continue
-            block = {}
+            block, texts = {}, {}
             for row in lines[i + 1:]:
                 cell = re.match(r'\s*(.+?)\s*:\s*(.*?)\s*$', row)
                 if not cell:
                     break
                 value = _value_or_none(cell.group(2))
                 block[cell.group(1)] = value if value is None or found.group(1) else value / 1000.0
+                if value is None:
+                    texts[cell.group(1)] = cell.group(2)
             if block:
-                info['impedance_kohm'], info['impedance_time'] = block, found.group(2)
+                info['impedance_kohm'], info['impedance_text'], info['impedance_time'] = block, texts, found.group(2)
     except Exception:
         pass   # a [Comment] written differently must never cost us the recording: what was understood is kept
     return info
@@ -258,9 +267,9 @@ def read_vhdr_header(vhdr_path):
     The online reference is listed last when the [Comment] names it and the file does not hold it (it can be recreated,
     see read_raw_bv): `in_file` is False for that row.
 
-    Added fields: format, sfreq, n_times, duration_s, in_file, resolution, gradient, online_reference, impedance_kohm,
-    impedance_time, n_segments, data_file, comment_warning. Raises when the recording cannot be opened (fatal for this
-    recording)."""
+    Added fields: format, binary_format, sfreq, n_times, duration_s, in_file, resolution, gradient, dc_coupled,
+    online_reference, impedance_kohm, impedance_text, impedance_time, n_segments, data_file, comment_warning. Raises when
+    the recording cannot be opened (fatal for this recording)."""
     vhdr_path = Path(vhdr_path)
     _check_companions(vhdr_path)
     raw, comment_warning = _open_raw(vhdr_path)
@@ -276,6 +285,7 @@ def read_vhdr_header(vhdr_path):
     resolution = [infos.get(ch, (None, 'uV'))[0] for ch in names]
     prefilter = [_prefiltering(h, l, n) for h, l, n in zip(comment['highpass'], comment['lowpass'], comment['notch'])]
     gradient = list(comment['gradient'])
+    dc_coupled = list(comment['dc_coupled'])
     in_file = [True] * len(names)
 
     reference = comment['online_reference']
@@ -285,12 +295,14 @@ def read_vhdr_header(vhdr_path):
         transducers.append('EEG')
         resolution.append(None)
         gradient.append(None)
+        dc_coupled.append(False)
         prefilter.append('online reference, not in the file')
         in_file.append(False)
 
     n_ch = len(names)
     start = vmrk['start_datetime']
     freq = str(int(sfreq)) if sfreq == int(sfreq) else str(sfreq)
+    binary_format = re.search(r'^\s*BinaryFormat\s*=\s*(\S+)', text, re.MULTILINE | re.IGNORECASE)
     return {
         'version': 'BrainVision',
         'patient_id': '',
@@ -313,19 +325,37 @@ def read_vhdr_header(vhdr_path):
         'reserved': [''] * n_ch,
         'sampling_frequency': [freq] * n_ch,
         'format': 'brainvision',
+        'binary_format': binary_format.group(1).upper() if binary_format else '',
         'sfreq': sfreq,
         'n_times': int(raw.n_times),
         'duration_s': raw.n_times / sfreq,
         'in_file': in_file,
         'resolution': resolution,
         'gradient': gradient,
+        'dc_coupled': dc_coupled,
         'online_reference': reference,
         'impedance_kohm': comment['impedance_kohm'],
+        'impedance_text': comment['impedance_text'],
         'impedance_time': comment['impedance_time'],
         'n_segments': vmrk['n_segments'],
         'data_file': _companion_name(text, 'DataFile', vhdr_path),
         'comment_warning': comment_warning,
     }
+
+
+def read_vhdr_acquisition(vhdr_path, keep_labels=None):
+    """What tool 6 shows of a recording, restricted to the channels in `keep_labels` when given: (sampling frequency text,
+    high-pass text, dc_coupled). Written like the texts of its EDF reading: every distinct high-pass, 'none/DC' when the
+    [Comment] says there is none, 'not stated' when it does not say. dc_coupled = all these channels are DC-coupled."""
+    header = read_vhdr_header(vhdr_path)
+    kept = [i for i, ch in enumerate(header['channel'])
+            if header['in_file'][i] and (keep_labels is None or ch in keep_labels)]
+    highpass = set()
+    for i in kept:
+        found = re.search(r'HP:([\d.eE+-]+)Hz', header['prefiltering'][i])
+        highpass.add(f'{float(found.group(1)):g} Hz' if found else 'none/DC' if header['dc_coupled'][i] else 'not stated')
+    return (f"{header['sampling_frequency'][0]} Hz", ' / '.join(sorted(highpass)) if highpass else '?',
+            bool(kept) and all(header['dc_coupled'][i] for i in kept))
 
 
 def _reference_position(name):
@@ -340,7 +370,9 @@ def _add_online_reference(raw, reference):
     data are re-referenced. It needs the data in memory. MNE leaves its position empty, so it is set here, which the
     topographies of tool 8 need."""
     raw.load_data()
-    mne.add_reference_channels(raw, [reference], copy=False)
+    with warnings.catch_warnings():
+        warnings.filterwarnings('ignore', message='Location for this channel')   # the position is set just below
+        mne.add_reference_channels(raw, [reference], copy=False)
     position = _reference_position(reference)
     montage = raw.get_montage()
     if position is None or montage is None:

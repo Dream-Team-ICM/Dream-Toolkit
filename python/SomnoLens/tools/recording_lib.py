@@ -6,6 +6,7 @@ only one format: study_files_lib.list_recordings finds the recordings.
 from pathlib import Path
 
 import mne
+import pandas as pd
 
 from brainvision_lib import read_raw_bv, read_vhdr_header, read_vmrk_info
 from edf_io_lib import read_edf_header_custom, read_edf_start_datetime
@@ -26,6 +27,12 @@ def read_header(path, fallback_encoding=None):
     if file_format(path) == 'edf':
         return read_edf_header_custom(path, fallback_encoding=fallback_encoding)
     return read_vhdr_header(path)
+
+
+def channel_table(header):
+    """A header as a table with one row per channel. The impedances of a BrainVision header are per electrode (the ground
+    is one, it is not a channel), so they stay out of it."""
+    return pd.DataFrame({key: value for key, value in header.items() if not isinstance(value, dict)})
 
 
 def read_start_datetime(path):

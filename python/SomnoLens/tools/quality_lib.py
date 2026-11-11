@@ -35,6 +35,7 @@ def odd(x):
 # Robust percentiles bounding the histogram used for the Savitzky-Golay curve + peak detection
 # (see compute_signal_metrics); keeps the amplitude range from being stretched by rare extremes.
 HIST_CLIP_PCT = (0.5, 99.5)
+DISPLAY_YLIM_UV = 500.0     # see display_limits
 
 
 def compute_signal_metrics(sig_uV, phys_min_uV, phys_max_uV):
@@ -968,6 +969,8 @@ def compute_channel_metrics(raw, sf, file_id, thresholds, hypno_vec, custom_stag
     and of {file_id}_quality_by_stage.tsv."""
     file_rows = []        # this file's per-channel metric rows → {file_id}_quality_metrics.tsv
     file_stage_rows = []  # this file's per-stage rows → {file_id}_quality_by_stage.tsv (if hypnogram)
+    # A format that declares no physical range (no bounds given at all): the metric does not exist, rather than 0 %.
+    has_bounds = bool(phys_bounds_by_name)
 
     # --- Compute metrics for all channels (unfiltered signal) ---
     # Memory: a full-night, high-rate recording with many channels (e.g. 32 EEG @ 1024 Hz)
@@ -987,6 +990,8 @@ def compute_channel_metrics(raw, sf, file_id, thresholds, hypno_vec, custom_stag
         m = compute_signal_metrics(sig_uV, phys_min, phys_max)
         ch_metrics[ch] = m
         ch_flags[ch] = flag_channel(m, thresholds)
+        if not has_bounds:
+            del m['bounds_pct']
         file_rows.append({
             'file_id': file_id,
             'channel': ch,
@@ -997,7 +1002,7 @@ def compute_channel_metrics(raw, sf, file_id, thresholds, hypno_vec, custom_stag
             'p99_abs_uV': m['p99_abs_uV'],
             'p999_abs_uV': m['p999_abs_uV'],
             'flat_pct': m['flat_pct'],
-            'bounds_pct': m['bounds_pct'],
+            'bounds_pct': m['bounds_pct'] if has_bounds else np.nan,
             'hist_extreme_pct': m['hist_extreme_pct'],
             'n_peaks': m['n_peaks'],
             'signal_preparation': signal_preparation,
@@ -1032,7 +1037,7 @@ def compute_channel_metrics(raw, sf, file_id, thresholds, hypno_vec, custom_stag
                     'mean_uV': sm['mean_uV'],
                     'std_uV': sm['std_uV'],
                     'flat_pct': sm['flat_pct'],
-                    'bounds_pct': sm['bounds_pct'],
+                    'bounds_pct': sm['bounds_pct'] if has_bounds else np.nan,
                     'hist_extreme_pct': sm['hist_extreme_pct'],
                     'p99_abs_uV': sm['p99_abs_uV'],
                     'p999_abs_uV': sm['p999_abs_uV'],
@@ -1040,13 +1045,17 @@ def compute_channel_metrics(raw, sf, file_id, thresholds, hypno_vec, custom_stag
     return ch_metrics, ch_flags, file_rows, file_stage_rows
 
 
-def display_limits(ch_metrics, ch_flags):
-    """Shared amplitude limits of the time-series and histogram figures.
+def display_limits(ch_metrics, ch_flags, cap_uV=None):
+    """Shared amplitude limits of the time-series and histogram figures. `cap_uV` caps them at a wide physiological
+    ceiling, for data with no declared range (DISPLAY_YLIM_UV): nothing clips them, so drifts and artefacts can push the
+    p99.9 far past the EEG and crush it, while clean channels still zoom in below the cap.
     Returns (y_lim_ts, x_lim_hist, hist_y_max)."""
     # Shared time-series / histogram amplitude limits from the per-channel p99.9 metric
     # (avoids materialising the whole recording just to take a global percentile).
     _p999 = [m['p999_abs_uV'] for m in ch_metrics.values()]
     y_lim_ts = float(max(_p999)) if _p999 else 1.0
+    if cap_uV is not None:
+        y_lim_ts = min(y_lim_ts, cap_uV)
     x_lim_hist = y_lim_ts
 
     # Shared Y-axis for histograms: computed from non-suspect channels only.

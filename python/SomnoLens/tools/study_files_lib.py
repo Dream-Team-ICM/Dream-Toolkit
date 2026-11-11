@@ -67,6 +67,15 @@ def list_recordings(folder):
     return [f for f in found if f.suffix.lower() == '.edf' or _norm(f.stem) not in edf_names]
 
 
+def recording_conflicts_text(folder):
+    """What a scan says about the recordings list_recordings sets aside, '' when there are none."""
+    conflicts = recording_name_conflicts(folder)
+    if not conflicts:
+        return ''
+    return (f'{len(conflicts)} recording(s) set aside, because an .edf has the same name (a recording is known by its '
+            'name): ' + ', '.join(f.name for f in conflicts))
+
+
 def recording_name_conflicts(folder):
     """The .vhdr files list_recordings leaves out because an .edf has the same name, to warn about at a scan."""
     kept = {_norm(f) for f in list_recordings(folder)}

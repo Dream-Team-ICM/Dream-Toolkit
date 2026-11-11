@@ -1,6 +1,6 @@
 # Plan : format BrainVision (.vhdr, .vmrk, .eeg) et une seule version de chaque outil
 
-**Statut** : version 3 du 2026-11-06, confirmée, phase 1 lancée le même jour. Chaque phase est validée avant la suivante.
+**Statut** : version 3 du 2026-11-06, confirmée. Phase 1 faite, phase 2 à valider. Chaque phase est validée avant la suivante.
 **Objectif immédiat** : pouvoir inspecter ces données et faire l'autoscoring (phases 1 à 3). Le reste de la chaîne suit
 (phase 4), puis l'affichage haute densité (phase 5) et la suppression des jumeaux Curry (phase 6).
 **Principe (ta remarque)** : les outils servent à d'autres jeux de données. Toute règle doit valoir pour n'importe quelle
@@ -61,7 +61,7 @@ Elles servent à vérifier les règles.
 | Événements | format texte Compumedics UTF-16, 205/205 sur la bonne époque depuis `New Segment`, stade identique à l'hypnogramme pour 205/205 | le parseur actuel convient, heure tronquée à la seconde comme en EDF |
 | Pauses | 1 seul `New Segment` par fichier | une pause réelle décalerait l'heure : à détecter |
 | Sommeil | 3 à 7 % des époques, pas de N3 ni de REM | à surveiller (phases 3 et 4) |
-| Impédances | dans le `[Comment]`, `Out of Range!` sur 8 canaux d'un enregistrement | à montrer dans l'outil 1, sans s'y fier seul (voir *Qualité des canaux*) |
+| Impédances | dans le `[Comment]`, un peu avant le début. `Out of Range!` sur 8 canaux d'un enregistrement, `not connected` sur 9 d'un autre, rien sur le 3e. Tous ces canaux EEG sont très bruités (écart-type de 3 400 à 18 000 µV) | à montrer dans l'outil 1 tel que le fichier l'écrit, sans s'y fier seul (voir *Qualité des canaux*) |
 | IO | inutilisable sur 1 enregistrement sur 3 (impédance hors plage, environ 350 µV d'écart-type). Ailleurs, corrélé à F8-F7 (+0,82 sur le plus net), ce qui concorde avec ta confirmation | signalé par le contrôle |
 | EMG | tonus plus fort en éveil qu'en N2 (361 → 277, 1 425 → 200, 665 → 158, à l'échelle du fichier), 95 % de la puissance à 50 Hz en N2 sur un enregistrement (4 époques) | vrai EMG, amplitude anormale, secteur à signaler |
 | ECG | ondes R de 59 à 124 mV, rythme de 70 à 83/min, 54 à 67 % de la puissance à 50 Hz en N2 sur 2 enregistrements sur 3 | vrai ECG, amplitude anormale. SleepFM le reçoit sans filtre (comme Score_EDF) : à regarder en phase 3 |
@@ -139,8 +139,9 @@ dérivation qui l'utilise.
 | Mastoïde morte | la dérivation garde la référence en ligne : mauvaise référence, sans aucun signe visible |
 | Bruit à 50 Hz seul | peu grave sur l'EEG, que les modèles filtrent en dessous |
 
-Une électrode de scoring mauvaise pose le même problème, et l'impédance ne suffit pas : sur un enregistrement sans aucune impédance
-hors plage, C3 et 9 autres canaux sont très bruités. **Le contrôle porte donc sur tous les canaux que les modèles reçoivent.**
+Une électrode de scoring mauvaise pose le même problème, et l'impédance ne suffit pas : sur l'enregistrement dont toutes les impédances
+sont bonnes, 7 canaux sont très bruités pendant l'enregistrement, dont TP9 (corrigé le 2026-11-06 : j'avais d'abord cité C3 sur un autre
+enregistrement, où il est en réalité `not connected`). **Le contrôle porte donc sur tous les canaux que les modèles reçoivent.**
 
 **Le contrôle** (`channel_check_lib.channel_quality_warnings`, tous formats)
 
@@ -162,7 +163,7 @@ hors plage, C3 et 9 autres canaux sont très bruités. **Le contrôle porte donc
 |---|---|
 | 13 EDF locaux (4 à 12 EEG, vraies nuits et défauts injectés) | le canal mort du jeu de test est trouvé sur 100 % des époques, une seule autre alerte (Fp2 sur `100`, 47 %, à regarder) |
 | Défauts non détectés sur ces EDF | clipping, 50 Hz, dérive, quantification, coupure de 30 min, mouvements brefs : le critère vise le bruit durable et les canaux morts. L'outil 6 reste là pour le reste |
-| 3 enregistrements BrainVision, 62 canaux | les 7 canaux EEG à impédance hors plage sont tous trouvés, avec d'autres dont l'impédance était bonne (dont C3 sur un enregistrement). Mastoïdes non signalées (TP9 à 18 % sur l'un). Pas de faux canal mort |
+| 3 enregistrements BrainVision, 62 canaux | les canaux `Out of Range!` et `not connected` sont trouvés, avec d'autres dont l'impédance était bonne. Mastoïdes non signalées (TP9 à 18 % sur l'un). Pas de faux canal mort |
 | Mêmes enregistrements, petit montage de 8 canaux | mêmes conclusions sur ces 8 canaux (O2 sur le premier, C3 sur le deuxième, rien sur le troisième) |
 | Électrodes voisines de la référence en ligne | rapport médian le plus bas de 0,26. C'est pourquoi je propose 0,1 pour *morte* plutôt que le 0,2 de l'essai, à vérifier en phase 3 sur le canal mort |
 
@@ -287,9 +288,16 @@ réponse. Dans toutes les phases, **le golden EDF synthétique ne doit pas bouge
 - **Outil 2** : scan par `read_header`, référence en ligne, détection du contexte, aperçu par `read_raw`.
 - **Outil 3** : découverte des enregistrements seulement.
 - **Outil 6** : bloc de lecture, règles des bornes physiques et du high-pass, référence en ligne laissée de côté.
-- **Tests** : `tests/synthetic.py` écrit aussi un jeu BrainVision. Test d'équivalence : le même signal en EDF et en BrainVision donne
-  les mêmes métriques dans l'outil 6, à la tolérance près. Puis lancement sur les vraies données en `%TEMP%`.
+- **Tests** : `tests/test_brainvision_tools.py` écrit ses enregistrements lui-même, sans toucher à `tests/synthetic.py` (qui relancerait
+  toute la chaîne). Test d'équivalence : le même signal en EDF et en BrainVision donne les mêmes métriques dans l'outil 6, à la
+  tolérance près. Puis lancement sur les vraies données en `%TEMP%`.
 - **Tests proposés** : standard sur `tool1`, `tool2`, `tool3`, `tool6`.
+- **Précisions apportées en faisant** :
+  - le high-pass n'est coché que si le `[Comment]` dit DC : un champ vide ne dit rien, et un EDF au champ vide reste comme avant ;
+  - la résolution n'est vérifiée que pour des échantillons entiers (un float32 n'a pas de pas fixe, et les AUX annoncent 1 mV) ;
+  - **corrigé pour tous les formats** : dans les outils 1 et 2, le premier fichier illisible arrêtait tout le scan (`except ... as e`
+    effaçait le compteur de boucle `e`) ;
+  - **corrigé pour tous les formats** : l'outil 2 proposait `Tp9`, `Ft10`... au lieu de `TP9`, `FT10` (noms absents de sa liste 10-10).
 
 ### Phase 3 : autoscoring (outil 3bis). **Objectif atteint, arrêt pour ton test**
 
@@ -390,7 +398,11 @@ chacun) permettent de la vérifier.
 - **Données compressées ou segmentées** (exports Analyzer) : non couvertes, seul l'enregistrement continu l'est.
 - **Triggers et capteurs de pression** : lus mais inutilisés, voir SPEC *Task triggers*.
 - **Outil 6** : ses drapeaux ne repèrent pas un canal simplement bruité (ils visent les canaux plats, morts, écrêtés ou bimodaux). Y ajouter
-  le critère du contrôle changerait les résultats EDF : ce sera un TODO à part si tu le souhaites.
+  le critère du contrôle changerait les résultats EDF : ce sera un TODO à part si tu le souhaites. Mesuré sur ces 3 enregistrements
+  (2026-11-06) : **aucun des canaux `not connected` n'est signalé** (jusqu'à 18 000 µV d'écart-type), un seul des `Out of Range!`, et
+  **9 canaux corrects sont signalés sur un enregistrement** (`flat_pct` de 3,5 à 5,6 % pour un seuil de 3,5 %, impédances bonnes, écart-type
+  normal). Probablement un effet de la fréquence d'échantillonnage : à 500 Hz, deux échantillons voisins diffèrent souvent de moins de
+  0,06 µV, la tolérance du calcul. Comme ces drapeaux décochent les canaux dans l'outil 7, c'est à regarder avant la phase 4.
 
 ## Sources sur le matériel
 

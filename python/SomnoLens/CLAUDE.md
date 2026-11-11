@@ -373,6 +373,9 @@ The "what to do / what not to break" reminders, grouped by theme. Each points to
   log guards*.
 
 **Curry twins** (→ SPEC *Curry 9 support*)
+- **Frozen until their removal (`tools/plan_brainvision.md`, phases 2 to 6, since 2026-11-06)**: the notebooks stay as they are,
+  and every "re-run the generator" of this file is suspended (their match strings no longer apply). A read of a recording in a
+  tool goes through `tools/recording_lib.py`.
 - **Tool 8's twin = 3 replacements** (`_make_tool8_curry.py`): H1, one prose sentence, and the
   **shared-library import probe** (the EDF notebook probes only `cwd`/`cwd/tools`, which does not resolve
   from `tools_curry/`). Nothing Curry-specific is injected: the high-density support is inherited from the

@@ -3,6 +3,8 @@ participant's stored table different from the run's settings (preparation, flags
 import sys
 from pathlib import Path
 
+import mne
+import numpy as np
 import pandas as pd
 import pytest
 
@@ -42,6 +44,35 @@ def test_signal_preparation_mismatch():
 
 
 THRESHOLDS = {'flat_pct': 3.5, 'bounds_pct': 1.0, 'n_peaks': 2, 'std_low': 5.0, 'hist_extreme_pct': 1.0}
+
+
+def _one_channel_raw(amplitude_uV=50.0, n=5000, sf=100.0):
+    data = np.random.default_rng(0).normal(0, amplitude_uV, (1, n)) * 1e-6
+    return mne.io.RawArray(data, mne.create_info(['C3'], sf, 'eeg'), verbose='ERROR')
+
+
+def test_no_declared_range_means_no_bounds_metric():
+    """With no bounds at all the metric does not exist (blank in the tables, not 0 %), and it flags nothing. Given bounds,
+    it stays as it was."""
+    raw = _one_channel_raw()
+    metrics, flags, rows, _ = QL.compute_channel_metrics(raw, 100.0, 'p', THRESHOLDS, None, [], {}, {})
+    assert 'bounds_pct' not in metrics['C3'] and np.isnan(rows[0]['bounds_pct'])
+    assert not any('bounds_pct' in reason for reason in flags['C3'])
+    assert 'At EDF bounds' not in QL.build_avg_metrics_html(metrics, ['C3'])
+
+    metrics, flags, rows, _ = QL.compute_channel_metrics(raw, 100.0, 'p', THRESHOLDS, None, [], {'C3': (-10.0, 10.0)}, {})
+    assert metrics['C3']['bounds_pct'] > 50 and rows[0]['bounds_pct'] == metrics['C3']['bounds_pct']
+    assert any('bounds_pct' in reason for reason in flags['C3'])
+
+
+def test_display_limits_cap_only_when_asked():
+    """Nothing clips a recording with no declared range, so its amplitude scale is capped. Without a cap, as before."""
+    metrics = {'C3': {'p999_abs_uV': 2000.0, 'histo': np.array([1, 2])}, 'O1': {'p999_abs_uV': 40.0, 'histo': np.array([1])}}
+    assert QL.display_limits(metrics, {'C3': [], 'O1': []})[0] == 2000.0
+    y_lim, x_lim, _ = QL.display_limits(metrics, {'C3': [], 'O1': []}, cap_uV=QL.DISPLAY_YLIM_UV)
+    assert (y_lim, x_lim) == (500.0, 500.0)
+    clean = {'O1': metrics['O1']}
+    assert QL.display_limits(clean, {'O1': []}, cap_uV=QL.DISPLAY_YLIM_UV)[0] == 40.0
 
 
 def stored_table(**changes):
