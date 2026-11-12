@@ -10,7 +10,11 @@ Tool 3bis keeps its user interface and everything it writes; tool 0 calls the sa
 
 EEG reference: each model is fed the derivations it was trained on, the contralateral mastoid (C3-M2, C4-M1...,
 REFERENCE_CONTRALATERAL, the default), whatever reference tool 2 declared for the other tools; tool 2's
-reference stays available (REFERENCE_DECLARED).
+reference stays available (REFERENCE_DECLARED). An EOG recorded against the online reference (an EOG electrode on
+an EEG input of a BrainVision amplifier) gets the reference of the EEG (eog_reference).
+
+Recordings are read through recording_lib (EDF, BrainVision); the EDF reading is the one this module always did.
+The channels each model receives are checked (channel_check_lib): warnings only, nothing is changed.
 
 GSSC is pinned to 0.0.9: `gssc_combination_logits` reproduces gssc's own scoring loop (see SPEC §3bis). Without
 torch / gssc the module still imports (GSSC_OK = False, GSSC_MSG says how to install them), so the plots and
@@ -30,8 +34,10 @@ import matplotlib.pyplot as plt
 import mne
 from sklearn.metrics import accuracy_score, cohen_kappa_score, f1_score, confusion_matrix
 from edf_io_lib import (   # one copy, in edf_io_lib (same folder)
-    CUSTOM_STAGE_PALETTE, load_custom_stages, drop_suffix_duplicates, adapt_remap_dict_to_suffixes, read_edf_start_datetime, load_json_lenient,
+    CUSTOM_STAGE_PALETTE, load_custom_stages, drop_suffix_duplicates, adapt_remap_dict_to_suffixes, load_json_lenient,
 )
+import recording_lib as RL
+import channel_check_lib as CC
 
 # GSSC and torch are imported apart: without them nothing can be scored, but the rest still works.
 # torch >= 2.6 loads model files with weights_only=True by default, which refuses the weights shipped
@@ -118,21 +124,21 @@ EOG_MODES = ['L − R bipolar', 'L and R separately', 'Left only', 'Right only',
 REFERENCE_CONTRALATERAL = 'Contralateral mastoid (as the models were trained)'
 REFERENCE_DECLARED = 'As declared in tool 2'
 REFERENCE_OPTIONS = [REFERENCE_CONTRALATERAL, REFERENCE_DECLARED]
-LEFT_MASTOIDS = ('M1', 'A1')        # 10-20 names of the left mastoid / earlobe
-RIGHT_MASTOIDS = ('M2', 'A2')
-
-
-def list_edf(folder):
-    return [f for f in sorted(Path(folder).rglob('*'))
-            if f.suffix.lower() == '.edf' and not f.name.startswith('._')]
+# 10-20 names of the left mastoid / earlobe, then the 10-10 electrode over the mastoid (a cap without M1 / M2). The
+# first one found is used, so a recording with M1 / M2 never takes TP9 / TP10.
+LEFT_MASTOIDS = ('M1', 'A1', 'TP9')
+RIGHT_MASTOIDS = ('M2', 'A2', 'TP10')
 
 
 def eeg_options(cfg_entry):
-    """Harmonized EEG names usable for scoring: the remap targets minus the reference and the EOG."""
+    """Harmonized EEG names usable for scoring: the remap targets minus the reference, the mastoids, the EOG and the
+    channels tool 2 declared as context channels (EOG, chin EMG, ECG)."""
     ref = cfg_entry.get('ref_channels', [])
     ref = ref if isinstance(ref, list) else []
-    return [ch for ch in cfg_entry.get('remap', {}).values()
-            if ch not in ref and not EOG_NAME_RE.search(ch)]
+    context = set((cfg_entry.get('context_channels') or {}).values())
+    mastoids = set(LEFT_MASTOIDS + RIGHT_MASTOIDS)
+    return [ch for orig, ch in cfg_entry.get('remap', {}).items()
+            if ch not in ref and not EOG_NAME_RE.search(ch) and ch.upper() not in mastoids and orig not in context]
 
 
 def electrode_side(ch):
@@ -172,27 +178,53 @@ def derivation_label(ch, refs):
 def reference_text(reference, refs_by_ch, cfg_entry):
     """How the EEG was referenced, for the parameters file and the report."""
     if reference == REFERENCE_CONTRALATERAL and refs_by_ch:
-        return 'contralateral mastoid: ' + ', '.join(derivation_label(ch, r) for ch, r in refs_by_ch.items())
+        text = 'contralateral mastoid: ' + ', '.join(derivation_label(ch, r) for ch, r in refs_by_ch.items())
+        # the labels say M1 / M2: name the electrodes that stand for them when they are not M1 / M2 / A1 / A2
+        stand_ins = {('M1' if m.upper() in LEFT_MASTOIDS else 'M2'): m for r in refs_by_ch.values() for m in r
+                     if m.upper() not in ('M1', 'M2', 'A1', 'A2')}
+        if stand_ins:
+            text += ' (' + ', '.join(f'{k} = {v}' for k, v in sorted(stand_ins.items())) + ')'
+        return text
     return f'as declared in tool 2: {cfg_entry.get("ref_channels", [])}'
+
+
+def _read_configured(path, cfg_entry):
+    """Every channel of tool 2's configuration, opened lazily under its harmonized name (for an EDF, the read this
+    module always did). A BrainVision online reference absent from the file is left out of this read, since
+    recreating it loads every channel into memory: its harmonized name is returned apart (None when there is none,
+    always for an EDF), for _load_channels. Returns (raw, online reference)."""
+    remap = cfg_entry.get('remap', {})
+    raw = RL.read_raw(path, include=list(remap.keys()), add_online_reference=False)
+    raw, _ = drop_suffix_duplicates(raw)
+    raw.rename_channels(adapt_remap_dict_to_suffixes(raw, remap))
+    reference, _ = RL.online_reference(path)
+    online = remap.get(reference) if reference in remap else None
+    return raw, (online if online not in raw.ch_names else None)
+
+
+def _load_channels(raw, keep, online):
+    """`raw` reduced to the channels `keep` and loaded, the online reference `online` recreated when `keep` names it."""
+    raw.pick([ch for ch in keep if ch != online])
+    raw.load_data()
+    if online is not None and online in keep:
+        RL.recreate_online_reference(raw, online)
+    return raw
 
 
 def load_eeg_contralateral(edf_path, cfg_entry, wanted):
     """EEG channels `wanted` (harmonized names), each referenced to its contralateral mastoid.
     Returns (raw, present, refs_by_ch, problem): problem is a message (raw None) when a mastoid is missing."""
-    raw = mne.io.read_raw_edf(str(edf_path), preload=False, encoding='latin-1',
-                              include=list(cfg_entry.get('remap', {}).keys()), verbose=False)
-    raw, _ = drop_suffix_duplicates(raw)
-    raw.rename_channels(adapt_remap_dict_to_suffixes(raw, cfg_entry.get('remap', {})))
-    present = [ch for ch in wanted if ch in raw.ch_names]
+    raw, online = _read_configured(edf_path, cfg_entry)
+    names = raw.ch_names + ([online] if online else [])
+    present = [ch for ch in wanted if ch in names]
     if not present:
         return None, [], {}, ''
-    refs = {ch: contralateral_refs(ch, raw.ch_names) for ch in present}
+    refs = {ch: contralateral_refs(ch, names) for ch in present}
     lacking = [ch for ch, r in refs.items() if not r]
     if lacking:
-        return None, present, {}, f'no contralateral mastoid (M1/A1, M2/A2) for {", ".join(lacking)}'
+        return None, present, {}, f'no contralateral mastoid (M1/A1/TP9, M2/A2/TP10) for {", ".join(lacking)}'
     needed = present + sorted({m for r in refs.values() for m in r} - set(present))
-    raw.pick(needed)
-    raw.load_data()
+    raw = _load_channels(raw, needed, online)
     raw.set_channel_types({ch: 'eeg' for ch in raw.ch_names}, verbose=False)
     groups = {tuple(r) for r in refs.values()}
     if len(groups) == 1:
@@ -210,21 +242,18 @@ def load_eeg_contralateral(edf_path, cfg_entry, wanted):
 def load_eeg(edf_path, cfg_entry, wanted):
     """EEG channels `wanted` (harmonized names), re-referenced as declared in tool 2.
     Returns (raw, present) where `present` lists the wanted channels found."""
-    raw = mne.io.read_raw_edf(str(edf_path), preload=False, encoding='latin-1',
-                              include=list(cfg_entry.get('remap', {}).keys()), verbose=False)
-    raw, _ = drop_suffix_duplicates(raw)
-    raw.rename_channels(adapt_remap_dict_to_suffixes(raw, cfg_entry.get('remap', {})))
+    raw, online = _read_configured(edf_path, cfg_entry)
+    names = raw.ch_names + ([online] if online else [])
     ref = cfg_entry.get('ref_channels', [])
-    present = [ch for ch in wanted if ch in raw.ch_names]
+    present = [ch for ch in wanted if ch in names]
     if not present:
         return None, []
-    ref_present = [ch for ch in ref if ch in raw.ch_names] if isinstance(ref, list) else []
+    ref_present = [ch for ch in ref if ch in names] if isinstance(ref, list) else []
     if ref == 'average':
-        keep = [ch for ch in raw.ch_names if not EOG_NAME_RE.search(ch)]   # average of every EEG
+        keep = [ch for ch in names if not EOG_NAME_RE.search(ch)]   # average of every EEG
     else:
         keep = present + [ch for ch in ref_present if ch not in present]
-    raw.pick(keep)
-    raw.load_data()
+    raw = _load_channels(raw, keep, online)
     raw.set_channel_types({ch: 'eeg' for ch in raw.ch_names}, verbose=False)
     # GSSC was trained on referenced derivations (e.g. C3-M2): apply tool 2's reference.
     if ref == 'average':
@@ -235,9 +264,56 @@ def load_eeg(edf_path, cfg_entry, wanted):
     return raw, present
 
 
-def load_eog(edf_path, cfg_entry, sfreq, n_times, mode):
-    """EOG from tool 2's context channels, at the EEG rate and length.
-    Returns (data (n_ch, n_times) in V, names, note)."""
+def _reference_words(refs):
+    """'TP9', 'mean of TP9, TP10', 'average of 63 EEG channels': the reference of a derivation, in a report."""
+    if len(refs) == 1:
+        return refs[0]
+    return f'mean of {", ".join(refs)}' if len(refs) <= 3 else f'average of {len(refs)} EEG channels'
+
+
+def eog_reference(path, cfg_entry, eog, reference, bipolar_pair=False):
+    """How each EOG is referenced for the models: ({label: harmonized names of the channels whose mean is subtracted},
+    description for the parameters file and the report ('' when every EOG is left as recorded), notes).
+    `eog` = {label: original name}, label 'EOG-L' (left eye) or 'EOG-R' (right eye).
+
+    An EOG electrode on an EEG input is recorded against the online reference (Cz on many 10-10 caps): it then also
+    holds the EEG of that electrode, inverted (spindles, K-complexes and slow waves are large at the vertex), which the
+    models never saw: they learnt on E1-M2 / E2-M1. Subtracting a mastoid removes it: (eye - Cz) - (M - Cz) = eye - M.
+    Such an EOG gets the reference of the EEG: the mastoid of the other side with the contralateral reference (left eye
+    on M2, right eye on M1), tool 2's reference otherwise. Left as recorded: an EOG on an auxiliary (already bipolar)
+    input; an EDF, whose header does not say against what a channel was recorded; the L - R derivation of two EOG
+    (`bipolar_pair`: the common term cancels); and an EOG without a mastoid of the other side (said in the notes)."""
+    online, on_reference = RL.online_reference(path)
+    eog = {label: orig for label, orig in eog.items() if orig in on_reference}
+    if not eog or bipolar_pair:
+        return {}, '', []
+    names = list(cfg_entry.get('remap', {}).values())
+    upper = {n.upper(): n for n in names}
+    declared = cfg_entry.get('ref_channels', [])
+    refs, notes = {}, []
+    for label, orig in eog.items():
+        if reference == REFERENCE_CONTRALATERAL:
+            other_side = RIGHT_MASTOIDS if label == 'EOG-L' else LEFT_MASTOIDS
+            mastoid = next((upper[m] for m in other_side if m in upper), None)
+            if mastoid is None:
+                notes.append(f'{label} ({orig}) is recorded against the online reference {online} and no mastoid of '
+                             'the other side is configured in tool 2: used as recorded')
+            else:
+                refs[label] = [mastoid]
+        elif declared == 'average':
+            refs[label] = [ch for ch in names if not EOG_NAME_RE.search(ch)]
+        elif isinstance(declared, list) and declared:
+            refs[label] = [ch for ch in declared if ch in names]
+        # tool 2 declared no reference: the EEG stays against the online reference, and so does the EOG
+    description = '; '.join(f'{label} = {eog[label]} - {_reference_words(r)}' for label, r in refs.items() if r)
+    if description:
+        description += f' ({", ".join(eog[label] for label in refs)} recorded against the online reference {online})'
+    return {label: r for label, r in refs.items() if r}, description, notes
+
+
+def load_eog(edf_path, cfg_entry, sfreq, n_times, mode, reference=REFERENCE_CONTRALATERAL):
+    """EOG from tool 2's context channels, at the EEG rate and length, referenced by eog_reference.
+    Returns (data (n_ch, n_times) in V, names, notes, EOG reference description)."""
     ctx = cfg_entry.get('context_channels') or {}
     sides = {'EOG-L': ctx.get('eog_left'), 'EOG-R': ctx.get('eog_right')}
     if mode in ('Left only', 'Right only'):
@@ -245,20 +321,27 @@ def load_eog(edf_path, cfg_entry, sfreq, n_times, mode):
         sides = {side: sides[side]}
     sides = {k: v for k, v in sides.items() if v}
     if mode == 'None':
-        return None, [], 'EOG not used (EOG mode = None)'
+        return None, [], ['EOG not used (EOG mode = None)'], ''
     if not sides and mode in ('Left only', 'Right only'):
-        return None, [], f'{mode.split()[0].lower()} EOG not declared in tool 2 (context channels): scored on EEG only'
+        return None, [], [f'{mode.split()[0].lower()} EOG not declared in tool 2 (context channels): scored on EEG only'], ''
     if not sides:
-        return None, [], 'no EOG declared in tool 2 (context channels): scored on EEG only'
+        return None, [], ['no EOG declared in tool 2 (context channels): scored on EEG only'], ''
+    refs, eog_ref, notes = eog_reference(edf_path, cfg_entry, sides, reference,
+                                         bipolar_pair=mode == 'L − R bipolar' and len(sides) == 2)
+    inverse = {target: orig for orig, target in cfg_entry.get('remap', {}).items()}
+    ref_orig = [inverse[h] for h in dict.fromkeys(h for r in refs.values() for h in r) if h in inverse]
     # Read the EOG apart from the EEG: one read with both would upsample everything to the fastest rate.
-    eog = mne.io.read_raw_edf(str(edf_path), preload=False, encoding='latin-1',
-                              include=list(sides.values()), verbose=False)
-    eog, _ = drop_suffix_duplicates(eog)
-    found = {k: v if v in eog.ch_names else f'{v}-0' for k, v in sides.items()}
+    try:
+        eog = RL.read_raw(edf_path, include=list(sides.values()) + ref_orig)
+    except ValueError:          # none of these channels in the file (the BrainVision reader says so)
+        eog = None
+    if eog is not None:
+        eog, _ = drop_suffix_duplicates(eog)
+    found = {k: v if v in eog.ch_names else f'{v}-0' for k, v in sides.items()} if eog is not None else {}
     found = {k: v for k, v in found.items() if v in eog.ch_names}
     if not found:
-        return None, [], f'declared EOG {list(sides.values())} not found in the EDF: scored on EEG only'
-    eog.pick(list(found.values()))
+        return None, [], notes + [f'declared EOG {list(sides.values())} not found in the recording: scored on EEG only'], ''
+    eog.pick(list(found.values()) + [o for o in ref_orig if o in eog.ch_names and o not in found.values()])
     eog.load_data()
     if not np.isclose(eog.info['sfreq'], sfreq):
         eog.resample(sfreq, npad='auto', verbose=False)
@@ -268,14 +351,19 @@ def load_eog(edf_path, cfg_entry, sfreq, n_times, mode):
         data = data[:, :n_times]
     else:
         data = np.pad(data, ((0, 0), (0, n_times - data.shape[1])))
-    rows = {k: data[i] for i, k in enumerate(found)}
+    by_name = dict(zip(eog.ch_names, data))
+    rows = {}
+    for k, ch in found.items():
+        ref = [inverse[h] for h in refs.get(k, []) if h in inverse and inverse[h] in by_name]
+        rows[k] = by_name[ch] - np.mean([by_name[o] for o in ref], axis=0) if ref else by_name[ch]
     if mode in ('Left only', 'Right only'):
-        return np.vstack(list(rows.values())), list(rows), ''
+        return np.vstack(list(rows.values())), list(rows), notes, eog_ref
     if mode == 'L − R bipolar' and len(rows) == 2:
         # The L−R derivation doubles the conjugate eye movements and cancels the EEG common to both.
-        return (rows['EOG-L'] - rows['EOG-R'])[None, :], ['EOG L-R'], ''
-    note = '' if len(rows) == 2 else f'only {list(rows)[0]} found: used alone'
-    return np.vstack(list(rows.values())), list(rows), note
+        return (rows['EOG-L'] - rows['EOG-R'])[None, :], ['EOG L-R'], notes, eog_ref
+    if len(rows) != 2:
+        notes.append(f'only {list(rows)[0]} found: used alone')
+    return np.vstack(list(rows.values())), list(rows), notes, eog_ref
 
 
 def gssc_combination_logits(infer, inst, eeg_names, eog_names):
@@ -375,7 +463,7 @@ def _hours(n):
 def recording_start(edf_path):
     """Recording start usable as a clock time, or None. 01.01.85 00.00.00 is the EDF+ placeholder of an
     unknown (anonymised) start date and time, not a night starting at midnight: treated as unknown."""
-    dt = read_edf_start_datetime(edf_path)
+    dt = RL.read_start_datetime(edf_path)
     if dt is None or dt == datetime.datetime(1985, 1, 1, 0, 0, 0):
         return None
     return dt
@@ -726,24 +814,63 @@ def save_report_html(path, title, items):
 def load_eeg_for_models(edf_path, cfg_entry, wanted, reference):
     """EEG `wanted` with the reference chosen for the models. Contralateral mastoid by default; a participant
     without the mastoid needed falls back to tool 2's reference, said in the notes.
-    Returns (raw, present, reference description, notes)."""
+    Returns (raw, present, reference description, notes, {electrode: its reference channels})."""
+    declared = cfg_entry.get('ref_channels', [])
+    declared = declared if isinstance(declared, list) else []
     if reference == REFERENCE_CONTRALATERAL:
         raw, present, refs, problem = load_eeg_contralateral(edf_path, cfg_entry, wanted)
         if not problem:
-            return raw, present, reference_text(reference, refs, cfg_entry), []
+            return raw, present, reference_text(reference, refs, cfg_entry), [], refs
         raw, present = load_eeg(edf_path, cfg_entry, wanted)
         return (raw, present, reference_text(REFERENCE_DECLARED, {}, cfg_entry) + ' (fallback)',
-                [f'{problem}: reference declared in tool 2 used instead'])
+                [f'{problem}: reference declared in tool 2 used instead'], {ch: declared for ch in present})
     raw, present = load_eeg(edf_path, cfg_entry, wanted)
-    return raw, present, reference_text(REFERENCE_DECLARED, {}, cfg_entry), []
+    return raw, present, reference_text(REFERENCE_DECLARED, {}, cfg_entry), [], {ch: declared for ch in present}
+
+
+def eog_used(cfg_entry, eog_mode):
+    """{label: original name} of the EOG an EOG mode (EOG_MODES, or YASA's 'Left' / 'Right' / 'None') uses."""
+    ctx = cfg_entry.get('context_channels') or {}
+    sides = {'EOG-L': ctx.get('eog_left'), 'EOG-R': ctx.get('eog_right')}
+    if eog_mode in ('Left only', 'Left'):
+        sides = {'EOG-L': sides['EOG-L']}
+    elif eog_mode in ('Right only', 'Right'):
+        sides = {'EOG-R': sides['EOG-R']}
+    elif eog_mode == 'None':
+        sides = {}
+    return {label: orig for label, orig in sides.items() if orig}
+
+
+def channel_checks(path, cfg_entry, refs_by_ch, eog, context_roles=()):
+    """The checks (channel_check_lib) of what one model receives: its EEG electrodes and their reference channels
+    (refs_by_ch, a reference of more than 2 channels, e.g. an average, is not checked channel by channel), its EOG
+    ({label: original name}) and its context channels ('ecg', 'emg'). Each EEG channel is compared with the EEG channels
+    of tool 2's configuration. Warnings only; never raises (a check that fails is said in the list)."""
+    checked = {ch: 'electrode' for ch in refs_by_ch}
+    for ch, refs in refs_by_ch.items():
+        for r in (refs if refs and len(refs) <= 2 else []):
+            if r not in refs_by_ch:
+                users = [c for c, rs in refs_by_ch.items() if rs and r in rs]
+                checked[r] = 'reference of ' + ', '.join(users)
+    try:
+        online, _ = RL.online_reference(path)
+        context = set((cfg_entry.get('context_channels') or {}).values())
+        pool = [ch for orig, ch in cfg_entry.get('remap', {}).items()
+                if orig not in context and orig != online and not EOG_NAME_RE.search(ch)]
+        warnings = CC.channel_quality_warnings(path, cfg_entry, pool, checked, eog)
+        if context_roles:
+            warnings += CC.context_amplitude_warnings(path, cfg_entry, context_roles)
+        return warnings
+    except Exception as e:
+        return [f'channel check not done ({e})']
 
 
 def score_night_gssc(infer, edf_path, cfg_entry, wanted, one_mode, eog_mode, reference=REFERENCE_CONTRALATERAL):
     """The scoring part of tool 3bis's score_one: EEG `wanted` with the chosen reference, EOG as declared in
     tool 2 (EOG mode), then GSSC. One-electrode mode never substitutes a missing electrode.
     Raises on a fatal problem. Returns a dict (stages, onsets, probs, winner, n_comb, present, eog_names,
-    reference, notes)."""
-    raw, present, ref_text, notes = load_eeg_for_models(edf_path, cfg_entry, wanted, reference)
+    reference, eog_reference, notes, checks)."""
+    raw, present, ref_text, notes, refs = load_eeg_for_models(edf_path, cfg_entry, wanted, reference)
     missing = [ch for ch in wanted if ch not in present]
     if one_mode and missing:
         raise RuntimeError(f'electrode {wanted[0]} absent (not substituted)')
@@ -751,12 +878,14 @@ def score_night_gssc(infer, edf_path, cfg_entry, wanted, one_mode, eog_mode, ref
         raise RuntimeError(f'none of the chosen electrodes present ({", ".join(wanted)})')
     if missing:
         notes.append(f'electrode(s) absent, scored without them: {", ".join(missing)}')
-    eog_data, eog_names, eog_note = load_eog(edf_path, cfg_entry, raw.info['sfreq'], raw.n_times, eog_mode)
-    if eog_note:
-        notes.append(eog_note)
+    eog_data, eog_names, eog_notes, eog_ref = load_eog(edf_path, cfg_entry, raw.info['sfreq'], raw.n_times,
+                                                       eog_mode, reference)
+    notes += eog_notes
     stages, onsets, probs, winner, n_comb = run_gssc(infer, raw, eog_data, eog_names)
+    checks = channel_checks(edf_path, cfg_entry, refs, eog_used(cfg_entry, eog_mode) if eog_names else {})
     return {'stages': stages, 'onsets': onsets, 'probs': probs, 'winner': winner, 'n_comb': n_comb,
-            'present': present, 'eog_names': eog_names, 'reference': ref_text, 'notes': notes}
+            'present': present, 'eog_names': eog_names, 'reference': ref_text, 'eog_reference': eog_ref,
+            'notes': notes, 'checks': checks}
 
 
 def score_night(infer, edf_path, cfg_entry, wanted, one_mode, eog_mode, reference=REFERENCE_CONTRALATERAL):
@@ -775,12 +904,14 @@ AASM_EEG = ['F3', 'F4', 'C3', 'C4', 'O1', 'O2']
 SLEEPFM_FALLBACK_BAS = ['EEG', 'EEG2', 'EEG3']   # generic EEG names SleepFM knows, for an unusual electrode name
 
 
-def read_signals(edf_path, cfg_entry, electrodes, reference, extra):
+def read_signals(edf_path, cfg_entry, electrodes, reference, extra, eog_keys=None):
     """ONE read of the EEG `electrodes` (tool 2's harmonized names, with what their reference needs) and of the
-    `extra` channels ({key: original EDF name or None}, e.g. tool 2's context channels), on the common time grid
+    `extra` channels ({key: original name or None}, e.g. tool 2's context channels), on the common time grid
     MNE gives them (the fastest rate among them). The EEG is referenced as asked (each electrode minus the mean
-    of its reference channels). Returns (sfreq, eeg {label: data in V}, extra {key: data or None}, reference
-    description, notes). Electrodes absent from the recording are left out (listed in the notes)."""
+    of its reference channels). `eog_keys` = {key of `extra`: 'EOG-L' / 'EOG-R'}: these EOG are referenced by
+    eog_reference. Returns (sfreq, eeg {label: data in V}, extra {key: data or None}, reference description, notes,
+    {electrode: its reference channels}, EOG reference description). Electrodes absent from the recording are left
+    out (listed in the notes)."""
     remap = cfg_entry.get('remap', {})
     inverse = {target: orig for orig, target in remap.items()}
     available = [ch for ch in remap.values()]
@@ -794,8 +925,8 @@ def read_signals(edf_path, cfg_entry, electrodes, reference, extra):
         refs_by_ch = {e: contralateral_refs(e, available) for e in present}
         lacking = [e for e, r in refs_by_ch.items() if not r]
         if lacking:
-            notes.append(f'no contralateral mastoid (M1/A1, M2/A2) for {", ".join(lacking)}: reference declared '
-                         'in tool 2 used instead')
+            notes.append(f'no contralateral mastoid (M1/A1/TP9, M2/A2/TP10) for {", ".join(lacking)}: reference '
+                         'declared in tool 2 used instead')
             refs_by_ch = {}
     if present and not refs_by_ch:
         declared = cfg_entry.get('ref_channels', [])
@@ -807,12 +938,17 @@ def read_signals(edf_path, cfg_entry, electrodes, reference, extra):
         ref_desc = reference_text(REFERENCE_DECLARED, {}, cfg_entry)
     else:
         ref_desc = reference_text(reference, refs_by_ch, cfg_entry)
-    eeg_needed = list(dict.fromkeys(present + [r for rs in refs_by_ch.values() for r in rs]))
+    eog_keys = eog_keys or {}
+    eog = {label: extra[key] for key, label in eog_keys.items() if extra.get(key)}
+    eog_refs, eog_ref, eog_notes = eog_reference(edf_path, cfg_entry, eog, reference) if eog else ({}, '', [])
+    notes += eog_notes
+    eeg_needed = list(dict.fromkeys(present + [r for rs in refs_by_ch.values() for r in rs]
+                                    + [r for rs in eog_refs.values() for r in rs if r in inverse]))
     extra_orig = {k: v for k, v in extra.items() if v}
     include = list(dict.fromkeys([inverse[h] for h in eeg_needed] + list(extra_orig.values())))
     if not include:
         raise RuntimeError('no channel to read')
-    raw = mne.io.read_raw_edf(str(edf_path), preload=False, encoding='latin-1', include=include, verbose=False)
+    raw = RL.read_raw(edf_path, include=include)
     raw, _ = drop_suffix_duplicates(raw)
     names = set(raw.ch_names)
 
@@ -829,7 +965,7 @@ def read_signals(edf_path, cfg_entry, electrodes, reference, extra):
     eeg = {}
     for e in present:
         if e not in data or any(r not in data for r in refs_by_ch[e]):
-            notes.append(f'{e} (or its reference) not found in the EDF: left out')
+            notes.append(f'{e} (or its reference) not found in the recording: left out')
             continue
         ref = refs_by_ch[e]
         label = derivation_label(e, ref) if reference == REFERENCE_CONTRALATERAL and ref and \
@@ -840,8 +976,12 @@ def read_signals(edf_path, cfg_entry, electrodes, reference, extra):
         ch = find(orig) if orig else None
         out_extra[k] = raw.get_data(picks=[ch])[0] if ch is not None else None
         if orig and ch is None:
-            notes.append(f'{k} channel {orig} not found in the EDF')
-    return sfreq, eeg, out_extra, ref_desc, notes
+            notes.append(f'{k} channel {orig} not found in the recording')
+    for key, label in eog_keys.items():
+        ref = eog_refs.get(label, [])
+        if ref and out_extra.get(key) is not None and all(r in data for r in ref):
+            out_extra[key] = out_extra[key] - np.mean([data[r] for r in ref], axis=0)
+    return sfreq, eeg, out_extra, ref_desc, notes, refs_by_ch, eog_ref
 
 
 YASA_EMG_DECLARED = 'Chin EMG declared in tool 2'
@@ -853,14 +993,16 @@ def score_night_yasa(edf_path, cfg_entry, eeg, eog_side, reference=REFERENCE_CON
     filters itself and says not to filter before). `emg`: YASA_EMG_DECLARED (tool 2's context channel), 'None'
     (no EMG) or the name of an EDF channel chosen by hand (absent from a recording: scored without EMG, noted).
     The recording is scored whole, from t = 0: epoch i = expert line i. Returns a dict (stages, onsets, probs,
-    used, reference, notes)."""
+    used, reference, eog_reference, notes, checks)."""
     if not YASA_OK:
         raise RuntimeError('YASA is not installed')
     ctx = cfg_entry.get('context_channels') or {}
     eog_orig = {'Left': ctx.get('eog_left'), 'Right': ctx.get('eog_right')}.get(eog_side)
     emg_orig = ctx.get('emg') if emg == YASA_EMG_DECLARED else (None if emg in (None, 'None') else emg)
-    sfreq, eeg_sig, extra, ref_desc, notes = read_signals(
-        edf_path, cfg_entry, [eeg], reference, {'eog': eog_orig, 'emg': emg_orig})
+    eog_label = {'Left': 'EOG-L', 'Right': 'EOG-R'}.get(eog_side)
+    sfreq, eeg_sig, extra, ref_desc, notes, refs, eog_ref = read_signals(
+        edf_path, cfg_entry, [eeg], reference, {'eog': eog_orig, 'emg': emg_orig},
+        eog_keys={'eog': eog_label} if eog_label else None)
     if not eeg_sig:
         raise RuntimeError(f'electrode {eeg} absent (not substituted)')
     if eog_side != 'None' and not eog_orig:
@@ -890,15 +1032,19 @@ def score_night_yasa(edf_path, cfg_entry, eeg, eog_side, reference=REFERENCE_CON
     stages = np.array([STAGES[i] for i in probs.argmax(axis=1)])
     used = {'eeg': eeg_label, 'eog': eog_orig if extra['eog'] is not None else None,
             'emg': emg_orig if extra['emg'] is not None else None}
+    # the chin EMG is checked when it is the one declared in tool 2 (channel_check_lib reads the context channels)
+    checks = channel_checks(edf_path, cfg_entry, {eeg: refs.get(eeg)},
+                            {eog_label: eog_orig} if used['eog'] else {},
+                            ('emg',) if used['emg'] and emg_orig == ctx.get('emg') else ())
     return {'stages': stages, 'onsets': 30.0 * np.arange(len(stages)), 'probs': probs, 'used': used,
-            'reference': ref_desc, 'notes': notes}
+            'reference': ref_desc, 'eog_reference': eog_ref, 'notes': notes, 'checks': checks}
 
 
 def find_resp_channels(edf_path):
     """Respiratory channels for SleepFM, found by name with Score_EDF's alias lists (one per role):
     {SleepFM name: original EDF name}."""
     import sleepfm_lib as SFM
-    names = mne.io.read_raw_edf(str(edf_path), preload=False, encoding='latin-1', verbose=False).ch_names
+    names = RL.read_raw(edf_path).ch_names
     lower = {n.strip().lower(): n for n in names}
     found, used = {}, set()
     for role, aliases in SFM.RESP_ALIASES.items():
@@ -919,7 +1065,7 @@ def score_night_sleepfm(edf_path, cfg_entry, sleepfm_root, reference=REFERENCE_C
     night as context, as Score_EDF did (slower; the default uses sleepfm_lib.TAIL_CONTEXT_CHUNKS).
     Returns a dict: stages / onsets / probs per 30-s epoch from t = 0, the native 5-s table (starts_s, stops_s,
     probs_5s, source), the features + final-layer parameters for recalibration B, used (channels per modality),
-    reference, notes."""
+    reference, eog_reference, notes, checks."""
     import sleepfm_lib as SFM
     tail_context_chunks = None if full_tail else SFM.TAIL_CONTEXT_CHUNKS
     ctx = cfg_entry.get('context_channels') or {}
@@ -928,7 +1074,8 @@ def score_night_sleepfm(edf_path, cfg_entry, sleepfm_root, reference=REFERENCE_C
     resp = find_resp_channels(edf_path)
     extra = {'EOG1': ctx.get('eog_left'), 'EOG2': ctx.get('eog_right'), 'EMG': ctx.get('emg'),
              'ECG': ctx.get('ecg'), **{f'resp:{k}': v for k, v in resp.items()}}
-    sfreq, eeg_sig, sig, ref_desc, notes = read_signals(edf_path, cfg_entry, electrodes, reference, extra)
+    sfreq, eeg_sig, sig, ref_desc, notes, refs, eog_ref = read_signals(
+        edf_path, cfg_entry, electrodes, reference, extra, eog_keys={'EOG1': 'EOG-L', 'EOG2': 'EOG-R'})
     groups = SFM.channel_groups(sleepfm_root)
     bas, generic = {}, list(SLEEPFM_FALLBACK_BAS)
     for label, values in eeg_sig.items():
@@ -961,10 +1108,15 @@ def score_night_sleepfm(edf_path, cfg_entry, sleepfm_root, reference=REFERENCE_C
             'RESP': [f'{role} = {ch}' for role, ch in resp.items() if sig[f'resp:{role}'] is not None],
             'EOG': [v for k, v in (('EOG1', ctx.get('eog_left')), ('EOG2', ctx.get('eog_right')))
                     if sig[k] is not None]}
+    eog_checked = {label: ctx.get(side) for key, label, side in (('EOG1', 'EOG-L', 'eog_left'), ('EOG2', 'EOG-R', 'eog_right'))
+                   if sig[key] is not None}
+    checks = channel_checks(edf_path, cfg_entry, {e: refs.get(e) for e in electrodes if e in refs}, eog_checked,
+                            tuple(role for role, key in (('ecg', 'ECG'), ('emg', 'EMG')) if sig[key] is not None))
     return {'stages': stages, 'onsets': EPOCH_SEC * np.arange(n_epochs, dtype=float), 'probs': probs30,
             'starts_s': r['starts_s'], 'stops_s': r['stops_s'], 'probs_5s': r['probs'], 'source': r['source'],
             'features': r['features'], 'fc_weight': r['fc_weight'], 'fc_bias': r['fc_bias'], 'used': used,
-            'reference': ref_desc, 'notes': notes, 'tail_context_chunks': tail_context_chunks}
+            'reference': ref_desc, 'eog_reference': eog_ref, 'notes': notes, 'checks': checks,
+            'tail_context_chunks': tail_context_chunks}
 
 
 # ---------------------------------------------------------------------------------------------------------

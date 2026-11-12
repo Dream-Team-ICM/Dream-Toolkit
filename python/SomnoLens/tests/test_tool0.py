@@ -280,8 +280,9 @@ def test_step5_equals_tool6(chain, tmp_path):
                     assert mine.empty, (fid, key)
                     continue
                 ref = pd.read_csv(found[0], sep='\t', dtype={'file_id': str})
-                if 'suspect_reason' in ref.columns:
-                    ref['suspect_reason'] = ref['suspect_reason'].fillna('')
+                for text_column in ('suspect_reason', 'comparison_alert'):    # an empty text reads back as NaN
+                    if text_column in ref.columns:
+                        ref[text_column] = ref[text_column].fillna('')
                 assert list(mine.columns) == list(ref.columns), (fid, key)
                 pd.testing.assert_frame_equal(mine.sort_values(sort).reset_index(drop=True),
                                               ref.sort_values(sort).reset_index(drop=True),
@@ -338,7 +339,10 @@ def test_step7_equals_tool8bis(chain, tmp_path):
             for expr, ref in (("STATE['decision']['epoch_df']", next(auto.rglob(f'{fid}_epoch_decision.tsv'))),
                               ("STATE['decision']['channel_df']", next(auto.rglob(f'{fid}_channel_decision.tsv'))),
                               ("STATE['decision']['record']", next(auto_rep.rglob(f'{fid}_autoreject_decision.tsv')))):
-                pd.testing.assert_frame_equal(table(expr), pd.read_csv(ref, sep='\t', dtype={'file_id': str}),
+                # the fingerprint of the tool 7 run: tool 0 decides from its own step 6, it has none
+                pd.testing.assert_frame_equal(table(expr).drop(columns='preproc_fingerprint', errors='ignore'),
+                                              pd.read_csv(ref, sep='\t', dtype={'file_id': str}).drop(
+                                                  columns='preproc_fingerprint', errors='ignore'),
                                               check_dtype=False, obj=f'{fid} {ref.name}')
             assert "Same decision as tool 8bis" in nb.value("''.join(REPORT_BLOCKS['7'])"), fid
             live = nb.value("STATE['decision']['rejected'].tolist()")

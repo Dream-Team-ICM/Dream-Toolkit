@@ -17,9 +17,12 @@ this code is used by tools 5, 5bis, 6, 7, 8, 8bis, 9 and their Curry twins, and 
    Excluded participants are still processed by every tool; they are only flagged in the tables
    (`participant_excluded`, `participant_exclude_reason`) and left out of group statistics / figures.
 
-2. ParticipantSelector: the "All participants / Subset only" block shared by the processing tools.
+2. ParticipantSelector: the "All participants / Subset only" block shared by the processing tools. With Skip
+   ticked, it also asks what to do with the participants made with other settings than the run's.
 """
 import datetime
+import html
+import json
 import os
 import re
 from pathlib import Path
@@ -268,6 +271,110 @@ def parse_id_list(text):
     return [t for t in re.split(r'[,;\s]+', text or '') if t]
 
 
+# ---------------------------------------------------------------------------
+# Participants made with other settings (Skip ticked)
+# ---------------------------------------------------------------------------
+# differences = {file_id: [(setting, recorded, this run), ...]}, found by each tool before any analysis. The run asks
+# what to do with them instead of reprocessing on its own: a page starts from its defaults at every launch, so a
+# difference may only mean that it was just opened, and reprocessing could overwrite a whole study.
+DIFFERENCES_SHOWN = 20       # lines of the box, then '… (+N)'
+
+
+def group_differences(differences):
+    """{file_id: [(setting, recorded, this run), ...]} -> [(setting, recorded, this run, [file_ids])], one row per
+    distinct difference, the most frequent first."""
+    groups = {}
+    for fid, rows in differences.items():
+        for row in rows:
+            groups.setdefault(tuple(str(value) for value in row), []).append(fid)
+    ordered = sorted(groups.items(), key=lambda item: -len(item[1]))     # a stable sort: first seen first on a tie
+    return [(*key, fids) for key, fids in ordered]
+
+
+def keeping_mixes_settings(n_different, n_processed, n_new):
+    """Whether keeping the participants made with other settings puts settings side by side in the tables: only if
+    someone else has this run's settings, already processed or about to be."""
+    return n_new > 0 or n_different < n_processed
+
+
+def other_settings_html(differences, n_processed, n_new=0):
+    """The box listing the differences, with the participants concerned, before the two answers."""
+    import ui_lib as UI      # the look shared by the Voila pages (imported on use: screen only)
+    keeping = ('Keeping them mixes settings in the database tables.'
+               if keeping_mixes_settings(len(differences), n_processed, n_new)
+               else 'Keeping them leaves the database tables as they are.')
+    groups = group_differences(differences)
+    lines = []
+    for setting, recorded, current, fids in groups[:DIFFERENCES_SHOWN]:
+        names = ', '.join(fids[:UI.MISSING_SHOWN])
+        if len(fids) > UI.MISSING_SHOWN:
+            names += f' (+{len(fids) - UI.MISSING_SHOWN})'
+        lines.append(f'<li><b>{html.escape(setting)}</b>: {html.escape(recorded)} → {html.escape(current)} '
+                     f'<small>({len(fids)} participant(s): {html.escape(names)})</small></li>')
+    if len(groups) > DIFFERENCES_SHOWN:
+        lines.append(f'<li>… (+{len(groups) - DIFFERENCES_SHOWN} other differences)</li>')
+    return UI.box('warn', f'<b>{len(differences)} of the {n_processed} processed participant(s) were made with other '
+                  f'settings</b> (recorded → this run). Nothing has run yet.<ul style="margin:4px 0;">'
+                  f'{"".join(lines)}</ul>{keeping}')
+
+
+def other_settings_list(differences):
+    """'165 (signal preparation), 176 (flags of C3, flags of O1)', for the log at the end of a run."""
+    return ', '.join(f'{fid} ({", ".join(dict.fromkeys(row[0] for row in rows))})'
+                     for fid, rows in differences.items())
+
+
+def kept_line(differences, n_processed, n_new):
+    """The line of the log at the end of a run when the participants made with other settings were kept."""
+    names = other_settings_list(differences)
+    if keeping_mixes_settings(len(differences), n_processed, n_new):
+        return f'⚠️ Kept as they are, so the tables mix settings: {names}'
+    return f'ℹ️ Kept as they are, with their recorded settings: {names}'
+
+
+def most_frequent_settings(records):
+    """The set of settings most participants were made with. records = [(file_id, settings dict)], in participant order.
+    Returns (settings, number of participants with it). At equal count, the first in participant order."""
+    counts, sets = {}, {}
+    for _fid, settings in records:
+        key = json.dumps(settings, sort_keys=True, default=str)
+        counts[key] = counts.get(key, 0) + 1
+        sets.setdefault(key, settings)
+    best = max(counts, key=counts.get)      # max keeps the first of equal counts, and a dict keeps its order
+    return sets[best], counts[best]
+
+
+def _setting_text(value):
+    if isinstance(value, bool):
+        return 'on' if value else 'off'
+    return f'{value:g}' if isinstance(value, (int, float)) else str(value)
+
+
+def put_back(changes, setting, widget, value):
+    """Put a widget of the page back to a recorded value. A change is noted in `changes` as (setting, value on the page,
+    recorded value)."""
+    if widget.value != value:
+        changes.append((setting, _setting_text(widget.value), _setting_text(value)))
+        widget.value = value
+
+
+def recorded_settings_html(changes, not_put_back, n_same, n_records):
+    """What the answer 'Use the recorded settings' did: nothing ran, the page changed."""
+    import ui_lib as UI      # the look shared by the Voila pages (imported on use: screen only)
+    text = (f'<b>Recorded settings put back</b> (the most frequent set: {n_same} of the {n_records} processed '
+            'participant(s)). Nothing has run yet: click Run again.')
+    if changes:
+        lines = ''.join(f'<li><b>{html.escape(setting)}</b>: {html.escape(page)} → {html.escape(recorded)}</li>'
+                        for setting, page, recorded in changes)
+        text += f'<ul style="margin:4px 0;">{lines}</ul>'
+    else:
+        text += '<br>Nothing to change on this page.'
+    if not_put_back:
+        lines = ''.join(f'<li>{html.escape(item, quote=False)}</li>' for item in not_put_back)
+        text += f'<br>Not put back, left as they are on this page:<ul style="margin:4px 0;">{lines}</ul>'
+    return UI.box('ok', text)
+
+
 class ParticipantSelector:
     """'All participants / Subset only' + 'Skip already processed', with a summary line and a
     prominent warning box. Usage in a tool:
@@ -315,6 +422,20 @@ class ParticipantSelector:
                                  layout=w.Layout(display='none'))
         self.widget = w.VBox([w.HBox([self.dd_mode, self.tgl_list]), self.box_subset, self.lst,
                               self.cb_skip, self.lbl_summary, self.html_warn])
+        # The answers when participants were made with other settings (ask_other_settings): shown in the run's log.
+        self.btn_redo_other = ui_lib.button('Reprocess them', 'caution')
+        self.btn_keep_other = ui_lib.button('Keep them', 'run')
+        self.btn_use_recorded = ui_lib.button('Use the recorded settings', 'helper',
+                                              tooltip='Put the settings of this page back to what these participants '
+                                                      'were made with. Nothing runs.',
+                                              layout=w.Layout(width='auto'))
+        self._box_other = w.HBox([self.btn_redo_other, self.btn_keep_other, self.btn_use_recorded])
+        self._on_other_answer = None
+        # Beside the page's Run button: the question sits under the progress bars, possibly below the window.
+        self.run_note = w.HTML('')
+        self.btn_redo_other.on_click(lambda _: self._answer_other('reprocess'))
+        self.btn_keep_other.on_click(lambda _: self._answer_other('keep'))
+        self.btn_use_recorded.on_click(lambda _: self._answer_other('use_recorded'))
         self.dd_mode.observe(self._on_mode, names='value')
         self.tags.observe(self._on_tags, names='value')
         self.cmb_add.observe(self._on_add, names='value')
@@ -389,6 +510,35 @@ class ParticipantSelector:
         return UI.box('warn', f'<b>{len(skipped)} of the {len(self.chosen_ids())} selected participant(s) will '
                       f'NOT be processed: already processed</b> ({names}).<br>Untick <b>Skip already processed '
                       'participants</b> to reprocess them.')
+
+    def ask_other_settings(self, differences, n_processed, n_new, on_answer):
+        """Skip met participants made with other settings: show the differences and the answers in the output area
+        this is called from (the tool's run log), then return. on_answer('reprocess', 'keep' or 'use_recorded') runs
+        when a button is clicked. The tool calls it before any analysis, and finds the differences again on the answer. It
+        shows run_note beside its Run button and empties it at the start of each Run."""
+        from IPython.display import HTML, display
+        import ui_lib as UI      # the look shared by the Voila pages (imported on use: screen only)
+        self.run_note.value = UI.msg('warn', 'Your answer is needed, just below')
+        n_redo = len(differences)
+        new_ones = f'run the {n_new} new one(s)'
+        self.btn_redo_other.description = f'Reprocess {n_redo} participant(s)' + (f' + {new_ones}' if n_new else '')
+        self.btn_keep_other.description = f'Keep them, {new_ones}' if n_new else 'Keep them, only rebuild the tables'
+        self._on_other_answer = on_answer
+        display(HTML(other_settings_html(differences, n_processed, n_new)))
+        display(self._box_other)
+
+    def show_recorded_settings(self, changes, not_put_back, n_same, n_records):
+        """The tool has answered 'use_recorded' by putting its widgets back: say what changed, in the output area this is
+        called from, and beside Run that the next step is to click it."""
+        from IPython.display import HTML, display
+        import ui_lib as UI      # the look shared by the Voila pages (imported on use: screen only)
+        self.run_note.value = UI.msg('ok', 'Recorded settings put back: click Run again')
+        display(HTML(recorded_settings_html(changes, not_put_back, n_same, n_records)))
+
+    def _answer_other(self, answer):
+        on_answer, self._on_other_answer = self._on_other_answer, None     # one answer per question
+        if on_answer is not None:
+            on_answer(answer)
 
     # -- callbacks ----------------------------------------------------------------
     def _on_mode(self, change=None):

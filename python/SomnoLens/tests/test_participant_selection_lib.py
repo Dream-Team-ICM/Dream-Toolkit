@@ -145,6 +145,96 @@ def test_subset_with_skip_warns_about_the_processed_ones():
     assert sel.html_warn.value == ''
 
 
+def test_differences_are_grouped_with_the_participants_concerned():
+    differences = {'p1': [('high-pass', 'off', '0.5 Hz')],
+                   'p2': [('notch', '50 Hz', 'off'), ('high-pass', 'off', '0.5 Hz')]}
+    assert P.group_differences(differences) == [('high-pass', 'off', '0.5 Hz', ['p1', 'p2']),
+                                                ('notch', '50 Hz', 'off', ['p2'])]
+    box = P.other_settings_html(differences, 4)
+    assert '2 of the 4 processed participant(s) were made with other settings' in box
+    assert 'high-pass</b>: off → 0.5 Hz' in box and '2 participant(s): p1, p2' in box
+    assert 'Nothing has run yet' in box and 'mixes settings' in box
+    assert P.other_settings_list(differences) == 'p1 (high-pass), p2 (notch, high-pass)'
+
+
+def test_the_box_stays_short_on_a_large_database():
+    many = {f'p{i}': [('high-pass', 'off', '0.5 Hz')] for i in range(13)}
+    assert '13 participant(s): p0, p1, p2, p3, p4, p5, p6, p7, p8, p9 (+3)' in P.other_settings_html(many, 13)
+    varied = {f'p{i}': [(f'flags of ch{i}', 'none', 'n_peaks')] for i in range(23)}
+    box = P.other_settings_html(varied, 23)
+    assert box.count('<li>') == P.DIFFERENCES_SHOWN + 1 and '(+3 other differences)' in box
+
+
+def test_keeping_says_mixed_only_if_settings_really_sit_side_by_side():
+    differences = {'p1': [('notch', '50 Hz', 'off')]}
+    # Someone else has this run's settings: already processed, or about to be.
+    for n_processed, n_new in ((2, 0), (1, 1)):
+        assert 'Keeping them mixes settings' in P.other_settings_html(differences, n_processed, n_new)
+        assert P.kept_line(differences, n_processed, n_new) == '⚠️ Kept as they are, so the tables mix settings: p1 (notch)'
+    # Everyone chosen differs and nobody is new: nothing changes in the tables.
+    assert 'Keeping them leaves the database tables as they are' in P.other_settings_html(differences, 1, 0)
+    assert P.kept_line(differences, 1, 0) == 'ℹ️ Kept as they are, with their recorded settings: p1 (notch)'
+
+
+def test_the_most_frequent_settings_win_and_the_first_at_equal_count():
+    a, b = {'notch': 50, 'flat': [1, 2]}, {'notch': 60, 'flat': [1, 2]}
+    assert P.most_frequent_settings([('p1', a), ('p2', b), ('p3', b)]) == (b, 2)
+    assert P.most_frequent_settings([('p1', a), ('p2', b)]) == (a, 1)
+    assert P.most_frequent_settings([('p1', b), ('p2', a)]) == (b, 1)
+    # The order of the keys is not a difference.
+    assert P.most_frequent_settings([('p1', {'x': 1, 'y': 2}), ('p2', {'y': 2, 'x': 1})])[1] == 2
+
+
+def test_putting_a_widget_back_notes_only_what_changes():
+    class Widget:
+        def __init__(self, value):
+            self.value = value
+
+    changes, widget, tick = [], Widget(0.5), Widget(False)
+    P.put_back(changes, 'high-pass (Hz)', widget, 0.5)
+    assert changes == []
+    P.put_back(changes, 'high-pass (Hz)', widget, 1.0)
+    P.put_back(changes, 'notch', tick, True)
+    assert changes == [('high-pass (Hz)', '0.5', '1'), ('notch', 'off', 'on')]
+    assert widget.value == 1.0 and tick.value is True
+
+
+def test_the_recorded_settings_box_says_what_changed_and_what_did_not():
+    box = P.recorded_settings_html([('notch', 'off', '50 Hz')], ["the reference: it comes from tool 2's configuration"], 27, 30)
+    assert '27 of the 30 processed participant(s)' in box and 'Nothing has run yet: click Run again' in box
+    assert '<b>notch</b>: off → 50 Hz' in box
+    assert "Not put back" in box and "tool 2's configuration" in box
+    box = P.recorded_settings_html([], [], 4, 4)
+    assert 'Nothing to change on this page' in box and 'Not put back' not in box
+
+
+def test_the_third_answer_goes_through_the_same_way():
+    sel = make_selector()
+    answers = []
+    sel.ask_other_settings({'p1': [('notch', '50 Hz', 'off')]}, 1, 0, answers.append)
+    sel.btn_use_recorded.click()
+    assert answers == ['use_recorded']
+    sel.show_recorded_settings([('notch', 'off', '50 Hz')], [], 1, 1)
+    assert 'click Run again' in sel.run_note.value
+
+
+def test_the_answers_say_what_they_do_and_count_once():
+    sel = make_selector()
+    answers = []
+    sel.ask_other_settings({'p1': [('notch', '50 Hz', 'off')]}, 2, 2, answers.append)
+    assert sel.btn_redo_other.description == 'Reprocess 1 participant(s) + run the 2 new one(s)'
+    assert sel.btn_keep_other.description == 'Keep them, run the 2 new one(s)'
+    assert 'just below' in sel.run_note.value                   # beside Run: the question may be below the window
+    sel.btn_keep_other.click()
+    sel.btn_redo_other.click()                                  # a second click on an answered question does nothing
+    assert answers == ['keep']
+    sel.ask_other_settings({'p1': [('notch', '50 Hz', 'off')]}, 2, 0, answers.append)
+    assert sel.btn_redo_other.description == 'Reprocess 1 participant(s)'
+    assert sel.btn_keep_other.description == 'Keep them, only rebuild the tables'
+    sel.btn_redo_other.click()
+    assert answers == ['keep', 'reprocess']
+
+
 def test_paste_and_list_pick_switch_to_subset_mode():
     sel = make_selector()
     sel.txt_paste.value = 'p4, p3; nope'

@@ -10,6 +10,7 @@ rewrites it).
 METHOD_ORDER is the single source of truth of the flagging methods (order, codes, labels).
 """
 import json
+import os
 from pathlib import Path
 
 import matplotlib.colors as mcolors
@@ -905,3 +906,126 @@ def epoch_metadata(mask_dict, hypno_epochs, event_type_masks, n_epochs):
         meta_rows.append(row)
     metadata_df = pd.DataFrame(meta_rows)
     return reject_epoch, metadata_df
+
+
+# ---------------------------------------------------------------------------------------------------------
+# What a participant already processed was made with (Skip ticked: tool 7's Run asks before any analysis)
+# ---------------------------------------------------------------------------------------------------------
+def recorded_channels(sidecar, start):
+    """The editor's {channel: keep} for a participant already processed, from its params sidecar, in the order of
+    `start` (tool 6's flags or the config). A channel it names is kept or not as it says. One it does not name keeps its
+    value in `start`: a mastoid used as reference has left the epochs, and unticked it would no longer be the reference."""
+    kept = sidecar.get('channels') or []
+    if not kept:
+        return dict(start)
+    bad = list(sidecar.get('bad_channels') or [])
+    state = {ch: (ch in kept if ch in kept or ch in bad else keep) for ch, keep in start.items()}
+    for ch in kept + bad:
+        state.setdefault(ch, ch in kept)
+    return state
+
+
+def psd_smoothing_label(block):
+    """The PSD smoothing block of a params sidecar, in words. An older sidecar has none: the smoothing did not exist."""
+    if not block or not block.get('enabled'):
+        return 'off'
+    if block.get('method') == 'median+lowess':
+        return f"median {block['median_span_hz']:g} Hz + LOWESS {block['lowess_span_hz']:g} Hz"
+    return f"LOWESS {block['lowess_span_hz']:g} Hz"
+
+
+def recorded_settings(sidecar, file_id):
+    """What a participant's params sidecar records of the settings of tool 7's page, without what belongs to the participant
+    alone, so that participants can be compared: the methods without the event one (it varies with each file's
+    annotations), the hypnogram as its suffix, no channels (the editor starts from them) and no reference (tool 2)."""
+    keys = ('epoch_length_s', 'resample', 'filter', 'notch', 'rejection_thresholds', 'event_rejection', 'psd_smoothing',
+            'manual_events')
+    settings = {key: sidecar[key] for key in keys if key in sidecar}
+    settings['methods'] = [m for m in METHOD_ORDER if m in (sidecar.get('methods_run') or []) and m != 'event']
+    name = sidecar.get('hypnogram_file')
+    if name and os.path.normcase(name).startswith(os.path.normcase(file_id)):
+        settings['hypnogram_suffix'] = name[len(file_id):]
+    return settings
+
+
+def settings_differences(sidecar, current):
+    """What separates a participant's params sidecar from this run's settings (`current`: the sidecar's keys, methods_run
+    without the event method), as (setting, recorded, this run) rows. [] when nothing does.
+    A key an older sidecar does not hold is not compared, except the notch and the PSD smoothing, which did not exist
+    (absent = off), and the epoch length (absent = 30 s). A threshold counts only if its method ran on both sides. The
+    event method varies with each file's annotations: the events are compared through the types asked for. Among the
+    channels, only those the sidecar names: a reference channel has left the epochs before it is written."""
+    rows = []
+
+    def compare(setting, recorded, now):
+        if recorded != now:
+            rows.append((setting, recorded, now))
+
+    def resample(block):
+        return f"{block['target_freq_hz']:g} Hz" if block.get('applied') else 'off'
+
+    def band_pass(block):
+        return f"{block['l_freq_hz']:g}-{block['h_freq_hz']:g} Hz" if block.get('applied') else 'off'
+
+    def notch(block):
+        return f"{block['freq_hz']:g} Hz" if block.get('applied') else 'off'
+
+    def events(block):
+        return ', '.join(sorted(block.get('event_types') or [])) if block.get('applied') else 'off'
+
+    def methods(names):
+        return ', '.join(m for m in METHOD_ORDER if m in names and m != 'event') or 'none'
+
+    def reference(value):
+        return value if isinstance(value, str) else ', '.join(value) or 'none'
+
+    compare('epoch length', f"{sidecar.get('epoch_length_s', 30):g} s", f"{current['epoch_length_s']:g} s")
+    if 'resample' in sidecar:
+        compare('resampling', resample(sidecar['resample']), resample(current['resample']))
+    if 'filter' in sidecar:
+        compare('band-pass filter', band_pass(sidecar['filter']), band_pass(current['filter']))
+    compare('notch', notch(sidecar.get('notch') or {}), notch(current['notch']))
+    if 'methods_run' in sidecar:
+        compare('flagging methods', methods(sidecar['methods_run']), methods(current['methods_run']))
+
+    ran_both = set(sidecar.get('methods_run') or []) & set(current['methods_run'])
+    recorded_t, now_t = sidecar.get('rejection_thresholds') or {}, current['rejection_thresholds']
+
+    def threshold(setting, key):
+        if recorded_t.get(key) is not None:
+            compare(setting, f'{recorded_t[key]:g}', f'{now_t[key]:g}')
+
+    if 'amplitude' in ran_both:
+        # Only the stages both sides know: a custom stage declared later in the study does not concern this participant.
+        recorded_ptp = recorded_t.get('amplitude_ptp_uV') or {}
+        for stage, value in now_t['amplitude_ptp_uV'].items():
+            if stage in recorded_ptp:
+                compare(f'amplitude threshold {stage} (µV)', f'{recorded_ptp[stage]:g}', f'{value:g}')
+    if 'flat' in ran_both:
+        threshold('flat threshold (µV)', 'flat_ptp_uV')
+    if 'gradient' in ran_both:
+        threshold('gradient threshold (µV/sample)', 'gradient_uV_per_sample')
+    if '1f_error' in ran_both:
+        threshold('1/f error max', '1f_mae_max')
+        threshold('1/f R² min', '1f_r2_min')
+        if recorded_t.get('1f_fit_range_hz'):
+            compare('1/f fit range', '{:g}-{:g} Hz'.format(*recorded_t['1f_fit_range_hz']),
+                    '{:g}-{:g} Hz'.format(*now_t['1f_fit_range_hz']))
+        compare('PSD smoothing', psd_smoothing_label(sidecar.get('psd_smoothing')),
+                psd_smoothing_label(current['psd_smoothing']))
+
+    if 'event_rejection' in sidecar:
+        compare('event flagging', events(sidecar['event_rejection']), events(current['event_rejection']))
+    if 'manual_events' in sidecar:
+        compare('manual annotations', 'on' if sidecar['manual_events'] else 'off',
+                'on' if current['manual_events'] else 'off')
+    if sidecar.get('channels'):
+        named = set(sidecar['channels']) | set(sidecar.get('bad_channels') or [])
+        compare('channels kept', ', '.join(sorted(sidecar['channels'])),
+                ', '.join(sorted(set(current['channels']) & named)))
+    if 'reference' in sidecar:
+        compare('reference', reference(sidecar['reference']), reference(current['reference']))
+    if 'hypnogram_file' in sidecar and (os.path.normcase(sidecar['hypnogram_file'])
+                                        != os.path.normcase(current['hypnogram_file'])):
+        rows.append(('hypnogram', sidecar['hypnogram_file'], current['hypnogram_file']))
+    return rows

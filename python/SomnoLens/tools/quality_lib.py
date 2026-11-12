@@ -20,6 +20,8 @@ import pandas as pd
 from scipy.signal import find_peaks, savgol_filter
 from scipy.stats import kurtosis as scipy_kurtosis, skew as scipy_skew
 
+import channel_check_lib as CC
+
 
 # ---------------------------------------------------------------------------------------------------------
 # Metrics, flags and figures (tool 6's shared-function cell)
@@ -35,21 +37,31 @@ def odd(x):
 # Robust percentiles bounding the histogram used for the Savitzky-Golay curve + peak detection
 # (see compute_signal_metrics); keeps the amplitude range from being stretched by rare extremes.
 HIST_CLIP_PCT = (0.5, 99.5)
+DISPLAY_YLIM_UV = 500.0     # see display_limits
 
 
-def compute_signal_metrics(sig_uV, phys_min_uV, phys_max_uV):
-    """Compute all quality metrics for one EEG channel (unfiltered signal, in uV)."""
+FLAT_MIN_S = 0.05     # a flat stretch counts from 50 ms on (see compute_signal_metrics)
+
+
+def compute_signal_metrics(sig_uV, phys_min_uV, phys_max_uV, sfreq):
+    """Compute all quality metrics for one EEG channel (unfiltered signal, in uV, sampled at `sfreq` Hz)."""
     cur_std = float(np.std(sig_uV))
     u = np.unique(sig_uV)
 
-    # Flat signal: fraction of consecutive sample pairs with no change.
-    # Tolerance = 2x ADC resolution to handle rounding, minimum 0.06 uV.
+    # Flat signal: share of the samples inside a stretch where the signal holds still (consecutive samples within
+    # 2x the ADC resolution, at least 0.06 uV) for FLAT_MIN_S or more. No EEG holds still for 50 ms, while a quiet
+    # channel at a high sampling rate often has neighbouring samples closer than 0.06 uV: counting every still pair,
+    # as before 2026-11-12, flagged clean channels at 500 Hz.
     if len(u) > 1:
         res = float(np.min(np.abs(np.diff(u))))
         flat_atol = max(2 * res, 0.06)
     else:
         flat_atol = 0.06
-    flat_pct = float(np.isclose(np.diff(sig_uV), 0, atol=flat_atol, rtol=0.0).mean()) * 100
+    still = np.isclose(np.diff(sig_uV), 0, atol=flat_atol, rtol=0.0)
+    edges = np.diff(np.concatenate([[0], still.astype(np.int8), [0]]))
+    run_lengths = np.flatnonzero(edges == -1) - np.flatnonzero(edges == 1)
+    min_run = int(np.ceil(FLAT_MIN_S * sfreq))
+    flat_pct = float(run_lengths[run_lengths >= min_run].sum() / max(still.size, 1)) * 100
 
     # EDF physical bounds: fraction of samples at/near the header declared limits.
     # Detects saturation at the EDF dynamic range boundary (hard clipping).
@@ -375,6 +387,10 @@ METRIC_INTERPRETATIONS = {
     'n_peaks (distribution)': '1&nbsp;=&nbsp;unimodal; &ge;2&nbsp;=&nbsp;irregular / suspect distribution (bimodal or multimodal: inspect the channel)',
     'p99 |amplitude|': '99% of samples are below this value&nbsp;; compare across channels&nbsp;',
     'p99.9 |amplitude|': '99.9% of samples are below this value&nbsp;; compare across channels&nbsp;',
+    'Noisy vs the median channel (% epochs)': 'epochs where its std exceeds 3&times; the median channel of the epoch; '
+                                              '&gt;&nbsp;20&nbsp;% = alert (not a flag)',
+    'Nearly flat vs the median channel (% epochs)': 'epochs where its std is under 0.1&times; the median channel; '
+                                                    '&gt;&nbsp;20&nbsp;% = alert (not a flag)',
 }
 
 
@@ -780,12 +796,13 @@ def signal_preparation_label(resampled_to=None, highpassed_at=None):
     return ', '.join(steps) if steps else 'none'
 
 
-def signal_preparation_mismatch(stored, do_resample, target_freq, do_highpass, hp_freq_val):
+def signal_preparation_mismatch(stored, do_resample, target_freq, do_highpass, hp_freq_val, native_sf=None):
     """Why a participant's stored `signal_preparation` label differs from this run's settings ('' when it does
-    not, or cannot be told). The high-pass is always compared. The resampling only when the stored file was
-    resampled: a file that was not may simply have been at or below the target rate already (prepare_signal
-    never upsamples), which only its header would tell. An empty label (a table written before the column
-    existed) is never reported."""
+    not, or cannot be told). The high-pass is always compared. A stored resampling too. A file stored without
+    resampling counts as different only when this run would really resample it, which takes `native_sf`, its rate
+    in the header: it may simply have been at or below the target already (prepare_signal never upsamples), and
+    without `native_sf` this cannot be told. An empty label (a table written before the column existed) is never
+    reported."""
     if not isinstance(stored, str) or not stored.strip():
         return ''
     parts = [p.strip() for p in stored.split(',')]
@@ -793,11 +810,89 @@ def signal_preparation_mismatch(stored, do_resample, target_freq, do_highpass, h
     stored_rs = next((p for p in parts if p.startswith('resampled to')), None)
     run_hp = f'high-pass {hp_freq_val:g} Hz' if (do_highpass and hp_freq_val is not None) else None
     run_rs = f'resampled to {target_freq:g} Hz' if (do_resample and target_freq is not None) else None
-    if stored_hp == run_hp and (stored_rs is None or stored_rs == run_rs):
+    newly_resampled = (stored_rs is None and run_rs is not None and native_sf is not None
+                       and target_freq < native_sf)
+    if stored_hp == run_hp and (stored_rs is None or stored_rs == run_rs) and not newly_resampled:
         return ''
     run_label = signal_preparation_label(target_freq if do_resample else None,
                                          hp_freq_val if do_highpass else None)
     return f'made with {stored.strip()}, this run: {run_label}'
+
+
+def flag_thresholds_text(thresholds):
+    """{'flat_pct': 3.5, ...} -> 'bounds_pct:1+flat_pct:3.5+...' (sorted), the flag_thresholds column of tool 6's
+    tables."""
+    return '+'.join(f'{key}:{value:g}' for key, value in sorted(thresholds.items()))
+
+
+def parse_flag_thresholds(text):
+    """The reverse of flag_thresholds_text. {} for an empty cell (a table written before the column existed)."""
+    parsed = {}
+    if isinstance(text, str):
+        for item in text.split('+'):
+            key, _, value = item.partition(':')
+            try:
+                parsed[key] = float(value)
+            except ValueError:
+                pass
+    return parsed
+
+
+def flag_criteria(reasons):
+    """The criteria behind a channel's flag reasons: 'flat_pct=5.0% > 3.5%' -> 'flat_pct'. The reasons themselves
+    hold the threshold, so their text changes with it even when the same channel stays flagged for the same cause."""
+    return sorted(reason.split('=')[0].strip() for reason in reasons)
+
+
+def recorded_preparation(stored):
+    """The signal_preparation label of a participant's table, '' when the table was written before the column."""
+    if 'signal_preparation' not in stored.columns or stored.empty:
+        return ''
+    label = stored['signal_preparation'].iloc[0]
+    return label.strip() if isinstance(label, str) else ''
+
+
+def recorded_settings(stored):
+    """What a participant's table records of the settings of tool 6's page. preparation_known False: a table written
+    before the column, which says nothing of the high-pass and of the resampling. thresholds {}: before its own column."""
+    prepared = recorded_preparation(stored)
+    settings = {'preparation_known': bool(prepared), 'highpass': None, 'resampled_to': None, 'thresholds': {}}
+    for part in prepared.split(','):
+        words = part.split()
+        if part.strip().startswith('high-pass'):
+            settings['highpass'] = float(words[1])
+        elif part.strip().startswith('resampled to'):
+            settings['resampled_to'] = float(words[2])
+    if 'flag_thresholds' in stored.columns and not stored.empty:
+        settings['thresholds'] = parse_flag_thresholds(stored['flag_thresholds'].iloc[0])
+    return settings
+
+
+def settings_differences(stored, do_resample, target_freq, do_highpass, hp_freq_val, thresholds, native_sf=None):
+    """What separates a participant's {file_id}_quality_metrics.tsv (`stored`) from this run's settings, as
+    (setting, recorded, this run) rows. [] when nothing does.
+    The signal preparation changes every metric. A threshold changes only the flags, so it counts only through
+    them: flag_channel is run again on the stored metrics, and a threshold that moves no flag is not a difference
+    (the report keeps the former threshold in its text). The former thresholds are given when a flag moves."""
+    rows = []
+    prepared = recorded_preparation(stored)
+    if signal_preparation_mismatch(prepared, do_resample, target_freq, do_highpass, hp_freq_val, native_sf):
+        rows.append(('signal preparation', prepared,
+                     signal_preparation_label(target_freq if do_resample else None,
+                                              hp_freq_val if do_highpass else None)))
+    flag_rows = []
+    for _, channel_row in stored.iterrows():
+        reason = channel_row['suspect_reason']
+        old = flag_criteria(reason.split(';')) if isinstance(reason, str) and reason.strip() else []
+        new = flag_criteria(flag_channel(channel_row, thresholds))
+        if old != new:
+            flag_rows.append((f"flags of {channel_row['channel']}", ', '.join(old) or 'none', ', '.join(new) or 'none'))
+    if flag_rows and 'flag_thresholds' in stored.columns:
+        recorded = parse_flag_thresholds(stored['flag_thresholds'].iloc[0])
+        for key, value in sorted(thresholds.items()):
+            if key in recorded and f'{recorded[key]:g}' != f'{value:g}':
+                rows.append((f'flag threshold {key}', f'{recorded[key]:g}', f'{value:g}'))
+    return rows + flag_rows
 
 
 def prepare_signal(raw, sf, file_id, do_resample, target_freq, do_highpass, hp_freq_val, warn=print, status=None):
@@ -889,6 +984,8 @@ def compute_channel_metrics(raw, sf, file_id, thresholds, hypno_vec, custom_stag
     and of {file_id}_quality_by_stage.tsv."""
     file_rows = []        # this file's per-channel metric rows → {file_id}_quality_metrics.tsv
     file_stage_rows = []  # this file's per-stage rows → {file_id}_quality_by_stage.tsv (if hypnogram)
+    # A format that declares no physical range (no bounds given at all): the metric does not exist, rather than 0 %.
+    has_bounds = bool(phys_bounds_by_name)
 
     # --- Compute metrics for all channels (unfiltered signal) ---
     # Memory: a full-night, high-rate recording with many channels (e.g. 32 EEG @ 1024 Hz)
@@ -905,9 +1002,11 @@ def compute_channel_metrics(raw, sf, file_id, thresholds, hypno_vec, custom_stag
         sig_uV = raw.get_data(picks=[ci])[0] * 1e6
         orig_base = final_to_orig.get(ch, ch)
         phys_min, phys_max = phys_bounds_by_name.get(orig_base, (np.nan, np.nan))
-        m = compute_signal_metrics(sig_uV, phys_min, phys_max)
+        m = compute_signal_metrics(sig_uV, phys_min, phys_max, sf)
         ch_metrics[ch] = m
         ch_flags[ch] = flag_channel(m, thresholds)
+        if not has_bounds:
+            del m['bounds_pct']
         file_rows.append({
             'file_id': file_id,
             'channel': ch,
@@ -918,10 +1017,11 @@ def compute_channel_metrics(raw, sf, file_id, thresholds, hypno_vec, custom_stag
             'p99_abs_uV': m['p99_abs_uV'],
             'p999_abs_uV': m['p999_abs_uV'],
             'flat_pct': m['flat_pct'],
-            'bounds_pct': m['bounds_pct'],
+            'bounds_pct': m['bounds_pct'] if has_bounds else np.nan,
             'hist_extreme_pct': m['hist_extreme_pct'],
             'n_peaks': m['n_peaks'],
             'signal_preparation': signal_preparation,
+            'flag_thresholds': flag_thresholds_text(thresholds),
             'suspect_reason': '; '.join(ch_flags[ch]),
             'exclude': bool(ch_flags[ch]),
         })
@@ -944,7 +1044,7 @@ def compute_channel_metrics(raw, sf, file_id, thresholds, hypno_vec, custom_stag
                 if not stage_samples:
                     continue
                 stage_sig = np.concatenate(stage_samples)
-                sm = compute_signal_metrics(stage_sig, phys_min, phys_max)
+                sm = compute_signal_metrics(stage_sig, phys_min, phys_max, sf)
                 file_stage_rows.append({
                     'file_id': file_id,
                     'channel': ch,
@@ -952,21 +1052,52 @@ def compute_channel_metrics(raw, sf, file_id, thresholds, hypno_vec, custom_stag
                     'mean_uV': sm['mean_uV'],
                     'std_uV': sm['std_uV'],
                     'flat_pct': sm['flat_pct'],
-                    'bounds_pct': sm['bounds_pct'],
+                    'bounds_pct': sm['bounds_pct'] if has_bounds else np.nan,
                     'hist_extreme_pct': sm['hist_extreme_pct'],
                     'p99_abs_uV': sm['p99_abs_uV'],
                     'p999_abs_uV': sm['p999_abs_uV'],
                 })
+    comparison = compare_channels(raw, sf)
+    for row in file_rows:
+        row.update(comparison[row['channel']])
     return ch_metrics, ch_flags, file_rows, file_stage_rows
 
 
-def display_limits(ch_metrics, ch_flags):
-    """Shared amplitude limits of the time-series and histogram figures.
+def compare_channels(raw, sf):
+    """Every channel compared with the median channel of the same 30-s epoch (channel_check_lib, every epoch of the
+    night, filtered 0.3-35 Hz): {channel: {'noisy_vs_median_pct', 'flat_vs_median_pct', 'comparison_alert'}}. The flags
+    judge each channel alone; this sees what only a comparison shows on a dense montage: a disconnected electrode is
+    many times larger than its neighbours. An alert apart, never a flag (not in suspect_reason / exclude, so tool 7
+    unticks nothing more). NaN and no alert with fewer than 3 channels (no median)."""
+    names = list(raw.ch_names)
+    empty = {ch: {'noisy_vs_median_pct': np.nan, 'flat_vs_median_pct': np.nan, 'comparison_alert': ''} for ch in names}
+    epochs = np.arange(int(raw.n_times // (CC.EPOCH_S * sf)))
+    if len(names) < CC.MIN_POOL or not len(epochs):
+        return empty
+    shares = CC.compared_with_median(CC.epoch_std_uV(raw, names, epochs), list(range(len(names))))
+    out = {}
+    for i, ch in enumerate(names):
+        noisy, flat = 100 * float(shares[0][i]), 100 * float(shares[1][i])
+        alert = ''
+        if noisy > 100 * CC.SHARE:
+            alert = f'noisy on {noisy:.0f}% of the epochs (over {CC.NOISY_RATIO:g} times the median channel)'
+        elif flat > 100 * CC.SHARE:
+            alert = f'nearly flat on {flat:.0f}% of the epochs (under {CC.DEAD_RATIO:g} times the median channel)'
+        out[ch] = {'noisy_vs_median_pct': noisy, 'flat_vs_median_pct': flat, 'comparison_alert': alert}
+    return out
+
+
+def display_limits(ch_metrics, ch_flags, cap_uV=None):
+    """Shared amplitude limits of the time-series and histogram figures. `cap_uV` caps them at a wide physiological
+    ceiling, for data with no declared range (DISPLAY_YLIM_UV): nothing clips them, so drifts and artefacts can push the
+    p99.9 far past the EEG and crush it, while clean channels still zoom in below the cap.
     Returns (y_lim_ts, x_lim_hist, hist_y_max)."""
     # Shared time-series / histogram amplitude limits from the per-channel p99.9 metric
     # (avoids materialising the whole recording just to take a global percentile).
     _p999 = [m['p999_abs_uV'] for m in ch_metrics.values()]
     y_lim_ts = float(max(_p999)) if _p999 else 1.0
+    if cap_uV is not None:
+        y_lim_ts = min(y_lim_ts, cap_uV)
     x_lim_hist = y_lim_ts
 
     # Shared Y-axis for histograms: computed from non-suspect channels only.

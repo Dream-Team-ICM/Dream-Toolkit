@@ -50,8 +50,8 @@ Not every change needs every test. The suite has three levels, from the fastest 
 | Level | What it runs | Duration | When |
 |---|---|---|---|
 | **Quick** | small checks of the shared code, and every Voila notebook (EDF tools and Curry twins) opened and run from top to bottom without clicking anything | about 2 min | a change that touches no tool's results (a test, a text, a Curry generator) |
-| **Standard** | quick + the full chain on the synthetic nights (comparison with the reference run, every check below) + the known answers + tools 1, 3, 4 | about 9 min (5 when the chain is reused) | a change to a tool |
-| **Full** | standard + the chain on the real nights + the parameter variants | about 24 min | before merging a branch, or after a change to code shared by several tools |
+| **Standard** | quick + the full chain on the synthetic nights (comparison with the reference run, every check below) + the known answers + tools 1, 3, 4 | about 32 min (28 when the chain is reused, measured on 2026-11-06) | a change to a tool |
+| **Full** | standard + the chain on the real nights + the parameter variants | about 1 h 20 (measured on 2026-11-06) | before merging a branch, or after a change to code shared by several tools |
 
 Two things keep the runs short:
 
@@ -202,8 +202,7 @@ the saved epochs file of tool 7 unreadable for tools 8 and 9. It is fixed, and t
 The tool 6 variant also documents a deliberate choice: tool 6 measures the signal **after** its optional
 filtering (a high-pass can rescue a channel worth keeping). The filtering smooths the flat tops of a clipped
 channel, so with these options the clipped Fp1 of the synthetic set is no longer flagged. The same variant
-checks that this preparation is recorded (tables and report), and that a second run without it, with
-"Skip already processed" ticked, warns on every skipped participant that its tables were made differently.
+checks that this preparation is recorded (tables and report).
 
 ### 10. Moving code into a shared library changes nothing (before / after check)
 
@@ -225,6 +224,69 @@ The checker is itself tested (`test_refactor_check.py`, quick level): it must se
 changed value, setting, report line, figure, array, a missing or an added file, and must not report a mere
 change of date in a report.
 
+### 11. "Skip already processed" does not hide other settings
+
+With *Skip* ticked, tools 6, 7, 8bis and 9 must not silently keep a participant made with other settings, and must not
+overwrite it on their own either. `test_settings_skip.py` opens a **new session** on a study already processed, the real
+case, on a light copy of the test chain's outputs. It checks, for each of the four tools:
+
+- the same settings: nobody is reprocessed, no question, no file touched;
+- other settings: the run stops and asks **before anything is written** (the dates of the files prove it);
+- *Keep* only rebuilds the tables, *Reprocess* makes again only the participants concerned, and the next session finds nothing
+  left to ask about them;
+- *Use the recorded settings* launches nothing and puts the page back, and a new participant is then made like the
+  others, whose files do not move. What cannot be put back is named;
+- a setting without effect asks nothing (a threshold that moves no flag, the bandwidth with Welch, the threshold of a method
+  that did not run);
+- tool 7 run again with other settings: 8bis and 9 ask, 8 only warns, and with the same settings or an older record nothing
+  happens. A re-aggregation of tool 9 does not make old spectra look up to date;
+- tool 9 takes the path each setting needs (full computation or re-aggregation), and a re-aggregation gives the same tables
+  as a full computation.
+
+Tool 7's editor is checked too: a channel unticked by hand comes back unticked, and the reference channel stays ticked, without
+which a reprocessing would change the reference.
+
+### 12. BrainVision recordings
+
+A BrainVision recording is three files (`.vhdr`, `.vmrk`, `.eeg`). The tests write such recordings themselves, with invented
+values, so no real recording is needed. `test_brainvision_lib.py` checks the reader: the signal comes back at the right scale in
+every data format, and a `[Comment]` that is missing, cut short or written differently never costs the recording.
+`test_brainvision_tools.py` runs the inspection tools:
+
+- **Same signal, same result**: the same two synthetic nights go through tool 6 as EDF and as BrainVision. Every metric agrees
+  within 0.1 %, and the same channels are flagged for the same reasons. Only the *at EDF bounds* metric differs, as it should: the
+  format declares no physical range, so it is blank rather than 0 %;
+- **Tool 1** reads the filters, the resolution and the impedances, flags an electrode above the threshold or without a measure (as the
+  file says it: *Out of Range!*, *not connected*), names the online reference and a recording pause, and says *not applicable* for what
+  the format does not have instead of reporting that all is well;
+- **A broken recording stops nothing**: with its `.eeg` gone, it is listed as failed with a clear message, and the others are read
+  (tools 1 and 2);
+- **Tool 2** goes through its whole page: the online reference is listed, a warning appears when it would stay flat, and the JSON test
+  recreates it on the signal;
+- **Tool 6** ticks its high-pass only when the header says the recording has no high-pass at all, and leaves out the online reference.
+
+`test_autoscoring_formats.py` does the same for the automatic scoring (tool 3bis):
+
+- **Same signal, same scoring**: one synthetic night scored by GSSC as EDF and as BrainVision gives the same stages and the same
+  probabilities (to the float32 precision of the BrainVision file);
+- **The derivations the models were trained on**: on a 10-10 cap, TP9 and TP10 stand for the mastoids (C3-M2 is C3 minus TP10), but
+  a recording with M1 / M2 keeps them; the online reference (Cz) is recreated only for a derivation that needs it; an eye electrode
+  recorded against Cz gets the reference of the EEG (IO minus TP9), while an EOG of an auxiliary input, an EDF, or the left-minus-right
+  derivation of two EOG are used as recorded. Each signal is checked value by value against what was written;
+- **Channel checks**: a noisy electrode, a dead mastoid and a noisy EOG are said (a clean recording says nothing); an ECG 100 times
+  too large, a chin EMG dominated by the mains, and a noise on the ECG input are said too. Nothing is changed;
+- **Tool 3bis** scores two BrainVision recordings with GSSC and YASA: the hypnograms are written beside the `.vhdr`, the parameters
+  file names the derivations and the EOG reference, and holds the channel warnings only when there is something to say.
+
+Tool 6's comparison of each channel with the median channel of the same epoch (`test_quality_lib.py`): a channel 10 times larger
+than the others is said in its own columns, never as a flag, so tool 7 unticks nothing more. Its flat measure counts only what
+holds still for 50 ms: a quiet channel at a high sampling rate is not flat, a 6-s flat stretch is, at any rate. Since this changed
+the flat values on purpose, `test_pipeline.py` compares tool 6 with the golden on everything else: only the flat values and, where
+they crossed the threshold, that one reason may move, and the channels tool 7 unticks stay the same.
+
+These tests do not replace a look at real data: at each phase the tools were also run on real recordings, which never enter the
+repository.
+
 ## Smaller checks
 
 | Area | What is checked |
@@ -242,6 +304,7 @@ change of date in a report.
 | Tool 8bis | The decision tables keep exactly the epochs and channels the former cleaned copy held; tool-7 deselected channels are recorded as dropped; an event-count threshold excludes a participant, a re-run without it lifts the exclusion; with *Skip* ticked, a participant decided with the same settings is skipped and one decided with another threshold is decided again |
 | Tool 8 | The decision tables match the former cleaned copy; the *Exclude* / *Remove my exclusion* button writes and deletes the decision |
 | Tool 9 | Every epoch × channel is in the tables with the right decision flags; dropped channels are still computed; the per-epoch spectrum file exists; night-third counts (rejected, out of scope, % rejected) are those of each stage × third cell |
+| The settings of *Skip* | Each comparison, record and fingerprint on small examples: both values reported, older records compared only on what they hold, the most frequent set at equal count (`test_quality_lib.py`, `test_preprocessing_lib.py`, `test_autoreject_settings.py`, `test_spectral_settings.py`, `test_study_files_lib.py`) |
 | Participant selector | Skip applies in both modes; a subset with already-processed participants shows the warning; the add box only offers participants not yet selected; pasted and clicked ids switch to subset mode; unknown ids are refused; a rescan drops vanished ids |
 | Registry details | Ids match regardless of case; no temporary file is left behind; rewriting the same decisions does not touch the file (their dates stay); the orange "registry changed" box compares what the tables say with the registry: a decision of the run shows it, a decision on another run or a decision lifted since then does not |
 | Several runs of tool 7 | Each run reads tool 5bis's decisions and its own; a decision on one run leaves the other's alone; on empty files: tool 7's line of the run, *New version* under Skip, the suffix proposed, typed, refused or already taken, who is already processed followed without a new Scan; tools 8, 8bis and 9 pre-choose the most recent run, tool 9 only its decisions. On the synthetic database (full level): a `_v2` of tool 7 then 8bis, 8 and 9 on it, each writing its own folders, the first run untouched and unaware of its exclusion |
@@ -258,7 +321,8 @@ change of date in a report.
   where the before / after check of section 10 compares the figures too).
 - **Curry recordings.** The Curry twins are checked for consistency with their EDF original and opened in a
   kernel (quick level), but never run on a recording (the Curry test data is 17 GB).
-- **Tool 2** is only opened (too interactive for a useful run), **tool 1bis** checks itself. Tool 0 is
+- **Tool 2** on an EDF study is only opened (too interactive for a useful run; section 12 goes through its page on BrainVision),
+  **tool 1bis** checks itself. Tool 0 is
   checked step by step as its steps are built (tool-0 redesign).
 - **Every option.** The variants cover the main options of tools 6 to 9, not every combination.
 - **The science of the methods.** The tests prove the tools compute what they computed before, or what a

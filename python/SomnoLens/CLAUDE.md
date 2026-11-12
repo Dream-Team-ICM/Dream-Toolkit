@@ -81,6 +81,13 @@ The "what to do / what not to break" reminders, grouped by theme. Each points to
   put the suffix (`SF.run_suffix`) on every output and on their registry sources (`8bis_auto_v2`), and read
   `PSL.effective_status(reg, run)` (5bis rows + the run's own). A new output folder or a new registry source of these
   tools carries the suffix too.
+- **Skip only what was made with the current settings (→ SPEC *Cross-cutting → Skip + cumulative-merge*)**: with Skip ticked, tools
+  6, 7, 8bis, 9 compare what each participant recorded with the page at Run, **before any analysis and any write**. A difference
+  stops the run and asks (`ParticipantSelector.ask_other_settings`): *Reprocess*, *Keep*, *Use the recorded settings* (puts
+  the widgets back, launches nothing). **A setting added to these tools must be recorded additively and added to its
+  `settings_differences` and `recorded_settings`**, or it is silently skipped again. No record = no difference. What follows
+  tool 7 carries `SF.preproc_fingerprint` (a fixed list of sidecar keys): 8bis and 9 ask, 8 only warns, a re-aggregation of tool 9
+  keeps it.
 - **Companion suffixes + names registry = `tools/study_files_lib.py`** (no EDF reading, imported next to `ui_lib`):
   the hypnogram pre-choice of tools 0, 3, 3bis, 5, 6, 7 is **one function**, `pick_hypno_suffix` (intent `scored`
   for tool 3, `expert` elsewhere): never re-implement it in a notebook. Each tool notes the names it **wrote** in
@@ -143,6 +150,11 @@ The "what to do / what not to break" reminders, grouped by theme. Each points to
   recomputed fallback), and the channel layer must be engaged **only** when the user actually uses it (the
   fallback flags depend on thresholds that differ from the tool-7 run when no params JSON exists).
   → SPEC *Cross-cutting → High-density montage support* + §8.
+- **Channel checks warn, they never decide (`tools/channel_check_lib.py`)**: each channel against the median channel of the
+  same epoch (noisy / nearly flat), the EOG, the ECG / chin EMG amplitude and mains. Tool 3bis checks each model's channels
+  (additive `channel_quality_warnings`), tool 6 shows the comparison in its own columns, **never as a flag** (tool 7 unticks
+  nothing more). An EOG recorded against a BrainVision online reference gets the EEG's reference in 3bis (`eog_reference`).
+  → SPEC *Cross-cutting → Channel checks* + §3bis + §6.
 - **Per-epoch montage scales are FIXED, never autoscaled** (`DISPLAY_SCALE_UV` = EEG 150 / EOG 300 /
   EMG 100 / ECG 1000 µV per row, clinical conventions): window-based autoscaling made the same waveform
   change height between epochs and destroyed visual amplitude criteria. Overflow into the neighbouring row
@@ -366,6 +378,9 @@ The "what to do / what not to break" reminders, grouped by theme. Each points to
   log guards*.
 
 **Curry twins** (→ SPEC *Curry 9 support*)
+- **Frozen until their removal (`tools/plan_brainvision.md`, phases 2 to 6, since 2026-11-06)**: the notebooks stay as they are,
+  and every "re-run the generator" of this file is suspended (their match strings no longer apply). A read of a recording in a
+  tool goes through `tools/recording_lib.py`.
 - **Tool 8's twin = 3 replacements** (`_make_tool8_curry.py`): H1, one prose sentence, and the
   **shared-library import probe** (the EDF notebook probes only `cwd`/`cwd/tools`, which does not resolve
   from `tools_curry/`). Nothing Curry-specific is injected: the high-density support is inherited from the
