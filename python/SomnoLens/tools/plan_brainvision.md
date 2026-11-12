@@ -1,6 +1,6 @@
 # Plan : format BrainVision (.vhdr, .vmrk, .eeg) et une seule version de chaque outil
 
-**Statut** : version 3 du 2026-11-06, confirmée. Phases 1 et 2 faites, phase 3 à valider (2026-11-12). Chaque phase est validée
+**Statut** : version 3 du 2026-11-06, confirmée. Phases 1 à 3 faites, phase 4 à valider (2026-11-12). Chaque phase est validée
 avant la suivante.
 **Objectif immédiat** : pouvoir inspecter ces données et faire l'autoscoring (phases 1 à 3). Le reste de la chaîne suit
 (phase 4), puis l'affichage haute densité (phase 5) et la suppression des jumeaux Curry (phase 6).
@@ -377,6 +377,23 @@ réponse. Dans toutes les phases, **le golden EDF synthétique ne doit pas bouge
   - les métriques de l'outil 5 sur des siestes en journée, et ses *lights off / on* ;
   - la mémoire de l'outil 7 : environ 2,9 Go par enregistrement avant ses copies, sans problème sur 31 Go.
 - **Tests proposés** : full, une fois.
+- **Précisions apportées en faisant** (2026-11-12) :
+  - **un seul endroit pour l'heure de début** : `recording_lib.read_start_datetime` (le `.vmrk`, `None` pour un enregistrement mis en
+    pause), utilisé par l'export des événements des outils 4, 5, 7, 0 ;
+  - **les lectures d'`edf_io_lib`** (EEG, canaux de contexte, bornes physiques) passent par `recording_lib`. L'outil 7 appelle
+    désormais `read_context_raw` au lieu de sa copie en ligne : l'EOG du compagnon reçoit la référence de l'outil 2 ;
+  - **la règle de référence de l'EOG** est passée dans `recording_lib`, pour que l'outil 7 l'utilise sans charger les modèles ;
+  - **Cz dans l'outil 7** : l'outil 6 la laisse de côté (plate telle qu'enregistrée). L'outil 7 la remet quand l'outil 2 déclare une
+    référence. Sans référence (ta configuration actuelle), elle reste plate : c'est ce que l'outil 2 signale déjà ;
+  - **bug trouvé sur tes données** : MNE type IO en `misc` (pas de position dans le fichier), et le spectre de l'outil 7 le laissait de
+    côté, d'où un plantage sur les trois enregistrements. Tous les canaux du montage sont maintenant typés EEG, comme pour un EDF ;
+  - **corrections de l'équipe** (FIX #8, #10 dans `edf_io_lib`, arrivées par le merge du 2026-11-12) reportées dans la copie de l'outil 7,
+    sans quoi le test de synchronisation échouait.
+- **Sur tes données (copie en `%TEMP%`)** : l'outil 4 détecte `_PSG4_ScoredEvents.txt` et lit les deux libellés.
+  `Micro-éveil 1 ARO SPONT` est reconnu, `Micro-éveil 5 MSE` reste à choisir à la main. L'outil 5 tourne : lumières aux bornes de
+  l'enregistrement (aucune autre source), TIB de 165 à 196 min, TST de 5 à 12 min. L'indice d'éveils (55 à 158 par heure) n'a pas de
+  sens sur si peu de sommeil. L'outil 7 tourne en 13,5 min pour les trois enregistrements (64 canaux, compagnon EOG/EMG/ECG,
+  événements placés). L'outil 8bis pré-coche tous les stades (médiane de 13 époques N2), et l'outil 8 charge et enregistre.
 
 ### Phase 5 : affichage haute densité
 

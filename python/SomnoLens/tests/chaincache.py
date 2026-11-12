@@ -41,10 +41,11 @@ LIB_RECORDING = [TOOLS / 'recording_lib.py', TOOLS / 'brainvision_lib.py']   # o
 LIB_CHECK = TOOLS / 'channel_check_lib.py'   # the channel checks (tool 6's comparison with the other channels)
 TOOL_DEPS = {
     '5': [TOOLS / '5_compute_sleep_macrostructure_voila.ipynb', LIB_PSL, LIB_MACRO, LIB_EIO, LIB_QUAL, LIB_UI,
-          LIB_SF],
+          LIB_SF, *LIB_RECORDING],
     '5bis': [TOOLS / '5bis_exclude_sleep_macrostructure_voila.ipynb', LIB_PSL, LIB_MACRO, LIB_EIO, LIB_UI, LIB_SF],
     '6': [TOOLS / '6_quality_overview_voila.ipynb', LIB_PSL, LIB_QUAL, LIB_EIO, LIB_UI, LIB_SF, *LIB_RECORDING, LIB_CHECK],
-    '7': [TOOLS / '7_preprocessing_voila.ipynb', LIB_PSL, LIB_PREP, LIB_EIO, LIB_UI, LIB_SF],   # the libraries import edf_io_lib
+    '7': [TOOLS / '7_preprocessing_voila.ipynb', LIB_PSL, LIB_PREP, LIB_EIO, LIB_UI, LIB_SF,   # the libraries import edf_io_lib
+          *LIB_RECORDING, LIB_CHECK],
     '8bis': [TOOLS / '8bis_reject_automatically_voila.ipynb', LIB_PSL, LIB_QC, LIB_PREP, LIB_AR, LIB_EIO, LIB_UI, LIB_SF],
     '8': [TOOLS / '8_reject_manually_voila.ipynb', LIB_PSL, LIB_QC, LIB_PREP, LIB_EIO, LIB_UI, LIB_SF],
     '9': [TOOLS / '9_spectral_features_voila.ipynb', LIB_PSL, LIB_SPEC, LIB_EIO, LIB_UI, LIB_SF],

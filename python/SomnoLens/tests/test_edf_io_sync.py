@@ -24,11 +24,11 @@ LIB = ROOT / 'tools' / 'edf_io_lib.py'
 COPIES = {
     'tools/1bis_anonymize_edf_voila.ipynb': ['detect_encoding'],
     'tools/2_select&remap_channels_edf_voila.ipynb': ['extract_filter_value'],
-    'tools/4_remap_events_edf_voila.ipynb': ['_TXT_DUR_RE', 'read_edf_start_datetime', 'event_companion_paths'],
+    'tools/4_remap_events_edf_voila.ipynb': ['_TXT_DUR_RE', 'event_companion_paths'],
     'tools/6_quality_overview_voila.ipynb': ['drop_suffix_duplicates', 'adapt_remap_dict_to_suffixes',
                                              'get_phys_bounds_uV'],
     'tools/7_preprocessing_voila.ipynb': ['drop_suffix_duplicates', 'adapt_remap_dict_to_suffixes', '_TXT_DUR_RE',
-                                          'read_edf_start_datetime', 'event_companion_paths', '_events_df_from_txt',
+                                          'event_companion_paths', '_events_df_from_txt',
                                           '_events_df_from_csv', '_events_df_from_manual', 'augment_remap_for_manual',
                                           'load_events', 'load_event_remap'],
     'tools/quality_lib.py': ['BASE_STAGE_COLORS', 'CUSTOM_STAGE_PALETTE', 'load_custom_stages', 'parse_custom_field',

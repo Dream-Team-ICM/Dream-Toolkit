@@ -27,9 +27,9 @@ SomnoLens/
 ├── tools/
 │   ├── 0_live_explore_1file_voila.ipynb         # One participant through the whole pipeline (Voila GUI, being rebuilt)
 │   ├── edf_io_lib.py                            # Shared EDF reading (header, channel types, hypnogram, events, context) + custom stages: tools 0, 1, 1bis, 3 and the libraries
-│   ├── brainvision_lib.py                       # BrainVision reading (.vhdr + .vmrk + .eeg), in the shape of the EDF header: tools 1, 2, 3, 3bis, 6 so far (tools/plan_brainvision.md)
-│   ├── recording_lib.py                         # One way to read a recording, EDF or BrainVision: header, channel table, start, signal, online reference: tools 1, 2, 3bis, 6 so far
-│   ├── channel_check_lib.py                     # Checks of the channels given to a tool (noisy / dead electrode, mastoid, EOG; ECG and chin EMG amplitude): warnings only, tool 3bis (+ 0) so far
+│   ├── brainvision_lib.py                       # BrainVision reading (.vhdr + .vmrk + .eeg), in the shape of the EDF header: every tool that reads a recording (tools/plan_brainvision.md)
+│   ├── recording_lib.py                         # One way to read a recording, EDF or BrainVision: header, channel table, start, signal, online reference, EOG reference: tools 0-7 and the libraries (edf_io_lib imports it at call time)
+│   ├── channel_check_lib.py                     # Checks of the channels given to a tool (noisy / dead electrode, mastoid, EOG; ECG and chin EMG amplitude): warnings only, tools 0, 3bis, 6 (comparison columns), 7 (log)
 │   ├── study_files_lib.py                       # Names registry (config_param/file_names.json), choice of the companion suffixes, where each input is found: tools 0, 2, 3, 3bis, 4, 5, 5bis, 6, 7 (no EDF reading)
 │   ├── autoscoring_lib.py                       # Tool 3bis step 1 (GSSC, YASA, SleepFM scoring + figures), shared with tool 0
 │   ├── sleepfm_lib.py                           # SleepFM-Clinical for tool 3bis: model download/locate, montage, inference
@@ -330,7 +330,11 @@ test must point it at a copied `preproc_epo`.
   `tool3bis`, `tool0`): the reading of `autoscoring_lib` (TP9 / TP10, the online reference recreated only when needed, the EOG
   reference, each signal against what was written), `channel_check_lib`'s checks, tool 3bis on BrainVision (GSSC + YASA), the
   same night scored the same in EDF and in BrainVision. Tool 3bis on EDF, before / after the change: `score_edf_equivalence`'s two
-  studies, every output compared file by file (`refactor_check.compare_file`).
+  studies, every output compared file by file (`refactor_check.compare_file`). `test_brainvision_chain.py` (quick + standard,
+  markers `tool0`, `tool4`, `tool5`, `tool7`, `tool8bis`): the reads of `edf_io_lib` / `macrostructure_lib` for any format (a
+  paused recording's clock not used), the reference stages of 8bis, then tools 4, 5, 6, 7 and 8bis on a two-nap study (events
+  placed from the `.vmrk` start, the online reference kept and re-referenced, the EOG of the companion referenced like the EEG,
+  every stage pre-ticked).
 - `test_tools_1_3_4.py` (standard): on a fresh synthetic database. Tool 1: 4 files × 4 channels at 256 Hz,
   the ±50 µV Fp1 of sim01 as bad dynamic range, headers anonymous. Tool 3: a raw Compumedics-style export
   (`0-5 / W / R / ?`, N3 coded `3` or `4`) remaps back to the generated stages, the mid-night `?` listed in
@@ -1187,6 +1191,14 @@ result shown in the app. Purpose: **diagnose a participant** and **train a new u
 modifies a recording, a companion or a batch-tool output (it writes only a rescored hypnogram, manual
 annotations and its inspection report, on an explicit action). Built by the tool-0 redesign (2026-10-09 → 15).
 
+**BrainVision recordings (2026-11-12, `tools/plan_brainvision.md` phase 4)**: the study scan lists the `.vhdr` too
+(`study_files_lib.list_recordings`), the header comes from `recording_lib.read_header`, and every signal read goes through
+`edf_io_lib`'s reading functions, which read any format (`read_eeg_raw`, `read_context_raw` with the EOG referenced like
+the EEG, `phys_bounds_for_remap`: no bounds for BrainVision, so step 5 caps its figures at ±500 µV like tool 6), and
+`macrostructure_lib.read_header_info` for step 4. Step 3 shows the channel checks of tool 3bis with its notes. The
+explorer and the other steps work on the loaded Raw, so they are unchanged; their figures are not audited at 62 channels
+yet (phase 5).
+
 **Core rule: never re-implement a computation.** Each step calls the very functions of the batch tool it
 mirrors, which live in the shared libraries (see *Cross-cutting → Shared computation libraries*), so the numbers
 are the batch tool's by construction; `tests/test_tool0.py` checks it, step by step, against the chain outputs
@@ -1208,7 +1220,7 @@ the whole database / what to look at), a status badge, a **Run** button, the res
 |---|---|---|
 | 1 Load | 2, 3, 4 | Header-only pre-fill on participant change (channels + detected types, tool 2's entry, context channels, hypnogram candidates, event companions); **Load the recording** reads the signal |
 | 2 Header | 1 (1bis check) | Per-channel header table (tool 1's `res_theoretical`, filters) **split by detected type** (`detect_channel_types`: EEG, EOG, EMG, ECG, other, each with its count; an empty EEG / EOG / EMG / ECG group says "none detected", an empty "other" is left out), so a detection miss shows at a glance; a channel whose role here disagrees with its detected type (used as EEG by tool 2's remap, or put on a context role, but detected otherwise) gets a `check` column "⚠ used as …" and a line in the checks; dynamic range ≤ 500 µV flagged on EEG, mixed EEG rates, anonymization verdict (the name itself is never shown) |
-| 3 Scoring & events | 3, 3bis, 4 | Hypnogram + events overview figure (tool 5's night figure, `macrostructure_lib.plot_night_overview`, with the manual annotations); hypnogram checks (length status, tool 3's mid-night `?` rule `edf_io_lib.mid_recording_unscored`, labels outside AASM / custom / MT, rescored count) and the epoch-by-epoch crosstab of every other hypnogram file of the recording against the one in use (e.g. raw export → tool 3's remapping); events: raw label → tool-4 label (unmapped flagged "tool 7 ignores it"), per type × stage at onset, onsets outside the recording. **Automatic scoring (GSSC, `autoscoring_lib`, imported on first use)**: *Read tool 3bis's scoring* (its `_hypnodensity.tsv` + params, when present) or *Score now with GSSC* (tool 3bis's one-electrode / consensus modes and EOG modes, `score_night`, model loaded once per session); tool 3bis's hypnograms, hypnodensity, agreement (κ, accuracy, F1) with the hypnogram in use (rescorings included), confusion matrix, non-AASM profile |
+| 3 Scoring & events | 3, 3bis, 4 | Hypnogram + events overview figure (tool 5's night figure, `macrostructure_lib.plot_night_overview`, with the manual annotations); hypnogram checks (length status, tool 3's mid-night `?` rule `edf_io_lib.mid_recording_unscored`, labels outside AASM / custom / MT, rescored count) and the epoch-by-epoch crosstab of every other hypnogram file of the recording against the one in use (e.g. raw export → tool 3's remapping); events: raw label → tool-4 label (unmapped flagged "tool 7 ignores it"), per type × stage at onset, onsets outside the recording. **Automatic scoring (GSSC, `autoscoring_lib`, imported on first use)**: *Read tool 3bis's scoring* (its `_hypnodensity.tsv` + params, when present) or *Score now with GSSC* (tool 3bis's one-electrode / consensus modes and EOG modes, `score_night_gssc` with its channel checks shown in the notes, model loaded once per session); tool 3bis's hypnograms, hypnodensity, agreement (κ, accuracy, F1) with the hypnogram in use (rescorings included), confusion matrix, non-AASM profile |
 | 4 Macrostructure | 5, 5bis | `macrostructure_lib.compute_recording` with tool 5's default parameters (sleep-onset rule, ODI / T90 options exposed), on the hypnogram in use (`stages=None` = tool 5 reads the file when nothing is rescored, else the file with the rescored epochs replaced), the study's participant table (`participants.tsv/.csv/.xlsx` at the study root, join column guessed like tool 5) and summary-txt suffix (tool 5's rule). Shows tool 5's per-recording report (the same `macrostructure_lib` pieces): the night figure (hypnogram, time in bed shaded with its lights source, sleep onset, end of the sleep period, one row per scored-event type), the AHI severity band, the `METRICS` table with the indicative ranges (out-of-range rows light grey, `recording_metrics_html`) and a **"tool 5 on disk" column** (✓ same / ≠ value, read from `{file_id}_sleep_metrics.tsv` when tool 5 has run), tool 5's checks, the provenance, and tool 5bis's last decision for the participant (`participant_selection.tsv`). A recording tool 5 cannot compute shows tool 5's error ("listed in sleep_metrics_failed.tsv") |
 | 5 Quality | 6 | Tool 6's run for this participant, `quality_lib`'s functions in tool 6's order: optional resampling then high-pass (`prepare_signal`, on a copy: the explorer's signal is never filtered), tool 6's hypnogram rules (`hypno_vector`, `check_hypno_length`) on the hypnogram file **whole** with the rescored epochs replaced (the scoring done here when there is no file), the EDF physical range of each channel (`edf_io_lib.phys_bounds_for_remap`: tool 6's bounds lines, header only), `compute_channel_metrics` (tool 6's thresholds and defaults exposed), `display_limits`, `compute_channel_spectrograms`. Shows tool 6's overview box (suspicious channels and why, hypnogram warning, what was analysed), the per-channel table (tool 6's columns, flagged rows shaded) with a **"tool 6 on disk" column** (✓ same / ≠ the columns that differ, against `{file_id}_quality_metrics.tsv` when tool 6 has run), the per-stage std / p99.9 / flat tables, and tool 6's Overview figures (butterfly, median spectrogram, PSD, amplitude distributions, averaged metrics). Tool 6's two **metric figures per electrode** (pooled box plots, metric by electrode) are large: they are drawn for the **inspection report only**, in a closed `<details>` ("Metrics per electrode"), and only when *Keep an inspection report* is ticked (the tab says where they are). **Per-channel inspection**: a closed `Accordion` (`acc_ch5`, shown once step 5 has run); a dropdown (the first flagged channel pre-selected) shows tool 6's channel section (metrics with the interpretation column, histogram, PSD, time series, spectrogram), **drawn ahead**: right after the overview figures are shown (they are not delayed), before the report's metric figures, so opening it is immediate; **Show in the explorer** puts the navigator spectrogram on that channel. The inspection report keeps the tables, the first two overview figures and the folded metric figures |
 | 6 Preprocessing | 7 | Tool 7's run for this participant, `preprocessing_lib`'s functions in tool 7's order on a copy of the recording: `select_montage_channels` (one keep checkbox per EEG channel, pre-filled like tool 7 from tool 6's `quality_summary.tsv` on disk, unticked = deselected: kept marked bad, never flagged; *Untick step 5's flagged channels* applies the live step-5 flags), `preprocess_raw` (re-reference declared in tool 2, resampling, notch, band-pass), `hypnogram_epochs` on the hypnogram in use (the file whole with the rescorings, as tool 7 reads it), `make_epochs`, `set_bads_aside`, `epoch_psd_for_1f`, the event chain (`edf_io_lib.load_events` + `augment_remap_for_manual`, then `event_flags`), `compute_rejection_masks`, `epoch_metadata`. Every parameter exposed with **tool 7's widget defaults** (notch 50 Hz on, band-pass 0.1–50 Hz on, resampling off, epoch length 30 s, amplitude W 250 / N1 250 / N2 300 / N3 300 / R 250 / custom 250 µV, gradient 100 µV/sample, flat 1 µV, 1/f R² 0.95 / error 0.15 on 2–45 Hz, PSD smoothing median 3 + LOWESS 2 Hz on, events off with every event_remap.json type ticked, manual annotations off). Shows the headline rates (pairs and epochs flagged), the deselected channels, a **"tool 7 on disk" line** (✓ identical / ≠ against `{file_id}_epoch_channel_rejection.tsv`), tool 7's heatmap, per-stage × method and channel × stage tables, the event-type table and the settings. A fatal step shows "Tool 7 would skip this recording" with its `preprocessing_failed.tsv` reason. Nothing is written but the inspection report |
@@ -1544,7 +1556,7 @@ left mastoid (M1/A1), a midline one minus both averaged (`contralateral_refs`), 
 derivations; GSSC uses MNE's re-referencing when every chosen electrode is on the same side (the test
 datasets: C3 on M2, outputs identical to the former ones). A participant without the mastoid needed falls back to
 tool 2's reference (noted in the log, the notes and `eeg_reference`). **`As declared in tool 2`**
-(`REFERENCE_DECLARED`): the former behaviour. Tool 0's step 3 (`score_night`) uses the same default.
+(`REFERENCE_DECLARED`): the former behaviour. Tool 0's step 3 (`score_night_gssc`) uses the same default.
 
 **Any recording format (2026-11-12, `tools/plan_brainvision.md` phase 3)**: the recordings are found by
 `study_files_lib.list_recordings` and read through `recording_lib` (EDF branch = the former reading, so an EDF study gives the
@@ -1571,7 +1583,7 @@ same outputs: checked file by file on `score_edf_equivalence`'s two studies, the
   it is tool 2's, SleepFM's ECG and EMG). Each warning is a `⚠️ channel check:` line of the log, a *Channel checks* report row
   (with the ways out: another electrode, tool 2's reference, EOG = None, the participant rescored alone) and the additive
   `channel_quality_warnings` list of `_scoring_params.json`, absent when there is nothing to say. Nothing is changed and the
-  night is always scored. Tool 0's step 3 runs the same checks (returned, not shown yet).
+  night is always scored. Tool 0's step 3 runs the same checks and shows them with its notes.
 
 **SleepFM model files** (`sleepfm_lib`): not a Python package but 9 files of the official repository
 (`zou-group/sleepfm-clinical`, commit `2bcbae04`, CC BY-NC 4.0), each listed with its SHA-256 (`SLEEPFM_FILES`,
@@ -1668,8 +1680,9 @@ refresh, *Planned modules*). **YASA 0.8 removes `SleepStaging.predict_proba()`**
 **Code location** (tool-0 redesign, phase 2): the computation and the figures live in
 **`tools/autoscoring_lib.py`**, moved verbatim from the notebook's former cell 2, with the guarded GSSC import
 (`GSSC_OK` / `GSSC_MSG` / `GSSC_VERSION` / `TORCH_VERSION`, `TORCH_FORCE_NO_WEIGHTS_ONLY_LOAD`) and
-**`score_night`**, the scoring steps of `score_one` (EEG + EOG + `run_gssc`, missing-electrode rule) lifted
-unchanged. The notebook imports them by name (cell 2) and keeps its UI, its writes and its reports; tool 0's
+**`score_night_gssc`**, the scoring steps of `score_one` (EEG + EOG + `run_gssc`, missing-electrode rule) lifted
+unchanged (the former tuple wrapper `score_night` of tool 0 was removed on 2026-11-12: tool 0 reads the dict, checks
+included). The notebook imports them by name (cell 2) and keeps its UI, its writes and its reports; tool 0's
 step 3 calls the same functions. Move proven output-neutral (`tests/outside_chain.py` + `refactor_check.py`:
 86 files, both datasets, no difference). Edit the library, not the notebook, for any scoring or figure change. Its
 reading helpers (`drop_suffix_duplicates`, `adapt_remap_dict_to_suffixes`, `read_edf_start_datetime`,
@@ -1789,6 +1802,12 @@ Interactive tool to **visualize** the scored-event configurations present across
 
 **Event sourcing (TXT-first / CSV / XML-fallback)**: a shared `load_events(edf_path, txt_suffix='_ScoredEvents_Export.txt', csv_suffix='_event_xml.csv')` helper reads three Compumedics companions in priority order, (1) the `*_ScoredEvents_Export.txt` **text export** (the "classic" Profusion/Curry French export: comma-separated, **no header**, `HH:MM:SS` clock time + `M:SS[.s]` duration + French label, **encoding sniffed**, UTF-16 with BOM or UTF-8/ANSI, and parsed inline by `load_events_from_txt`, mirroring `curry_io._parse_events_txt`), (2) the event CSV (`Name, Start, Duration` in seconds), (3) the `<ScoredEvents>` of the `*.edf.XML` (Profusion `CMPStudyConfig`, `<Input>` ignored). For the harmonization scan **only the names are needed**, so the `.txt` clock times are *not* converted (Start/Duration `NaN`, no EDF-header read). `read_edf_start_datetime()` (EDF header offsets 168/176, 2-digit-year clipping) supplies the recording-start datetime that converts them to seconds **only** in the 1bis check. CSV and XML were verified equivalent on ICEBERG. The `<ScoredEventSettings>` catalogue is **not** used for grouping.
 
+**BrainVision recordings (2026-11-12, `tools/plan_brainvision.md` phase 4)**: the `.vhdr` are found by
+`study_files_lib.list_recordings` (a conflict with an `.edf` of the same name is said), and the 1bis check takes the start
+of the recording from `recording_lib.read_start_datetime` (the `.vmrk` for BrainVision; `None` for a recording paused,
+its clock no longer following the samples: the line says so). A BrainVision recording has no `*.edf.XML`, so the check
+lists it as *missing XML*. The tool's former copy of `read_edf_start_datetime` is gone (`test_edf_io_sync.py` updated).
+
 **Configurable event suffixes**: two editable text fields, **`TXT suffix:`** (default `_ScoredEvents_Export.txt`) and **`CSV suffix:`** (default `_event_xml.csv`), drive `event_companion_paths(edf_path, txt_suffix, csv_suffix)`, so datasets exported with different suffixes are supported. On folder selection **both** are **auto-detected** (mirroring the hypnogram-suffix detection of `6_quality_overview`, see *Cross-cutting procedures*): for the TXT the `.txt` files **whose name contains `event`** are scanned (so hypnogram `.txt` are not counted), for the CSV the `.csv` files. Candidate suffixes are counted and each suffix menu (*Voila page conventions → Suffix menus*) pre-set on the **most frequent** suffix (shortest on ties), with the number of recordings that have it and the ones that miss it under it (the Curry twin keeps a single menu, the event export). The XML fallback (`.edf.XML`) is auto-derived, no field.
 
 **Existing mapping and file name** (2026-11-04): the existing mapping is a line of the *Inputs found* list (`fc_mapping`,
@@ -1826,6 +1845,14 @@ and references in `REFERENCE_SOURCES` / `REFERENCES` (see *Glossary and indicati
 `.py`, no Curry twin): the outputs are per-recording TSVs + a **per-recording report** (since 2026-10-13, see
 *Per-recording report* below) plus one database-level table / workbook / report. It is the documented **exception** to *Feature tools start
 from the clean epochs*: macrostructure needs every scored epoch, not the ones that survived rejection.
+
+**BrainVision recordings (2026-11-12, `tools/plan_brainvision.md` phase 4)**: `macrostructure_lib.read_header_info` gives the
+header of any format in the shape of `read_edf_header_info` (an EDF by its binary header, unchanged; a BrainVision
+recording through `recording_lib`: the start from the `.vmrk`, one sample per data record, the channels of the file only).
+A recording without a usable start (no date, or paused: its clock no longer follows the samples) raises, like an
+unreadable EDF header, since the lights and the event exports are clock times. The optional `Light` / `SpO2` reads go
+through `recording_lib.read_raw`. The scored events come from `edf_io_lib.load_events`, whose recording start is now
+`recording_lib.read_start_datetime`.
 
 **Code location** (tool-0 redesign, phase 3): the constants and helpers (former setup cell: `METRICS`,
 `METRIC_INFO`, `METRIC_KEYS`, `PROVENANCE_KEYS`, `REFERENCE_RANGES` / `_SOURCES`, `REFERENCES`,
@@ -2293,6 +2320,20 @@ Key metrics shown in plots: `std_uV`, `flat_pct`, `bounds_pct`, `hist_extreme_pc
 
 Implemented as a Voila notebook with four sections: (1) path configuration, (2) preprocessing and rejection parameters, (3) participant selection, (4) processing loop. **Section 2 is organised into two headed sub-sections**: **Preprocessing** (resampling + notch + bandpass filter) and **Epoch rejection** (peak-to-peak amplitude per stage, flat signal & gradient, 1/f fit quality, and the optional event-based rejection, see below).
 
+**BrainVision recordings (2026-11-12, `tools/plan_brainvision.md` phase 4)**: the recordings are found by
+`study_files_lib.list_recordings` (the 5 discovery sites), the `[load]` read is `recording_lib.read_raw` (same `include=`;
+the EDF branch is the former call; the online reference of a BrainVision recording is recreated when the remap names it),
+the `.txt` event export is placed with `edf_io_lib.read_start_datetime` (the `.vmrk` start; not converted for a paused
+recording), and the `[H]` companion is `edf_io_lib.read_context_raw` (the former inline lines, lifted there for tool 0), with
+`sub_config` so that an EOG recorded against the online reference gets tool 2's reference, like the EEG shown above it in
+tool 8. **The online reference** is not in tool 6's table (flat as recorded, left out there): Load adds it to the channels
+of the participant when tool 2 declares a reference (it is then a real signal, e.g. Cz − TP9), and leaves it out without one.
+**Channel checks** (`channel_check_lib`, before the read): the reference channels declared in tool 2 against the median
+EEG channel, and the amplitude / mains of the declared ECG and chin EMG, as `⚠ channel check:` lines of the log only (no
+output changes). An EDF study gives the same outputs (the test chain's golden). The event-chain copies of the notebook
+also take the team's fixes of `edf_io_lib` (FIX #8 `read_bytes`, FIX #10 logged parse errors), so that
+`test_edf_io_sync.py` holds.
+
 **Shared library (`tools/preprocessing_lib.py`, tool-0 redesign phase 5)**: the computation lives in the library,
 **moved verbatim** and shared with tool 0's step 6 (same code, same flags). It holds (a) the former
 shared-function cell minus the EDF reading: `METHOD_ORDER` / `METHOD_CODE` / `MULTIPLE_CODE` / `METHOD_LABEL`, the
@@ -2682,6 +2723,13 @@ PREP / FASTER, cited in the page's references): a globally-bad channel is **drop
 no longer condemns every epoch it appears in. Section 2 says in grey that the 20 % defaults are to be adapted to
 the dataset's quality. Voila-only (no batch twin: the run loop already processes the whole database). It is a
 pure **decision + write** tool: it reads tool-7 outputs **read-only** and never modifies them.
+
+**Few reference epochs (2026-11-12, `tools/plan_brainvision.md` decision 13)**: the scan counts each participant's epochs
+in N2 / N3 / R (its `_epoch_channel_rejection.tsv`, one row per epoch). When the median participant has fewer than
+`MIN_REFERENCE_EPOCHS` (30), as in naps, every stage is pre-ticked as a reference stage
+(`default_reference_stages(ordered, n_reference_epochs)`), and an amber line of the scan says why: channel badness judged on
+4 or 10 epochs would be unstable. The choice stays editable; a night study keeps N2 / N3 / R (the median rule, so one
+short night does not change the study's default).
 
 **Shared library (`tools/autoreject_lib.py`, tool-0 redesign phase 6)**: the decision rule, its tables and figures
 live in the library, **moved verbatim** from the notebook's shared-function cell and shared with tool 0's step 7

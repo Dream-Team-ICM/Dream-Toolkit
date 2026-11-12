@@ -31,6 +31,7 @@ from edf_io_lib import (read_edf_start_datetime, event_companion_paths, _events_
                         _events_df_from_xml, _events_df_from_manual, augment_remap_for_manual, load_events,
                         load_event_remap)
 from edf_io_lib import (load_custom_stages, parse_custom_field)   # one copy, in edf_io_lib (same folder)
+import recording_lib as RL   # one way to read a recording (EDF, BrainVision)
 
 try:
     import openpyxl                     # noqa: F401  (pandas needs it to read/write .xlsx)
@@ -304,6 +305,26 @@ def read_edf_header_info(edf_path):
             'samples_per_record': samples_per_record, 'sfreq_per_ch': sfreq, 'dims': dims}
 
 
+def read_header_info(path):
+    """read_edf_header_info for a recording of any format: an EDF by its binary header (unchanged), a BrainVision
+    recording through recording_lib (one sample per data record, the channels of the file only). Raises when the
+    recording start is unknown or unusable (a BrainVision recording paused, whose clock no longer follows the samples):
+    the lights and the scored-event exports are clock times."""
+    if RL.file_format(path) == 'edf':
+        return read_edf_header_info(path)
+    header = RL.read_header(path)
+    start_dt = RL.read_start_datetime(path)
+    if start_dt is None:
+        raise ValueError('no usable recording start in the .vmrk (no date, or the recording was paused)')
+    keep = [i for i, in_file in enumerate(header['in_file']) if in_file]
+    labels = [header['channel'][i] for i in keep]
+    sfreq = float(header['sfreq'])
+    return {'start_dt': start_dt, 'duration_s': float(header['duration_s']), 'n_data_records': int(header['n_times']),
+            'record_duration_s': 1.0 / sfreq, 'n_channels': len(labels), 'ch_names': labels,
+            'samples_per_record': [1] * len(labels), 'sfreq_per_ch': {lab: sfreq for lab in labels},
+            'dims': [header['dimension'][i] for i in keep]}
+
+
 def find_channel(ch_names, pattern):
     """First channel label matching a case-insensitive regex, or None."""
     rx = re.compile(pattern, re.IGNORECASE)
@@ -384,9 +405,9 @@ def load_lights_from_summary_txt(path, col='Luminosité'):
 
 
 def detect_lights_from_channel(edf_path, ch_name, epoch_s):
-    """Per-epoch light state from an EDF step channel (Compumedics 'Light': 1 = ON, 0 = OFF).
+    """Per-epoch light state from a step channel of the recording (Compumedics 'Light': 1 = ON, 0 = OFF).
     Only that channel is read (`include=` at read time). Returns a boolean array (True = ON)."""
-    raw = mne.io.read_raw_edf(str(edf_path), include=[ch_name], preload=True, verbose=False)
+    raw = RL.read_raw(edf_path, include=[ch_name], add_online_reference=False, preload=True)
     x = raw.get_data()[0]
     sf = raw.info['sfreq']
     n_per_epoch = int(round(epoch_s * sf))
@@ -790,7 +811,7 @@ def compute_odi(events_df, remap, tst_min, threshold_pct, xml_path, cls, off_idx
 def load_spo2_signal(edf_path, ch_name):
     """Read ONE channel (`include=` at read time) -> (values in %, sfreq). A channel stored as a
     fraction (max <= 1) is rescaled to %, which the caller reports."""
-    raw = mne.io.read_raw_edf(str(edf_path), include=[ch_name], preload=True, verbose=False)
+    raw = RL.read_raw(edf_path, include=[ch_name], add_online_reference=False, preload=True)
     x = raw.get_data()[0].astype(float)
     sf = float(raw.info['sfreq'])
     rescaled = False
@@ -1404,7 +1425,7 @@ def compute_recording(p, cfg, custom_stages, event_remap, subject, hypno_suffix,
     epoch_s = cfg['epoch_s']
     # --- header + hypnogram -------------------------------------------------
     phase('reading the EDF header', 0)
-    header = p.get('header') or read_edf_header_info(p['edf'])
+    header = p.get('header') or read_header_info(p['edf'])
     phase('loading the hypnogram', COST_HEADER)
     if stages is None:
         if p.get('hypno') is None:

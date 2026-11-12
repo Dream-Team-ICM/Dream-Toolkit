@@ -3,7 +3,7 @@ Automatic sleep scoring with GSSC, YASA and SleepFM: the computation and the fig
 (3bis_autoscoring_voila.ipynb), shared with tool 0 (tool-0 redesign, tools/plan_tool0_redesign.md).
 
 The GSSC functions were MOVED VERBATIM from tool 3bis (its cell 2), plus its guarded GSSC import (cell 1) and
-`score_night`, the scoring part of its `score_one`, so both tools chain the same steps. YASA and SleepFM were
+`score_night_gssc`, the scoring part of its `score_one`, so both tools chain the same steps. YASA and SleepFM were
 ported from python/Score_EDF (SPEC §3bis): same inputs and computations, read from
 tool 2's configuration instead of Score_EDF's channel aliases. SleepFM itself lives in sleepfm_lib.py.
 Tool 3bis keeps its user interface and everything it writes; tool 0 calls the same functions on one night.
@@ -113,8 +113,8 @@ def non_aasm_color(group, custom_stages):
 # Expert hypnogram drawn over a hypnodensity (probability axis 0-1): W on top, N3 at the bottom.
 OVERLAY_Y = {'W': 0.9, 'R': 0.7, 'N1': 0.5, 'N2': 0.3, 'N3': 0.1}
 CONSENSUS_RULE = 'loudest_vote'   # GSSC's native rule: the most confident combination wins, per epoch
-# EOG names that tool 2 may have kept in the remap: never offered as an EEG electrode.
-EOG_NAME_RE = re.compile(r'(EOG|^LOC$|^ROC$|^E1$|^E2$)', re.IGNORECASE)
+# EOG names (never offered as an EEG electrode) and mastoid names: one copy, in recording_lib (eog_reference uses them)
+EOG_NAME_RE, LEFT_MASTOIDS, RIGHT_MASTOIDS = RL.EOG_NAME_RE, RL.LEFT_MASTOIDS, RL.RIGHT_MASTOIDS
 
 ALGORITHMS = ['GSSC', 'YASA', 'SleepFM']
 EOG_MODES = ['L − R bipolar', 'L and R separately', 'Left only', 'Right only', 'None']
@@ -124,10 +124,6 @@ EOG_MODES = ['L − R bipolar', 'L and R separately', 'Left only', 'Right only',
 REFERENCE_CONTRALATERAL = 'Contralateral mastoid (as the models were trained)'
 REFERENCE_DECLARED = 'As declared in tool 2'
 REFERENCE_OPTIONS = [REFERENCE_CONTRALATERAL, REFERENCE_DECLARED]
-# 10-20 names of the left mastoid / earlobe, then the 10-10 electrode over the mastoid (a cap without M1 / M2). The
-# first one found is used, so a recording with M1 / M2 never takes TP9 / TP10.
-LEFT_MASTOIDS = ('M1', 'A1', 'TP9')
-RIGHT_MASTOIDS = ('M2', 'A2', 'TP10')
 
 
 def eeg_options(cfg_entry):
@@ -264,51 +260,10 @@ def load_eeg(edf_path, cfg_entry, wanted):
     return raw, present
 
 
-def _reference_words(refs):
-    """'TP9', 'mean of TP9, TP10', 'average of 63 EEG channels': the reference of a derivation, in a report."""
-    if len(refs) == 1:
-        return refs[0]
-    return f'mean of {", ".join(refs)}' if len(refs) <= 3 else f'average of {len(refs)} EEG channels'
-
-
 def eog_reference(path, cfg_entry, eog, reference, bipolar_pair=False):
-    """How each EOG is referenced for the models: ({label: harmonized names of the channels whose mean is subtracted},
-    description for the parameters file and the report ('' when every EOG is left as recorded), notes).
-    `eog` = {label: original name}, label 'EOG-L' (left eye) or 'EOG-R' (right eye).
-
-    An EOG electrode on an EEG input is recorded against the online reference (Cz on many 10-10 caps): it then also
-    holds the EEG of that electrode, inverted (spindles, K-complexes and slow waves are large at the vertex), which the
-    models never saw: they learnt on E1-M2 / E2-M1. Subtracting a mastoid removes it: (eye - Cz) - (M - Cz) = eye - M.
-    Such an EOG gets the reference of the EEG: the mastoid of the other side with the contralateral reference (left eye
-    on M2, right eye on M1), tool 2's reference otherwise. Left as recorded: an EOG on an auxiliary (already bipolar)
-    input; an EDF, whose header does not say against what a channel was recorded; the L - R derivation of two EOG
-    (`bipolar_pair`: the common term cancels); and an EOG without a mastoid of the other side (said in the notes)."""
-    online, on_reference = RL.online_reference(path)
-    eog = {label: orig for label, orig in eog.items() if orig in on_reference}
-    if not eog or bipolar_pair:
-        return {}, '', []
-    names = list(cfg_entry.get('remap', {}).values())
-    upper = {n.upper(): n for n in names}
-    declared = cfg_entry.get('ref_channels', [])
-    refs, notes = {}, []
-    for label, orig in eog.items():
-        if reference == REFERENCE_CONTRALATERAL:
-            other_side = RIGHT_MASTOIDS if label == 'EOG-L' else LEFT_MASTOIDS
-            mastoid = next((upper[m] for m in other_side if m in upper), None)
-            if mastoid is None:
-                notes.append(f'{label} ({orig}) is recorded against the online reference {online} and no mastoid of '
-                             'the other side is configured in tool 2: used as recorded')
-            else:
-                refs[label] = [mastoid]
-        elif declared == 'average':
-            refs[label] = [ch for ch in names if not EOG_NAME_RE.search(ch)]
-        elif isinstance(declared, list) and declared:
-            refs[label] = [ch for ch in declared if ch in names]
-        # tool 2 declared no reference: the EEG stays against the online reference, and so does the EOG
-    description = '; '.join(f'{label} = {eog[label]} - {_reference_words(r)}' for label, r in refs.items() if r)
-    if description:
-        description += f' ({", ".join(eog[label] for label in refs)} recorded against the online reference {online})'
-    return {label: r for label, r in refs.items() if r}, description, notes
+    """How each EOG is referenced for the models (recording_lib.eog_reference): with the contralateral reference, the
+    mastoid of the other side (the models learnt on E1-M2 / E2-M1), else tool 2's reference."""
+    return RL.eog_reference(path, cfg_entry, eog, reference == REFERENCE_CONTRALATERAL, bipolar_pair)
 
 
 def load_eog(edf_path, cfg_entry, sfreq, n_times, mode, reference=REFERENCE_CONTRALATERAL):
@@ -853,11 +808,7 @@ def channel_checks(path, cfg_entry, refs_by_ch, eog, context_roles=()):
                 users = [c for c, rs in refs_by_ch.items() if rs and r in rs]
                 checked[r] = 'reference of ' + ', '.join(users)
     try:
-        online, _ = RL.online_reference(path)
-        context = set((cfg_entry.get('context_channels') or {}).values())
-        pool = [ch for orig, ch in cfg_entry.get('remap', {}).items()
-                if orig not in context and orig != online and not EOG_NAME_RE.search(ch)]
-        warnings = CC.channel_quality_warnings(path, cfg_entry, pool, checked, eog)
+        warnings = CC.channel_quality_warnings(path, cfg_entry, CC.eeg_pool(path, cfg_entry), checked, eog)
         if context_roles:
             warnings += CC.context_amplitude_warnings(path, cfg_entry, context_roles)
         return warnings
@@ -886,14 +837,6 @@ def score_night_gssc(infer, edf_path, cfg_entry, wanted, one_mode, eog_mode, ref
     return {'stages': stages, 'onsets': onsets, 'probs': probs, 'winner': winner, 'n_comb': n_comb,
             'present': present, 'eog_names': eog_names, 'reference': ref_text, 'eog_reference': eog_ref,
             'notes': notes, 'checks': checks}
-
-
-def score_night(infer, edf_path, cfg_entry, wanted, one_mode, eog_mode, reference=REFERENCE_CONTRALATERAL):
-    """Tool 0's entry point (same steps as tool 3bis): score_night_gssc as a tuple
-    (stages, onsets, probs, winner, n_comb, present, eog_names, notes)."""
-    r = score_night_gssc(infer, edf_path, cfg_entry, wanted, one_mode, eog_mode, reference)
-    return (r['stages'], r['onsets'], r['probs'], r['winner'], r['n_comb'], r['present'], r['eog_names'],
-            r['notes'])
 
 
 # ---------------------------------------------------------------------------------------------------------

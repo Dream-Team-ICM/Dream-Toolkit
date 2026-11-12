@@ -284,9 +284,9 @@ The "what to do / what not to break" reminders, grouped by theme. Each points to
   makes the tool-8 epoch montage readable), epochs them **identically to the EEG** (`make_fixed_length_epochs`
   duration=30 from t=0: same epoch count regardless of sfreq, hence 1:1 index alignment), and saves
   `{file_id}_context-epo.fif`. **Optional + non-fatal**: no `context_channels` → no companion written, all
-  other outputs byte-identical. The Curry generator swaps the reader (`read_raw_edf`→`read_raw_curry`) and
-  drops the suffix-dedup line via a dedicated `_make_tool7_curry.py` replacement: re-run the generator after
-  editing the `[H]` block.
+  other outputs byte-identical. Since 2026-11-12 the block calls `edf_io_lib.read_context_raw` (the same lines, any
+  format; given `sub_config`, an EOG recorded against a BrainVision online reference gets tool 2's reference): edit it
+  there. (The Curry generator's replacement no longer applies: the twins are frozen.)
 - **Manually reject flagged epochs (`8_reject_manually*`)**: reads tool-7 `{file_id}_all-epo.fif`
   (+ optional params JSON), **never reloads the raw EDF**, **never modifies tool-7 outputs**. **Section 1 =
   the study folder; the run of tool 7 is found from it** (like 8bis, the reports folder paired by name is optional here).

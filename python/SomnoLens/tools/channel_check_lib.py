@@ -136,6 +136,16 @@ def _read(path, originals):
 # ---------------------------------------------------------------------------------------------------------
 # The checks
 # ---------------------------------------------------------------------------------------------------------
+def eeg_pool(path, cfg_entry):
+    """The EEG channels of tool 2's configuration (harmonized names) that the median channel is taken from: the remap
+    without its EOG names, the channels declared as context channels, and the online reference (a flat channel in the
+    data as recorded)."""
+    online, _ = RL.online_reference(path)
+    context = set((cfg_entry.get('context_channels') or {}).values())
+    return [ch for orig, ch in cfg_entry.get('remap', {}).items()
+            if orig not in context and orig != online and not RL.EOG_NAME_RE.search(ch)]
+
+
 def channel_quality_warnings(path, cfg_entry, pool, checked, eog=None):
     """Warnings ([] when there is nothing to say) on the channels a model receives, read as recorded.
 

@@ -1,6 +1,8 @@
 """
 Shared EDF reading helpers: header, channel types, configuration files, hypnogram, scored events,
-context channels. EDF-specific (the Curry twins have tools_curry/curry_header.py + curry_io.py).
+context channels. The signal reads (read_eeg_raw, read_context_raw, the recording start of load_events) go through
+recording_lib, so they read a BrainVision recording too; their EDF branch is the former reading. recording_lib imports
+this module, so they import it at call time. (The Curry twins have tools_curry/curry_header.py + curry_io.py.)
 
 Part of the tool-0 redesign (tools/plan_tool0_redesign.md): tool 0 walks ONE participant through the whole
 pipeline and must read a recording exactly like the batch tools do, so the reading code lives here once.
@@ -315,7 +317,11 @@ def phys_bounds_for_remap(edf_path, remap):
     ({original channel name: (phys_min_uV, phys_max_uV)}, {harmonised name: original name}), the two dicts
     quality_lib.compute_channel_metrics takes for bounds_pct. Same read as tool 6 (`include=` the original
     names of the tool-2 remap). Tool 6 keeps its own copy of these lines until it reads the EDF through this
-    library (plan phase 8): its Curry generator replaces that load block."""
+    library (plan phase 8): its Curry generator replaces that load block. A BrainVision recording declares no physical
+    range: no bounds at all (so no bounds_pct), the channels known by their original names."""
+    import recording_lib   # here, not at the top: recording_lib imports this module
+    if recording_lib.file_format(edf_path) != 'edf':
+        return {}, {new: orig for orig, new in remap.items()}
     raw = mne.io.read_raw_edf(str(edf_path), preload=False, encoding='latin-1', include=list(remap.keys()),
                               verbose=False)
     extras = raw._raw_extras[0]
@@ -336,11 +342,17 @@ def read_eeg_raw(edf_path, remap):
     """Tool 7's EEG read ([load] + [B]): `include=` evaluated AT READ TIME with the original names of the
     tool-2 remap (excludes faster off-montage channels, which avoids MNE's partial-read AssertionError and
     keeps the native EEG rate), suffix duplicates dropped, channels renamed to their harmonised names, then
-    the data loaded. Returns the preloaded Raw (no re-reference, no filter)."""
-    raw = mne.io.read_raw_edf(str(edf_path), preload=False, encoding='latin-1',
-                              include=list(remap.keys()), verbose=False)
+    the data loaded. Returns the preloaded Raw (no re-reference, no filter). Any format (recording_lib.read_raw: the
+    online reference of a BrainVision recording is recreated when the remap names it)."""
+    import recording_lib   # here, not at the top: recording_lib imports this module
+    raw = recording_lib.read_raw(edf_path, include=list(remap.keys()))
     raw, _ = drop_suffix_duplicates(raw)
     raw.rename_channels(adapt_remap_dict_to_suffixes(raw, remap))
+    # every channel of the montage as EEG, as an EDF read types them (tool 7 does the same): a BrainVision reader types a
+    # channel without a position (an eye electrode on an EEG input) as misc
+    not_eeg = {ch: 'eeg' for ch, t in zip(raw.ch_names, raw.get_channel_types()) if t != 'eeg'}
+    if not_eeg:
+        raw.set_channel_types(not_eeg, on_unit_change='ignore', verbose=False)
     raw.load_data()
     return raw
 
@@ -404,6 +416,13 @@ def read_edf_start_datetime(edf_path):
         return datetime.datetime(year, mm, dd, hh, mi, ss)
     except Exception:
         return None
+
+
+def read_start_datetime(path):
+    """The start of a recording of any format (recording_lib.read_start_datetime): the EDF header, or the .vmrk of a
+    BrainVision recording, None when unknown or when the recording was paused (its clock no longer follows the samples)."""
+    import recording_lib   # here, not at the top: recording_lib imports this module
+    return recording_lib.read_start_datetime(path)
 
 
 def event_companion_paths(edf_path, txt_suffix='_ScoredEvents_Export.txt', csv_suffix='_event_xml.csv'):
@@ -535,8 +554,8 @@ def load_events(edf_path, txt_suffix='_ScoredEvents_Export.txt', csv_suffix='_ev
     """Load scored events next to the EDF, TXT-first then CSV then *.edf.XML fallback.
     Returns (DataFrame Name/Start/Duration in seconds, source) with source in
     {'txt', 'csv', 'xml'}, or (None, None) when no usable event companion is found.
-    The .txt onsets need the recording-start datetime (header offsets 168/176), so a .txt present
-    without a readable start datetime is skipped in favour of the CSV/XML companions.
+    The .txt onsets need the recording-start datetime (read_start_datetime), so a .txt present
+    without a usable start datetime is skipped in favour of the CSV/XML companions.
 
     With include_manual=True the tool-8 manual annotations ({stem}_manual_events.tsv) are APPENDED to
     whichever scored source won the priority chain (source tag e.g. 'csv+manual'), or used alone when
@@ -547,7 +566,7 @@ def load_events(edf_path, txt_suffix='_ScoredEvents_Export.txt', csv_suffix='_ev
     df, source = None, None
     # FIX #10: log exceptions instead of silently swallowing them
     if txt is not None:
-        rec_start = read_edf_start_datetime(edf_path)
+        rec_start = read_start_datetime(edf_path)
         if rec_start is not None:
             try:
                 d = _events_df_from_txt(txt, rec_start)
@@ -607,12 +626,14 @@ CONTEXT_ROLE_TYPE = {'eog_left': 'eog', 'eog_right': 'eog', 'emg': 'emg', 'ecg':
 CONTEXT_ROLE_LABEL = {'eog_left': 'EOG-L', 'eog_right': 'EOG-R', 'emg': 'EMG', 'ecg': 'ECG'}
 
 
-def read_context_raw(edf_path, ctx_map, eeg_sfreq):
+def read_context_raw(edf_path, ctx_map, eeg_sfreq, cfg_entry=None):
     """The declared context channels ({role: original EDF name}, tool 2's `context_channels` block), read
     like tool 7 does: include= at read time, renamed to their role labels (EOG-L / EOG-R / EMG / ECG),
     resampled to the EEG rate, then filtered for DISPLAY per role (AASM-like: EOG band-pass 0.3-35 Hz,
     EMG high-pass 10 Hz, ECG band-pass 0.5-40 Hz). Returns the Raw, or None when no declared channel is
-    in the file."""
+    in the file. Any format; given tool 2's entry `cfg_entry`, an EOG recorded against a BrainVision online
+    reference gets tool 2's reference, like the EEG it is shown under (recording_lib.eog_reference)."""
+    import recording_lib   # here, not at the top: recording_lib imports this module
     orig_to_role = {}
     for _role in CONTEXT_ROLES:
         _orig = (ctx_map or {}).get(_role)
@@ -620,18 +641,29 @@ def read_context_raw(edf_path, ctx_map, eeg_sfreq):
             orig_to_role[_orig] = _role
     if not orig_to_role:
         return None
-    ctx_probe = mne.io.read_raw_edf(str(edf_path), preload=False, encoding='latin-1',
-                                    include=list(orig_to_role.keys()), verbose=False)
+    eog = {CONTEXT_ROLE_LABEL[r]: o for o, r in orig_to_role.items() if r in ('eog_left', 'eog_right')}
+    refs = recording_lib.eog_reference(edf_path, cfg_entry, eog, False)[0] if cfg_entry and eog else {}
+    inverse = {target: orig for orig, target in ((cfg_entry or {}).get('remap') or {}).items()}
+    ref_orig = [inverse[h] for h in dict.fromkeys(h for r in refs.values() for h in r) if h in inverse]
+    ctx_probe = recording_lib.read_raw(edf_path, include=list(orig_to_role.keys()) + ref_orig)
     ctx_probe, _ = drop_suffix_duplicates(ctx_probe)
     present = [o for o in orig_to_role if o in ctx_probe.ch_names]
     if not present:
         return None
-    ctx_raw = ctx_probe.pick(present)
+    ctx_raw = ctx_probe.pick(present + [o for o in ref_orig if o in ctx_probe.ch_names and o not in present])
     ctx_raw.load_data()
+    for label, ref in refs.items():
+        ref_present = [inverse[h] for h in ref if inverse[h] in ctx_raw.ch_names]
+        if eog[label] in present and ref_present:
+            mean_ref = ctx_raw.get_data(picks=ref_present).mean(axis=0)
+            ctx_raw.apply_function(lambda x: x - mean_ref, picks=[eog[label]], channel_wise=True)
+    references_read = [ch for ch in ctx_raw.ch_names if ch not in present]
+    if references_read:
+        ctx_raw.drop_channels(references_read)
     ctx_raw.rename_channels({o: CONTEXT_ROLE_LABEL[orig_to_role[o]] for o in present})
     ctx_raw.set_channel_types(
         {CONTEXT_ROLE_LABEL[orig_to_role[o]]: CONTEXT_ROLE_TYPE[orig_to_role[o]] for o in present},
-        verbose=False)
+        on_unit_change='ignore', verbose=False)
     if not np.isclose(ctx_raw.info['sfreq'], eeg_sfreq):
         ctx_raw.resample(eeg_sfreq, npad='auto', verbose=False)
     _nyq = ctx_raw.info['sfreq'] / 2.0

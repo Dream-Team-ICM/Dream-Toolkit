@@ -278,6 +278,16 @@ every data format, and a `[Comment]` that is missing, cut short or written diffe
 - **Tool 3bis** scores two BrainVision recordings with GSSC and YASA: the hypnograms are written beside the `.vhdr`, the parameters
   file names the derivations and the EOG reference, and holds the channel warnings only when there is something to say.
 
+`test_brainvision_chain.py` goes down the rest of the chain on a small study of two naps:
+
+- **Tool 4** finds the scored-event exports beside the `.vhdr` and reads their labels;
+- **Tool 5** computes the macrostructure, the recording start taken from the `.vmrk`;
+- **Tool 7** epochs the naps, places the scored events at the right time (the export gives clock times), keeps the online
+  reference (Cz) once re-referenced, writes the EOG of the companion with the reference of the EEG, and runs the channel checks;
+- **Tool 8bis** pre-ticks every stage as a reference stage when the participants have few N2 / N3 / R epochs (a night study
+  keeps N2 / N3 / R);
+- **A paused recording**: its clock no longer follows the samples, so the clock times of an event export are not placed on it.
+
 Tool 6's comparison of each channel with the median channel of the same epoch (`test_quality_lib.py`): a channel 10 times larger
 than the others is said in its own columns, never as a flag, so tool 7 unticks nothing more. Its flat measure counts only what
 holds still for 50 ms: a quiet channel at a high sampling rate is not flat, a 6-s flat stretch is, at any rate. Since this changed

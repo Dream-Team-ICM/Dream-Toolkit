@@ -405,9 +405,17 @@ def ordered_stages(stages):
     return [s for s in AASM_STAGES if s in stages] + sorted(s for s in stages if s not in AASM_STAGES)
 
 
-def default_reference_stages(ordered):
-    """8bis's default reference stages: N2 / N3 / R when present, else every stage."""
+MIN_REFERENCE_EPOCHS = 30   # below this, a participant's N2 / N3 / R epochs are too few to judge its channels
+
+
+def default_reference_stages(ordered, n_reference_epochs=None):
+    """8bis's default reference stages: N2 / N3 / R when present, else every stage. Also every stage when the median
+    participant has fewer than MIN_REFERENCE_EPOCHS epochs in N2 / N3 / R (`n_reference_epochs`, one count per
+    participant: naps, short recordings), so that channel badness is judged on enough epochs. A night study keeps N2 /
+    N3 / R."""
     prefer = [s for s in ordered if s in ('N2', 'N3', 'R')]
+    if n_reference_epochs is not None and len(n_reference_epochs) and np.median(n_reference_epochs) < MIN_REFERENCE_EPOCHS:
+        return list(ordered)
     return prefer if prefer else list(ordered)
 
 
