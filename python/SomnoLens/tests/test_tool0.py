@@ -280,8 +280,9 @@ def test_step5_equals_tool6(chain, tmp_path):
                     assert mine.empty, (fid, key)
                     continue
                 ref = pd.read_csv(found[0], sep='\t', dtype={'file_id': str})
-                if 'suspect_reason' in ref.columns:
-                    ref['suspect_reason'] = ref['suspect_reason'].fillna('')
+                for text_column in ('suspect_reason', 'comparison_alert'):    # an empty text reads back as NaN
+                    if text_column in ref.columns:
+                        ref[text_column] = ref[text_column].fillna('')
                 assert list(mine.columns) == list(ref.columns), (fid, key)
                 pd.testing.assert_frame_equal(mine.sort_values(sort).reset_index(drop=True),
                                               ref.sort_values(sort).reset_index(drop=True),

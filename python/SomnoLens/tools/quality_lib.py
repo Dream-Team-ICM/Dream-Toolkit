@@ -20,6 +20,8 @@ import pandas as pd
 from scipy.signal import find_peaks, savgol_filter
 from scipy.stats import kurtosis as scipy_kurtosis, skew as scipy_skew
 
+import channel_check_lib as CC
+
 
 # ---------------------------------------------------------------------------------------------------------
 # Metrics, flags and figures (tool 6's shared-function cell)
@@ -38,19 +40,28 @@ HIST_CLIP_PCT = (0.5, 99.5)
 DISPLAY_YLIM_UV = 500.0     # see display_limits
 
 
-def compute_signal_metrics(sig_uV, phys_min_uV, phys_max_uV):
-    """Compute all quality metrics for one EEG channel (unfiltered signal, in uV)."""
+FLAT_MIN_S = 0.05     # a flat stretch counts from 50 ms on (see compute_signal_metrics)
+
+
+def compute_signal_metrics(sig_uV, phys_min_uV, phys_max_uV, sfreq):
+    """Compute all quality metrics for one EEG channel (unfiltered signal, in uV, sampled at `sfreq` Hz)."""
     cur_std = float(np.std(sig_uV))
     u = np.unique(sig_uV)
 
-    # Flat signal: fraction of consecutive sample pairs with no change.
-    # Tolerance = 2x ADC resolution to handle rounding, minimum 0.06 uV.
+    # Flat signal: share of the samples inside a stretch where the signal holds still (consecutive samples within
+    # 2x the ADC resolution, at least 0.06 uV) for FLAT_MIN_S or more. No EEG holds still for 50 ms, while a quiet
+    # channel at a high sampling rate often has neighbouring samples closer than 0.06 uV: counting every still pair,
+    # as before 2026-11-12, flagged clean channels at 500 Hz.
     if len(u) > 1:
         res = float(np.min(np.abs(np.diff(u))))
         flat_atol = max(2 * res, 0.06)
     else:
         flat_atol = 0.06
-    flat_pct = float(np.isclose(np.diff(sig_uV), 0, atol=flat_atol, rtol=0.0).mean()) * 100
+    still = np.isclose(np.diff(sig_uV), 0, atol=flat_atol, rtol=0.0)
+    edges = np.diff(np.concatenate([[0], still.astype(np.int8), [0]]))
+    run_lengths = np.flatnonzero(edges == -1) - np.flatnonzero(edges == 1)
+    min_run = int(np.ceil(FLAT_MIN_S * sfreq))
+    flat_pct = float(run_lengths[run_lengths >= min_run].sum() / max(still.size, 1)) * 100
 
     # EDF physical bounds: fraction of samples at/near the header declared limits.
     # Detects saturation at the EDF dynamic range boundary (hard clipping).
@@ -376,6 +387,10 @@ METRIC_INTERPRETATIONS = {
     'n_peaks (distribution)': '1&nbsp;=&nbsp;unimodal; &ge;2&nbsp;=&nbsp;irregular / suspect distribution (bimodal or multimodal: inspect the channel)',
     'p99 |amplitude|': '99% of samples are below this value&nbsp;; compare across channels&nbsp;',
     'p99.9 |amplitude|': '99.9% of samples are below this value&nbsp;; compare across channels&nbsp;',
+    'Noisy vs the median channel (% epochs)': 'epochs where its std exceeds 3&times; the median channel of the epoch; '
+                                              '&gt;&nbsp;20&nbsp;% = alert (not a flag)',
+    'Nearly flat vs the median channel (% epochs)': 'epochs where its std is under 0.1&times; the median channel; '
+                                                    '&gt;&nbsp;20&nbsp;% = alert (not a flag)',
 }
 
 
@@ -987,7 +1002,7 @@ def compute_channel_metrics(raw, sf, file_id, thresholds, hypno_vec, custom_stag
         sig_uV = raw.get_data(picks=[ci])[0] * 1e6
         orig_base = final_to_orig.get(ch, ch)
         phys_min, phys_max = phys_bounds_by_name.get(orig_base, (np.nan, np.nan))
-        m = compute_signal_metrics(sig_uV, phys_min, phys_max)
+        m = compute_signal_metrics(sig_uV, phys_min, phys_max, sf)
         ch_metrics[ch] = m
         ch_flags[ch] = flag_channel(m, thresholds)
         if not has_bounds:
@@ -1029,7 +1044,7 @@ def compute_channel_metrics(raw, sf, file_id, thresholds, hypno_vec, custom_stag
                 if not stage_samples:
                     continue
                 stage_sig = np.concatenate(stage_samples)
-                sm = compute_signal_metrics(stage_sig, phys_min, phys_max)
+                sm = compute_signal_metrics(stage_sig, phys_min, phys_max, sf)
                 file_stage_rows.append({
                     'file_id': file_id,
                     'channel': ch,
@@ -1042,7 +1057,34 @@ def compute_channel_metrics(raw, sf, file_id, thresholds, hypno_vec, custom_stag
                     'p99_abs_uV': sm['p99_abs_uV'],
                     'p999_abs_uV': sm['p999_abs_uV'],
                 })
+    comparison = compare_channels(raw, sf)
+    for row in file_rows:
+        row.update(comparison[row['channel']])
     return ch_metrics, ch_flags, file_rows, file_stage_rows
+
+
+def compare_channels(raw, sf):
+    """Every channel compared with the median channel of the same 30-s epoch (channel_check_lib, every epoch of the
+    night, filtered 0.3-35 Hz): {channel: {'noisy_vs_median_pct', 'flat_vs_median_pct', 'comparison_alert'}}. The flags
+    judge each channel alone; this sees what only a comparison shows on a dense montage: a disconnected electrode is
+    many times larger than its neighbours. An alert apart, never a flag (not in suspect_reason / exclude, so tool 7
+    unticks nothing more). NaN and no alert with fewer than 3 channels (no median)."""
+    names = list(raw.ch_names)
+    empty = {ch: {'noisy_vs_median_pct': np.nan, 'flat_vs_median_pct': np.nan, 'comparison_alert': ''} for ch in names}
+    epochs = np.arange(int(raw.n_times // (CC.EPOCH_S * sf)))
+    if len(names) < CC.MIN_POOL or not len(epochs):
+        return empty
+    shares = CC.compared_with_median(CC.epoch_std_uV(raw, names, epochs), list(range(len(names))))
+    out = {}
+    for i, ch in enumerate(names):
+        noisy, flat = 100 * float(shares[0][i]), 100 * float(shares[1][i])
+        alert = ''
+        if noisy > 100 * CC.SHARE:
+            alert = f'noisy on {noisy:.0f}% of the epochs (over {CC.NOISY_RATIO:g} times the median channel)'
+        elif flat > 100 * CC.SHARE:
+            alert = f'nearly flat on {flat:.0f}% of the epochs (under {CC.DEAD_RATIO:g} times the median channel)'
+        out[ch] = {'noisy_vs_median_pct': noisy, 'flat_vs_median_pct': flat, 'comparison_alert': alert}
+    return out
 
 
 def display_limits(ch_metrics, ch_flags, cap_uV=None):

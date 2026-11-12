@@ -27,8 +27,9 @@ SomnoLens/
 ├── tools/
 │   ├── 0_live_explore_1file_voila.ipynb         # One participant through the whole pipeline (Voila GUI, being rebuilt)
 │   ├── edf_io_lib.py                            # Shared EDF reading (header, channel types, hypnogram, events, context) + custom stages: tools 0, 1, 1bis, 3 and the libraries
-│   ├── brainvision_lib.py                       # BrainVision reading (.vhdr + .vmrk + .eeg), in the shape of the EDF header: tools 1, 2, 3, 6 so far (tools/plan_brainvision.md)
-│   ├── recording_lib.py                         # One way to read a recording, EDF or BrainVision: header, channel table, start, signal: tools 1, 2, 6 so far
+│   ├── brainvision_lib.py                       # BrainVision reading (.vhdr + .vmrk + .eeg), in the shape of the EDF header: tools 1, 2, 3, 3bis, 6 so far (tools/plan_brainvision.md)
+│   ├── recording_lib.py                         # One way to read a recording, EDF or BrainVision: header, channel table, start, signal, online reference: tools 1, 2, 3bis, 6 so far
+│   ├── channel_check_lib.py                     # Checks of the channels given to a tool (noisy / dead electrode, mastoid, EOG; ECG and chin EMG amplitude): warnings only, tool 3bis (+ 0) so far
 │   ├── study_files_lib.py                       # Names registry (config_param/file_names.json), choice of the companion suffixes, where each input is found: tools 0, 2, 3, 3bis, 4, 5, 5bis, 6, 7 (no EDF reading)
 │   ├── autoscoring_lib.py                       # Tool 3bis step 1 (GSSC, YASA, SleepFM scoring + figures), shared with tool 0
 │   ├── sleepfm_lib.py                           # SleepFM-Clinical for tool 3bis: model download/locate, montage, inference
@@ -325,7 +326,11 @@ test must point it at a copied `preproc_epo`.
   Tool 2: the whole page with its default choices (scan, online reference, context menus, *Preview & Save*, Section 7) and a
   recording it cannot read. Tool 3: hypnograms beside `.vhdr`. Tool 6: the same two nights in EDF and in BrainVision give the same
   metrics and flags; the high-pass of a DC-coupled recording. They write their recordings themselves, **never `synthetic.py`**:
-  it belongs to `BASE_DEPS`, and changing it would rerun the chain.
+  it belongs to `BASE_DEPS`, and changing it would rerun the chain. `test_autoscoring_formats.py` (quick + 2 standard, markers
+  `tool3bis`, `tool0`): the reading of `autoscoring_lib` (TP9 / TP10, the online reference recreated only when needed, the EOG
+  reference, each signal against what was written), `channel_check_lib`'s checks, tool 3bis on BrainVision (GSSC + YASA), the
+  same night scored the same in EDF and in BrainVision. Tool 3bis on EDF, before / after the change: `score_edf_equivalence`'s two
+  studies, every output compared file by file (`refactor_check.compare_file`).
 - `test_tools_1_3_4.py` (standard): on a fresh synthetic database. Tool 1: 4 files × 4 channels at 256 Hz,
   the ±50 µV Fp1 of sim01 as bad dynamic range, headers anonymous. Tool 3: a raw Compumedics-style export
   (`0-5 / W / R / ?`, N3 coded `3` or `4`) remaps back to the generated stages, the mid-night `?` listed in
@@ -1014,6 +1019,29 @@ instead of restating them. Only tool-specific deltas are kept inline.
   comparable). With `'full'` the multitaper PSD matches Welch to within ~0.2 dB above 4 Hz. Both traps
   were found by comparing tool 9 against an external pipeline (`tools/Thomas4Carl_extract_features.py`,
   which has both). Tool 9's Welch path was never affected.
+- **Channel checks (`tools/channel_check_lib.py`, 2026-11-12, `tools/plan_brainvision.md`)**: checks of the channels a tool
+  receives, every format (read through `recording_lib`, without the online reference), no torch. **They warn, they never decide
+  or change anything.** Used by tool 3bis (each model's channels, §3bis) and tool 0's step 3; tool 7's reference channels in
+  phase 4 of the plan.
+  - `channel_quality_warnings(path, cfg_entry, pool, checked, eog)`: 60 epochs of 30 s spread over the recording
+    (`sampled_epochs`), each filtered 0.3-35 Hz (what the models see), on the signal as recorded. An EEG channel is compared with
+    the **median EEG channel of the same epoch** (`pool` = the EEG of tool 2's configuration, at least 3): *noisy* when its
+    standard deviation exceeds 3 times that median on more than 20 % of the epochs, *nearly flat* under 0.1 times; with fewer
+    than 3 EEG, only *flat* (under 1 µV on more than 20 % of the epochs). A movement that disturbs every channel does not count.
+    The EOG, unlike the EEG because of the eye movements: *noisy* when its median standard deviation exceeds 100 µV, *flat*
+    under 1 µV. A bad mastoid matters most: C3-M2 = C3 - M2, so its noise enters every derivation that uses it, unseen.
+  - `context_amplitude_warnings(path, cfg_entry, roles)`: 30 epochs. ECG: R waves (found on 5-30 Hz, measured on 1-40 Hz)
+    outside 0.1-5 mV, or no heart rate in 30-120 per minute (*does not look like an ECG*). Chin EMG: RMS 10-100 Hz with the mains
+    notched over 100 µV. Both: the mains (50 or 60 Hz, ±1 Hz) holding more than half of the 1-100 Hz power. An amplitude out of
+    range comes with its factor to the typical value (1 mV, 5 µV) rounded to a power of ten (`decade`): an order of magnitude,
+    to confirm on the hardware (an auxiliary input with its own gain).
+  - **Calibration (2026-11-12)**: 11 local EDF (4 to 12 EEG, the injected defects of `test_data_manifest.tsv`), 2 Curry nights
+    (32 EEG), 3 BrainVision recordings (62 EEG). Clean channels: noisy on at most 10 % of the epochs (one Fp2 of an EDF at 53 %,
+    an electrode no model uses); the dead C3 of `734` at 0.01 times the median; the electrodes next to an online reference down
+    to 0.22 times (hence 0.1 for *nearly flat*); the BrainVision channels `Out of Range!` / `not connected` noisy on 100 % of the
+    epochs. EOG: 7-14 µV (EDF), 8-51 µV (BrainVision), 334 µV for one out of range. ECG 0.31-0.57 mV and EMG 1.4-8.9 µV in the
+    EDF, 59-124 mV and 320-1356 µV on the BrainVision auxiliary inputs (about 100 times). Mains: up to 46 % on an EDF chin EMG,
+    61-70 % on one BrainVision recording.
 - **Custom (non-AASM) sleep stages**: a project may intentionally keep stage labels outside the AASM set
   (`W/N1/N2/N3/R`), e.g. `N4` or a movement stage. They are declared **once** in a shared flat JSON
   `<study_folder>/config_param/custom_stages.json` (`{"custom_stages": ["N4", …]}`, order = display order),
@@ -1517,6 +1545,33 @@ derivations; GSSC uses MNE's re-referencing when every chosen electrode is on th
 datasets: C3 on M2, outputs identical to the former ones). A participant without the mastoid needed falls back to
 tool 2's reference (noted in the log, the notes and `eeg_reference`). **`As declared in tool 2`**
 (`REFERENCE_DECLARED`): the former behaviour. Tool 0's step 3 (`score_night`) uses the same default.
+
+**Any recording format (2026-11-12, `tools/plan_brainvision.md` phase 3)**: the recordings are found by
+`study_files_lib.list_recordings` and read through `recording_lib` (EDF branch = the former reading, so an EDF study gives the
+same outputs: checked file by file on `score_edf_equivalence`'s two studies, the three models). In the libraries:
+- **Mastoids of a 10-10 cap**: `TP9` / `TP10` added at the end of `LEFT_MASTOIDS` / `RIGHT_MASTOIDS` (the first name found is
+  used, so M1/M2 or A1/A2 keep their precedence). The derivation labels stay `C3-M2`; `eeg_reference` names the stand-ins:
+  `contralateral mastoid: C3-M2, C4-M1 (M1 = TP9, M2 = TP10)`. `eeg_options` leaves out the mastoids and the channels tool 2
+  declared as context channels (kept in the remap under another name).
+- **Online reference** (a BrainVision reference absent from the file, e.g. Cz): the first lazy read leaves it out
+  (`add_online_reference=False`: recreating it loads every channel), and it is recreated (`recording_lib.recreate_online_reference`)
+  only when a derivation needs it: Cz on both mastoids, an average reference.
+- **EOG recorded against the online reference** (`eog_reference`, GSSC's `load_eog`, YASA's and SleepFM's `read_signals`): an EOG
+  channel of an EEG input (BrainVision: unit µV and no gradient in the `[Comment]`, `brainvision_lib.channels_on_online_reference`)
+  also holds the EEG of the reference electrode, inverted. It gets the reference of the EEG: the mastoid of the other side with
+  the contralateral reference (left eye on M2, right eye on M1), tool 2's reference otherwise (`average` = every EEG of the
+  remap). Left as recorded: an EOG of an auxiliary input, any EDF (its header does not say), the L − R derivation of two EOG, tool 2
+  declaring no reference, a missing mastoid (noted). Written in the additive `eog_reference` key of `_scoring_params.json` (e.g.
+  `EOG-R = IO - TP9 (IO recorded against the online reference Cz)`) and an *EOG reference (model)* report row, absent otherwise.
+- **SleepFM's belt**: `Respi`, `Resp`, `Respiration`, `Resp Belt`, `Belt` added to `RESP_ALIASES['Abdominal']` (a single belt
+  with a generic name is taken as abdominal, a convention). SleepFM needs a channel in each modality: without them it could
+  not score such a recording.
+- **Channel checks** (see *Cross-cutting → Channel checks*): each model's channels are checked after it scored
+  (`channel_checks`: its electrodes, their reference channels, its EOG, and the context channels it uses: YASA's chin EMG when
+  it is tool 2's, SleepFM's ECG and EMG). Each warning is a `⚠️ channel check:` line of the log, a *Channel checks* report row
+  (with the ways out: another electrode, tool 2's reference, EOG = None, the participant rescored alone) and the additive
+  `channel_quality_warnings` list of `_scoring_params.json`, absent when there is nothing to say. Nothing is changed and the
+  night is always scored. Tool 0's step 3 runs the same checks (returned, not shown yet).
 
 **SleepFM model files** (`sleepfm_lib`): not a Python package but 9 files of the official repository
 (`zou-group/sleepfm-clinical`, commit `2bcbae04`, CC BY-NC 4.0), each listed with its SHA-256 (`SLEEPFM_FILES`,
@@ -2091,6 +2146,17 @@ follow them without anything of its own.
 Same signal, same metrics: `tests/test_brainvision_tools.py` runs the tool on the same two nights in EDF and in BrainVision (every
 metric within 0.1 %, same `n_peaks`, same flags except `bounds_pct`).
 
+**Compared with the other channels (2026-11-12, user request after phase 2 of `tools/plan_brainvision.md`)**: the flags judge each
+channel alone, with thresholds set on PSG EDF. On a 62-channel cap they missed every `not connected` electrode (up to 18 000 µV of
+standard deviation) but one. `quality_lib.compare_channels` (called at the end of `compute_channel_metrics`, so tool 0's step 5 has
+it too) takes every 30-s epoch of the night, filtered 0.3-35 Hz, and compares each channel's standard deviation with the median
+channel of that epoch (`channel_check_lib`, same rule and thresholds as tool 3bis's check: over 3 times on more than 20 % of the
+epochs = noisy, under 0.1 times = nearly flat). Three additive columns of `{file_id}_quality_metrics.tsv` and `quality_summary.tsv`:
+`noisy_vs_median_pct`, `flat_vs_median_pct`, `comparison_alert` (text, empty without alert); NaN with fewer than 3 channels. **Never
+a flag**: not in `suspect_reason` / `exclude`, so tool 7 unticks nothing more and the EDF flags are unchanged. Shown in the report
+(an amber *Compared with the other channels* box in the Overview, two rows and a line in each channel's metrics) and the log. No
+setting, so nothing to add to the Skip comparison; a participant processed before has blank columns until reprocessed.
+
 **Shared library (`tools/quality_lib.py`, tool-0 redesign phase 4)**: the computation and the figures live in
 the library, **moved verbatim** and shared with tool 0's step 5 (same code, same numbers). It holds (a) the
 former shared-function cell: `compute_signal_metrics`, `flag_channel`, `HIST_CLIP_PCT`, the per-channel and
@@ -2194,7 +2260,15 @@ Both are built from the per-channel `file_rows` already collected for `quality_s
 | `std_uV` | < 5.0 µV | Dead / near-dead channels |
 | `hist_extreme_pct` | > 1.0% | In-range clipping (saturation within declared EDF range) |
 
-`flat_pct` = fraction of consecutive sample pairs with \|diff\| < `max(2×ADC_step, 0.06 µV)`. `bounds_pct` = fraction of samples within 0.5 µV of the EDF physical_min/max header limits, reconstructed in µV by `get_phys_bounds_uV()`. **Unit handling**: MNE keeps `_raw_extras['physical_max']`/`['offsets']` in each channel's *native* EDF physical unit (µV, mV, V…), not in µV, whereas the signal is read as `raw.get_data() * 1e6` (always µV). `get_phys_bounds_uV()` therefore multiplies both bounds by `extras['units'][ch_idx] * 1e6` (MNE's native-unit→volts factor: `1e-6` µV, `1e-3` mV, `1.0` V) so the comparison is unit-consistent. This is essential for non-EEG channels: Compumedics EOG/EMG/ECG are declared in **mV** (e.g. `physical_max = 1.0 mV`), so without the conversion they are compared against a 1.0 µV bound (1000× too small) and `bounds_pct` flags ~98–100 % of a perfectly healthy signal. EEG channels (declared in µV) are unaffected. `hist_extreme_pct` = fraction of samples in the outermost histogram bins (computed on a **full-range** histogram, independent of the percentile-clipped histogram that feeds the Savitzky-Golay curve + peak detection, see *Distribution histogram (robust range for peak detection)* above). **Kurtosis is intentionally NOT used as a flagging criterion**: normal PSG EEG has physiologically high kurtosis (spindles, K-complexes produce values of 100–500), making it unreliable without per-subject normalization. `p99_abs_uV` and `p999_abs_uV` (99th and 99.9th percentile of |amplitude|) are recorded as informational metrics in `quality_summary.tsv` but are not currently used for flagging. They are useful for cross-channel and cross-dataset amplitude comparison.
+`flat_pct` = share of the consecutive sample pairs with \|diff\| < `max(2×ADC_step, 0.06 µV)` **that belong to a still stretch of at
+least 50 ms** (`FLAT_MIN_S`, since 2026-11-12, user decision after phase 3 of `tools/plan_brainvision.md`). Counting every still pair,
+as before, depended on the sampling rate: at 500 Hz a quiet but clean channel has many neighbouring samples closer than 0.06 µV (9
+clean channels of a BrainVision recording at 3.5-5.6 %, a quiet synthetic mastoid at 3.4 %). Measured: every injected defect stays
+flagged (the 30-min flat segment 7.4 %, the dead channels 41-98 %, the quantization 99.6 %), the false alerts go to 0-1.7 %; on the
+local EDF, 4 channels at 3.7-7.1 % lose the flag (no still stretch of 50 ms). The clipped Fp1 of the synthetic chain goes from 4.9 to
+1.9 % and stays flagged by `bounds_pct` / `hist_extreme_pct`, so the `exclude` decision, and tool 7, are unchanged on the test chain
+(`test_pipeline.py::test_tool6_matches_golden_but_the_flat_rule`). A study processed before keeps its former values while Skip
+keeps its tables: untick Skip to reprocess it. `bounds_pct` = fraction of samples within 0.5 µV of the EDF physical_min/max header limits, reconstructed in µV by `get_phys_bounds_uV()`. **Unit handling**: MNE keeps `_raw_extras['physical_max']`/`['offsets']` in each channel's *native* EDF physical unit (µV, mV, V…), not in µV, whereas the signal is read as `raw.get_data() * 1e6` (always µV). `get_phys_bounds_uV()` therefore multiplies both bounds by `extras['units'][ch_idx] * 1e6` (MNE's native-unit→volts factor: `1e-6` µV, `1e-3` mV, `1.0` V) so the comparison is unit-consistent. This is essential for non-EEG channels: Compumedics EOG/EMG/ECG are declared in **mV** (e.g. `physical_max = 1.0 mV`), so without the conversion they are compared against a 1.0 µV bound (1000× too small) and `bounds_pct` flags ~98–100 % of a perfectly healthy signal. EEG channels (declared in µV) are unaffected. `hist_extreme_pct` = fraction of samples in the outermost histogram bins (computed on a **full-range** histogram, independent of the percentile-clipped histogram that feeds the Savitzky-Golay curve + peak detection, see *Distribution histogram (robust range for peak detection)* above). **Kurtosis is intentionally NOT used as a flagging criterion**: normal PSG EEG has physiologically high kurtosis (spindles, K-complexes produce values of 100–500), making it unreliable without per-subject normalization. `p99_abs_uV` and `p999_abs_uV` (99th and 99.9th percentile of |amplitude|) are recorded as informational metrics in `quality_summary.tsv` but are not currently used for flagging. They are useful for cross-channel and cross-dataset amplitude comparison.
 
 **`dataset_overview.html` (dataset-level summary)**: generated at the end of every run from the full cumulative `quality_summary.tsv` (reflects all participants processed to date, not just the current run) **minus the excluded participants** (exclusion registry): they stay in the TSV tables (`participant_excluded = True`) but are left out of every statistic and figure of the overview, whose header names them with their reason (`generate_dataset_overview(..., excluded=)`). Contains two levels:
 - **Global section (all electrodes pooled)**: stats table (mean / median / p5 / p25 / p75 / p95 per metric), **mean (median) by sleep stage table** (metrics as rows (`mean_uV`, `std_uV`, `flat_pct`, `bounds_pct`, `hist_extreme_pct`, `p99_abs_uV`, `p999_abs_uV`) stages W/N1/N2/N3/R as columns, shown only when `quality_summary_by_stage.tsv` is present), n_peaks frequency table by electrode (flags DC drift and quantization cases), pooled boxplots (one subplot per key metric, each subplot contains a **stage inset** in its upper-right corner showing per-stage boxplots with stage colours W/N1/N2/N3/R, inset shown only when stage data is available, stage colours: W `#969696`, N1 `#9e9ac8`, N2 `#807dba`, N3 `#6a51a3`, R `#c994c7`), grouped boxplots (one subplot per key metric, x-axis = electrode, compares electrodes side by side).
@@ -3185,7 +3259,7 @@ Not placed in this order yet: *BrainVision format and one version of each tool* 
 Read BrainVision recordings (`.vhdr` + `.vmrk` + `.eeg`), first to inspect them and score them automatically, then through
 the whole chain, with **one version of each tool** instead of a third set of twins, and later remove the Curry twins the
 same way. The plan, with what was measured on real recordings, is `tools/plan_brainvision.md`. Done: the reader (phase 1),
-tools 1, 2, 3, 6 (phase 2). **The Curry twins are frozen until their removal (phase 6)**: their notebooks stay as they are and
+tools 1, 2, 3, 6 (phase 2), tool 3bis with the channel checks and tool 6's comparison with the median channel (phase 3). **The Curry twins are frozen until their removal (phase 6)**: their notebooks stay as they are and
 their generators are no longer re-run (their match strings no longer apply), so a fix to an EDF tool does not reach them.
 
 ### Task triggers: reading, checks, trigger-locked analyses (TODO, after the slow-wave and spindle extraction)

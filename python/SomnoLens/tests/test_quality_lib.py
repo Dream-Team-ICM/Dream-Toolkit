@@ -65,6 +65,39 @@ def test_no_declared_range_means_no_bounds_metric():
     assert any('bounds_pct' in reason for reason in flags['C3'])
 
 
+def test_flat_counts_only_what_holds_still_for_50_ms():
+    """A quiet channel at a high sampling rate: many neighbouring samples closer than the tolerance, but never for 50 ms,
+    so 0 % (the former rule counted each still pair). A 6-s flat stretch in 60 s: 10 %, at any sampling rate."""
+    for sf in (256.0, 500.0, 1000.0):
+        quiet = np.random.default_rng(2).normal(0, 0.2, int(60 * sf))     # 1 pair in 6 within 0.06 uV
+        assert QL.compute_signal_metrics(quiet, np.nan, np.nan, sf)['flat_pct'] == 0
+        stretch = np.random.default_rng(3).normal(0, 20, int(60 * sf))
+        stretch[int(10 * sf):int(16 * sf)] = 1.0
+        assert abs(QL.compute_signal_metrics(stretch, np.nan, np.nan, sf)['flat_pct'] - 10) < 0.1
+    short = np.random.default_rng(4).normal(0, 20, 6000)          # stretches of 40 ms at 100 Hz: not flat
+    for start in range(100, 5900, 200):
+        short[start:start + 4] = 1.0
+    assert QL.compute_signal_metrics(short, np.nan, np.nan, 100.0)['flat_pct'] == 0
+
+
+def test_a_channel_is_compared_with_the_median_channel_apart_from_the_flags():
+    """A disconnected electrode of a dense cap: 10 times its neighbours, said in its own columns, never a flag (tool 7
+    unticks nothing more). Under 3 channels, no median: no alert."""
+    names = ['Fp1', 'C3', 'C4', 'O1', 'O2']
+    data = np.random.default_rng(1).normal(0, 20, (len(names), 100 * 300)) * 1e-6
+    data[1] *= 10
+    raw = mne.io.RawArray(data, mne.create_info(names, 100.0, 'eeg'), verbose='ERROR')
+    metrics, flags, rows, _ = QL.compute_channel_metrics(raw, 100.0, 'p', THRESHOLDS, None, [], {}, {})
+    by_channel = {row['channel']: row for row in rows}
+    assert by_channel['C3']['noisy_vs_median_pct'] == 100 and by_channel['C3']['comparison_alert'].startswith('noisy on 100%')
+    assert by_channel['O1']['noisy_vs_median_pct'] == 0 and by_channel['O1']['comparison_alert'] == ''
+    assert not any('median' in reason for reason in flags['C3'])
+    assert 'median' not in str(by_channel['C3']['suspect_reason'])
+    raw.pick(['C3', 'O1'])
+    rows = QL.compute_channel_metrics(raw, 100.0, 'p', THRESHOLDS, None, [], {}, {})[2]
+    assert np.isnan(rows[0]['noisy_vs_median_pct']) and rows[0]['comparison_alert'] == ''
+
+
 def test_display_limits_cap_only_when_asked():
     """Nothing clips a recording with no declared range, so its amplitude scale is capped. Without a cap, as before."""
     metrics = {'C3': {'p999_abs_uV': 2000.0, 'histo': np.array([1, 2])}, 'O1': {'p999_abs_uV': 40.0, 'histo': np.array([1])}}

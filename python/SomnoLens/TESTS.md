@@ -265,6 +265,25 @@ every data format, and a `[Comment]` that is missing, cut short or written diffe
   recreates it on the signal;
 - **Tool 6** ticks its high-pass only when the header says the recording has no high-pass at all, and leaves out the online reference.
 
+`test_autoscoring_formats.py` does the same for the automatic scoring (tool 3bis):
+
+- **Same signal, same scoring**: one synthetic night scored by GSSC as EDF and as BrainVision gives the same stages and the same
+  probabilities (to the float32 precision of the BrainVision file);
+- **The derivations the models were trained on**: on a 10-10 cap, TP9 and TP10 stand for the mastoids (C3-M2 is C3 minus TP10), but
+  a recording with M1 / M2 keeps them; the online reference (Cz) is recreated only for a derivation that needs it; an eye electrode
+  recorded against Cz gets the reference of the EEG (IO minus TP9), while an EOG of an auxiliary input, an EDF, or the left-minus-right
+  derivation of two EOG are used as recorded. Each signal is checked value by value against what was written;
+- **Channel checks**: a noisy electrode, a dead mastoid and a noisy EOG are said (a clean recording says nothing); an ECG 100 times
+  too large, a chin EMG dominated by the mains, and a noise on the ECG input are said too. Nothing is changed;
+- **Tool 3bis** scores two BrainVision recordings with GSSC and YASA: the hypnograms are written beside the `.vhdr`, the parameters
+  file names the derivations and the EOG reference, and holds the channel warnings only when there is something to say.
+
+Tool 6's comparison of each channel with the median channel of the same epoch (`test_quality_lib.py`): a channel 10 times larger
+than the others is said in its own columns, never as a flag, so tool 7 unticks nothing more. Its flat measure counts only what
+holds still for 50 ms: a quiet channel at a high sampling rate is not flat, a 6-s flat stretch is, at any rate. Since this changed
+the flat values on purpose, `test_pipeline.py` compares tool 6 with the golden on everything else: only the flat values and, where
+they crossed the threshold, that one reason may move, and the channels tool 7 unticks stay the same.
+
 These tests do not replace a look at real data: at each phase the tools were also run on real recordings, which never enter the
 repository.
 

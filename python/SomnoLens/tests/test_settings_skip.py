@@ -157,8 +157,8 @@ def test_tool6_reprocess_makes_again_the_participants_concerned(t6_data, ids):
 
 @pytest.mark.tool6
 def test_tool6_a_threshold_counts_only_through_the_flags(t6_data, ids):
-    """Fp1 of the clipped recording has flat_pct 4.9 %, the only value between 3.5 and 10: the dead channel (99 %) stays
-    flagged whatever the threshold, the others stay below."""
+    """Fp1 of the clipped recording has flat_pct 1.9 % (its clipping plateaus that last 50 ms or more), the only value
+    between 1.5 and 4: the dead channel (98 %) stays flagged whatever the threshold, the others are at 0 %."""
     clipped = ids[0]
     reports = t6_data / 'reports_quality_overview'
     before = mtimes(reports, *T6_OUTPUTS)
@@ -170,12 +170,12 @@ def test_tool6_a_threshold_counts_only_through_the_flags(t6_data, ids):
     assert QUESTION not in log, log[-2000:]
     with NotebookSession(pipeline.T6) as nb:              # a flag moved on one participant: only this one
         open_tool6(nb, t6_data)
-        nb.set('thresh_flat', 10.0)
+        nb.set('thresh_flat', 1.5)
         nb.click('btn_run')
         log = nb.widget_text()
     assert f'1 of the {len(ids)} processed participant(s) {QUESTION}' in log, log[-2000:]
-    assert 'flag threshold flat_pct : 3.5 → 10' in log            # the former threshold, recorded
-    assert 'flags of Fp1 : bounds_pct, flat_pct, hist_extreme → bounds_pct, hist_extreme' in log
+    assert 'flag threshold flat_pct : 3.5 → 1.5' in log           # the former threshold, recorded
+    assert 'flags of Fp1 : bounds_pct, hist_extreme → bounds_pct, flat_pct, hist_extreme' in log
     assert 'Keeping them mixes settings' in log                   # the three others have this run's settings
     assert f'(1 participant(s): {clipped})' in log
     assert mtimes(reports, *T6_OUTPUTS) == before

@@ -55,8 +55,9 @@ MODALITIES = ['BAS', 'RESP', 'EKG', 'EMG']
 RESP_ALIASES = {
     'Thoracic': ['Thoracic', 'Thor', 'Chest', 'Thor Effort', 'Thorax', 'Effort THO', 'RIP Thoracic', 'THO',
                  'Chest Effort'],
+    # a single belt with a generic name (Respi, Belt...) is taken as abdominal: a convention, written in the report
     'Abdominal': ['Abdominal', 'Abdo', 'Abd', 'Abdomen', 'Abd Effort', 'Effort ABD', 'RIP Abdominal', 'ABD',
-                  'Abdom Effort'],
+                  'Abdom Effort', 'Respi', 'Resp', 'Respiration', 'Resp Belt', 'Belt'],
     'Airflow': ['Flux', 'Airflow', 'Flow', 'Nasal', 'NasalFlow', 'Nasal Pressure', 'Nasal Flow', 'Thermistor',
                 'AIRFLOW', 'Airflow-0'],
     'SpO2': ['SpO2', 'SaO2', 'Oximetry', 'SAO2', 'SPO2', 'Ox Status'],

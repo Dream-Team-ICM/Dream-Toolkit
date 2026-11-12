@@ -8,7 +8,8 @@ from pathlib import Path
 import mne
 import pandas as pd
 
-from brainvision_lib import read_raw_bv, read_vhdr_header, read_vmrk_info
+import brainvision_lib
+from brainvision_lib import channels_on_online_reference, read_raw_bv, read_vhdr_header, read_vmrk_info
 from edf_io_lib import read_edf_header_custom, read_edf_start_datetime
 
 
@@ -48,3 +49,17 @@ def read_raw(path, include=None, add_online_reference=True, preload=False):
     if file_format(path) == 'edf':
         return mne.io.read_raw_edf(str(path), preload=preload, encoding='latin-1', include=include, verbose=False)
     return read_raw_bv(path, include=include, add_online_reference=add_online_reference, preload=preload)
+
+
+def online_reference(path):
+    """(online reference, [channels recorded against it]) when the recording says so, else (None, []). An EDF header does
+    not say which reference its channels were recorded against: (None, []), and an EDF is used as it is."""
+    if file_format(path) == 'edf':
+        return None, []
+    return channels_on_online_reference(path)
+
+
+def recreate_online_reference(raw, name):
+    """Add the online reference `name` to a Raw whose data are loaded (a channel of zeros, which becomes a signal once
+    the data are re-referenced): for a read that first opens every channel lazily, then loads only those it needs."""
+    return brainvision_lib.recreate_online_reference(raw, name)

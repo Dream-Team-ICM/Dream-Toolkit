@@ -150,6 +150,11 @@ The "what to do / what not to break" reminders, grouped by theme. Each points to
   recomputed fallback), and the channel layer must be engaged **only** when the user actually uses it (the
   fallback flags depend on thresholds that differ from the tool-7 run when no params JSON exists).
   → SPEC *Cross-cutting → High-density montage support* + §8.
+- **Channel checks warn, they never decide (`tools/channel_check_lib.py`)**: each channel against the median channel of the
+  same epoch (noisy / nearly flat), the EOG, the ECG / chin EMG amplitude and mains. Tool 3bis checks each model's channels
+  (additive `channel_quality_warnings`), tool 6 shows the comparison in its own columns, **never as a flag** (tool 7 unticks
+  nothing more). An EOG recorded against a BrainVision online reference gets the EEG's reference in 3bis (`eog_reference`).
+  → SPEC *Cross-cutting → Channel checks* + §3bis + §6.
 - **Per-epoch montage scales are FIXED, never autoscaled** (`DISPLAY_SCALE_UV` = EEG 150 / EOG 300 /
   EMG 100 / ECG 1000 µV per row, clinical conventions): window-based autoscaling made the same waveform
   change height between epochs and destroyed visual amplitude criteria. Overflow into the neighbouring row

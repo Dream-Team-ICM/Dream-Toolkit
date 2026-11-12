@@ -1,6 +1,7 @@
 # Plan : format BrainVision (.vhdr, .vmrk, .eeg) et une seule version de chaque outil
 
-**Statut** : version 3 du 2026-11-06, confirmée. Phase 1 faite, phase 2 à valider. Chaque phase est validée avant la suivante.
+**Statut** : version 3 du 2026-11-06, confirmée. Phases 1 et 2 faites, phase 3 à valider (2026-11-12). Chaque phase est validée
+avant la suivante.
 **Objectif immédiat** : pouvoir inspecter ces données et faire l'autoscoring (phases 1 à 3). Le reste de la chaîne suit
 (phase 4), puis l'affichage haute densité (phase 5) et la suppression des jumeaux Curry (phase 6).
 **Principe (ta remarque)** : les outils servent à d'autres jeux de données. Toute règle doit valoir pour n'importe quelle
@@ -314,6 +315,53 @@ réponse. Dans toutes les phases, **le golden EDF synthétique ne doit pas bouge
   une question scientifique que le format ne règle pas.
 - **Tests proposés** : standard sur `tool3bis`, puis `tests/score_edf_equivalence.py`, car la Section 4 ne doit pas changer.
 - **Fin de phase** : tu testes dans Voila.
+- **Précisions apportées en faisant** :
+  - **SleepFM ne peut pas tourner sans ECG ni sans ceinture** : il lui faut un canal par modalité. Les comparaisons « sans » sont
+    remplacées par ECG tel quel contre ECG filtré 0,5-40 Hz (le 50 Hz retiré), et j'ai ajouté EOG IO-TP9 contre IO-Cz pour juger la
+    décision 8. Sans l'alias de la ceinture, SleepFM ne pouvait pas scorer ces enregistrements ;
+  - **référence en ligne recréée seulement si une dérivation en a besoin** (Cz sur les deux mastoïdes, référence moyenne) : la recréer
+    à la lecture chargeait les 64 canaux en mémoire ;
+  - **un EOG est « sur une entrée EEG »** quand le `.vhdr` lui donne l'unité µV et aucun gradient (les entrées AUX en ont un). Sinon,
+    et pour tout EDF, il reste tel qu'enregistré ;
+  - **électrodes proposées** : sans les mastoïdes (M1, M2, A1, A2, TP9, TP10) ni les canaux de contexte de l'outil 2 ;
+  - **calage des seuils** (EDF de test, 2 nuits Curry, 3 enregistrements BrainVision) : ceux du plan tiennent (3 fois, 0,1 fois, 20 %,
+    100 µV). TP9 du 3e enregistrement est juste sous le seuil (18 %) ;
+  - **EDF inchangés** : l'outil 3bis avant et après, sur les deux études de `score_edf_equivalence` et les trois modèles, donne les mêmes
+    fichiers de données. Seuls changent deux textes : la note « recording start time unknown » et le libellé « Recording start ».
+- **Résultats des comparaisons** (2026-11-12, 3 siestes de 330 à 391 époques, environ 95 % d'éveil ; l'expert score 13 N1 et 37 N2
+  en tout, ni N3 ni R ; kappa sur les 3 enregistrements réunis, l'exactitude ne dit rien ici car « tout en éveil » ferait 96 %) :
+
+  | Modèle | Variante | Kappa | Par enregistrement |
+  |---|---|---|---|
+  | GSSC | défaut (C3, C4, F3, F4 + IO-TP9) | 0,28 | 0,49 / 0,14 / 0,65 |
+  | GSSC | EOG tel qu'enregistré (IO-Cz) | 0,31 | 0,51 / 0,18 / 0,62 |
+  | GSSC | EEG seul | 0,29 | 0,43 / 0,17 / 0,62 |
+  | YASA | sans EMG (décidé pour l'étude) | 0,22 | 0,29 / 0,13 / 0,47 |
+  | YASA | EMG tel quel (x100) | 0,21 | 0,23 / 0,15 / 0,37 |
+  | YASA | EMG corrigé (/100 dans une copie du `.vhdr`) | 0,24 | 0,44 / 0,15 / 0,42 |
+  | YASA | sans EMG, IO-Cz | 0,24 | 0,37 / 0,15 / 0,46 |
+  | SleepFM | défaut (ECG tel quel, IO-TP9) | 0,13 | 0,10 / 0,04 / 0,39 |
+  | SleepFM | ECG filtré 0,5-40 Hz | 0,12 | 0,08 / 0,05 / 0,37 |
+  | SleepFM | IO-Cz | 0,14 | 0,10 / 0,05 / 0,46 |
+
+  - **EMG de YASA** : à la mauvaise échelle, il dégrade 2 enregistrements sur 3. Corrigé, il aide sur le 1er et pas sur le 3e. Rester
+    sans EMG tant que le gain n'est pas confirmé, puis corriger la résolution du `.vhdr` ;
+  - **ECG de SleepFM** : le filtrer n'apporte rien, il reste tel quel (comme Score_EDF) ;
+  - **référence de l'EOG** : IO-TP9 n'apporte rien de mesurable ici, un peu moins bien en tout pour les trois modèles. Sur 50 époques
+    de sommeil, l'écart tient à quelques époques. TP9 est bruité sur 18 % des époques du 3e enregistrement, celui où l'écart est le
+    plus grand pour SleepFM. **Décidé (2026-11-12) : la règle est gardée**, pour suivre l'apprentissage des modèles ;
+  - **le 2e enregistrement** est mauvais pour les trois modèles, qui y voient beaucoup de sommeil là où l'expert score de l'éveil.
+    Sans son C3 signalé, GSSC passe seulement de 0,14 à 0,15 ;
+  - **SleepFM** est le plus faible sur ces siestes : il a appris sur des nuits entières et prédit trop de N2.
+- **Outil 6, ta demande du 2026-11-12** (fin de phase) :
+  - **(a) fait** : chaque canal comparé au canal médian de la même époque, toute la nuit, en trois colonnes à part
+    (`noisy_vs_median_pct`, `flat_vs_median_pct`, `comparison_alert`). Ce n'est jamais un drapeau, donc l'outil 7 ne décoche rien de
+    plus et les drapeaux EDF ne bougent pas ;
+  - **(b) fait, avec ton accord** (il change des résultats EDF) : `flat_pct` ne compte que les moments où le signal reste immobile au
+    moins 50 ms. Mesuré : tous les défauts injectés restent signalés, les 9 fausses alertes du 3e enregistrement disparaissent, et
+    4 canaux EDF perdent leur drapeau (les deux EOG d'une nuit de test à 256 Hz, C3 et un EOG d'une autre à 512 Hz), sans plat
+    réel de 50 ms. Sur la chaîne de test, seul le Fp1 écrêté change de raison (4,9 % → 1,9 %), il reste signalé par ses autres
+    critères : l'outil 7 lit les mêmes canaux. Les références de l'outil 6 sont comparées hors `flat_pct` par un test dédié.
 
 ### Phase 4 : le reste de la chaîne (outils 4, 5, 7, 0)
 
@@ -397,12 +445,12 @@ chacun) permettent de la vérifier.
   numéro de série de l'ampli : avant tout partage de données, il faudra une anonymisation dédiée. À noter en TODO si tu le souhaites.
 - **Données compressées ou segmentées** (exports Analyzer) : non couvertes, seul l'enregistrement continu l'est.
 - **Triggers et capteurs de pression** : lus mais inutilisés, voir SPEC *Task triggers*.
-- **Outil 6** : ses drapeaux ne repèrent pas un canal simplement bruité (ils visent les canaux plats, morts, écrêtés ou bimodaux). Y ajouter
-  le critère du contrôle changerait les résultats EDF : ce sera un TODO à part si tu le souhaites. Mesuré sur ces 3 enregistrements
+- **Outil 6** : ses drapeaux ne repèrent pas un canal simplement bruité (ils visent les canaux plats, morts, écrêtés ou bimodaux). Le
+  critère du contrôle est montré à part depuis la phase 3 (comparaison au canal médian), sans entrer dans les drapeaux. Mesuré sur ces 3 enregistrements
   (2026-11-06) : **aucun des canaux `not connected` n'est signalé** (jusqu'à 18 000 µV d'écart-type), un seul des `Out of Range!`, et
   **9 canaux corrects sont signalés sur un enregistrement** (`flat_pct` de 3,5 à 5,6 % pour un seuil de 3,5 %, impédances bonnes, écart-type
-  normal). Probablement un effet de la fréquence d'échantillonnage : à 500 Hz, deux échantillons voisins diffèrent souvent de moins de
-  0,06 µV, la tolérance du calcul. Comme ces drapeaux décochent les canaux dans l'outil 7, c'est à regarder avant la phase 4.
+  normal). C'était bien un effet de la fréquence d'échantillonnage : à 500 Hz, deux échantillons voisins diffèrent souvent de moins de
+  0,06 µV, la tolérance du calcul. Corrigé en phase 3 (règle des 50 ms) : ces 9 canaux passent à 0 %.
 
 ## Sources sur le matériel
 

@@ -365,7 +365,25 @@ def _reference_position(name):
     return next((xyz for ch, xyz in positions.items() if ch.lower() == name.lower()), None)
 
 
-def _add_online_reference(raw, reference):
+def channels_on_online_reference(vhdr_path):
+    """(online reference, [channels recorded against it]) from the .vhdr, or (None, []) when the [Comment] names no
+    reference. A channel of an EEG input is recorded against the online reference: its unit is µV and the [Comment] gives
+    it no gradient (the auxiliary inputs carry one, and their own unit). An EOG electrode on an EEG input therefore also
+    holds the EEG of the reference electrode, inverted. Read as text, without opening the recording. Never raises."""
+    try:
+        text = _read_text(vhdr_path)
+        infos = _channel_infos(text)
+        names = list(infos)
+        comment = read_comment_info(text, names)
+    except Exception:
+        return None, []
+    reference = comment['online_reference']
+    if not reference:
+        return None, []
+    return reference, [ch for k, ch in enumerate(names) if infos[ch][1] == 'uV' and comment['gradient'][k] is None]
+
+
+def recreate_online_reference(raw, reference):
     """Recreate the online reference (MNE's documented method): a channel of zeros, which becomes a real signal once the
     data are re-referenced. It needs the data in memory. MNE leaves its position empty, so it is set here, which the
     topographies of tool 8 need."""
@@ -406,5 +424,5 @@ def read_raw_bv(vhdr_path, include=None, add_online_reference=True, preload=Fals
         reference = read_comment_info(_read_text(vhdr_path), raw.ch_names)['online_reference']
     raw.pick(keep)
     if reference and reference in include and reference not in keep:
-        return _add_online_reference(raw, reference)
+        return recreate_online_reference(raw, reference)
     return raw.load_data() if preload else raw
