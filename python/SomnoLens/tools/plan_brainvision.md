@@ -1,7 +1,7 @@
 # Plan : format BrainVision (.vhdr, .vmrk, .eeg) et une seule version de chaque outil
 
-**Statut** : version 3 du 2026-11-06, confirmée. Phases 1 à 3 faites, phase 4 à valider (2026-11-12). Chaque phase est validée
-avant la suivante.
+**Statut** : version 3 du 2026-11-06, confirmée. Phases 1 à 4 faites. Le 2026-11-12 : deux ajouts à l'outil 7 (phase 4 bis) et
+l'audit de la phase 5, à confirmer avant de coder. Chaque phase est validée avant la suivante.
 **Objectif immédiat** : pouvoir inspecter ces données et faire l'autoscoring (phases 1 à 3). Le reste de la chaîne suit
 (phase 4), puis l'affichage haute densité (phase 5) et la suppression des jumeaux Curry (phase 6).
 **Principe (ta remarque)** : les outils servent à d'autres jeux de données. Toute règle doit valoir pour n'importe quelle
@@ -395,6 +395,45 @@ réponse. Dans toutes les phases, **le golden EDF synthétique ne doit pas bouge
   sens sur si peu de sommeil. L'outil 7 tourne en 13,5 min pour les trois enregistrements (64 canaux, compagnon EOG/EMG/ECG,
   événements placés). L'outil 8bis pré-coche tous les stades (médiane de 13 époques N2), et l'outil 8 charge et enregistre.
 
+### Phase 4 bis : deux ajouts demandés le 2026-11-12 (avant la phase 5)
+
+**A. La référence en ligne sans re-référence (outils 7 et 0).** Décidé : laissée de côté.
+
+- **Constat** : une référence déclarée dans l'outil 2 est déjà retirée après le re-référencement (`preprocess_raw`), donc jamais
+  signalée. Reste la référence en ligne d'un BrainVision (Cz) quand l'outil 2 ne déclare aucune référence : elle vaut 0 partout et
+  elle est signalée dans toutes les époques. Sur tes données, l'outil 6 n'avait pas tourné sur la copie, et l'outil 7 a pris le
+  montage de l'outil 2, Cz comprise.
+- **Règle, tous formats** : quand l'outil 2 garde la référence en ligne dans le montage sans déclarer de référence, elle est laissée
+  de côté : ni lue, ni dans le `.fif`, ni signalée. Une ligne le dit au scan et dans le log. Rien ne change pour un EDF (pas de
+  référence en ligne) ni quand une référence est déclarée (Cz redevient un vrai signal, gardée comme aujourd'hui).
+- **Une fonction** `recording_lib.flat_online_reference(path, cfg_entry)` (le nom harmonisé, ou `None`), appelée par l'outil 7 (scan)
+  et l'outil 0 (chargement).
+- **Outil 0, trouvé en préparant** : son étape 5 (l'outil 6) garde Cz plate et la signale, alors que l'outil 6 la laisse de côté.
+  L'étape 5 la laissera de côté comme l'outil 6, et l'étape 6 la gardera seulement avec une référence déclarée, comme l'outil 7.
+- **Test** : dans `test_brainvision_chain`, sans référence, Cz absente du `.fif` et la ligne présente. Avec référence, rien ne change.
+
+**B. Déclarer les fichiers d'événements d'une étude (outils 4, 5, 7, 0).** Décidé : une déclaration pour l'étude.
+
+- **Constat** : chaque outil cherche le TXT, le CSV et le XML, et dit ce qui manque. Sur une étude qui n'a que des TXT, l'outil 4
+  avertit en orange « No event CSV detected… rely on the XML fallback », et l'outil 7 parle de `*.edf.XML` sur une étude
+  BrainVision.
+- **Où** : dans l'outil 4, l'outil des événements. Sous les suffixes, une ligne « Event files of this study » avec trois cases
+  (*TXT export*, *CSV*, *XML*), pré-cochées d'après la détection (cochée = au moins un enregistrement en a un) et modifiables.
+  Elles sont enregistrées au *Save* dans `config_param/file_names.json` (clé `event_files`, avec le suffixe choisi pour le TXT et
+  le CSV). Une étude sans aucun événement : tout décoché, et *Save* enregistre seulement la déclaration, sans `event_remap.json`.
+- **Lecteurs** (outils 5, 7, 0, et l'outil 4 à la réouverture) :
+  - un type déclaré absent n'est plus cherché, même si un fichier existe, et son champ de suffixe et ses messages disparaissent ;
+  - le suffixe enregistré est pré-choisi, avant la détection ;
+  - sans aucun type, l'outil 7 masque la méthode *event* avec une ligne qui dit pourquoi, et l'outil 5 écrit « no scored events in
+    this study (declared in tool 4) » au lieu de son avertissement (indices d'événements à NaN, comme aujourd'hui).
+- **Sans déclaration, rien ne change** (sorties et textes identiques). Une déclaration conforme au disque donne les mêmes sorties.
+- `load_events` / `event_companion_paths` : un type absent (suffixe `None`, `xml=False`) n'est pas cherché. Les copies des outils 4 et
+  7 restent identiques (`test_edf_io_sync`).
+- **Tests** : une étude déclarée sans CSV ni XML (aucun message sur eux dans 4, 5, 7, mêmes sorties) ; une étude déclarée sans
+  événements (l'outil 7 sans méthode *event*, l'outil 5 avec la ligne d'information).
+- **Question ouverte** : le résumé Compumedics (`_Summary_Export.txt`, source des lumières de l'outil 5) peut suivre la même
+  déclaration, avec une quatrième case. Je le propose.
+
 ### Phase 5 : affichage haute densité
 
 Le principe reste : **adapté au nombre de canaux, jamais au format, inerte à 12 canaux ou moins** (`HD_CHANNEL_THRESHOLD`), donc EDF
@@ -412,6 +451,31 @@ inchangé. Audit à 62 canaux :
 | 5 | pas de signal EEG | rien |
 
 - **Tests proposés** : quick, plus un test qui prouve que rien ne change à 12 canaux ou moins.
+
+**Audit fait le 2026-11-12** sur un jeu synthétique en `%TEMP%\hd5` (aucune donnée réelle) : 2 siestes de 2 h à 256 Hz, 62 EEG + IO
+(sans position, comme sur tes données), Cz en référence en ligne, EMG, ECG, ceinture, une électrode morte, une bruitée, une avec du
+50 Hz. Chaîne 6 → 7 → 8bis → 8 → 9 sans erreur (outil 6 en 5 min, outil 7 en 4,5 min, outil 9 en 15 min), puis chaque figure regardée.
+
+| Outil | Constat à 62 canaux | Proposition |
+|---|---|---|
+| 8bis | heatmap lisible (0,22 pouce par canal, bandes du haut de hauteur fixe) | rien |
+| 8 | montage par époque lisible (62 rangées, contexte EOG/EMG/ECG dessous) ; tableau du détail réduit à 8 lignes | rien pour l'affichage. Voir la ligne *topographies* |
+| tous (8, 0) | **aucune topographie** : elle demande une position à tous les canaux, et l'électrode de l'œil (IO) n'en a pas. Même chose sur tes données | topographie sur les canaux qui ont une position |
+| 0 | le détail affiche **les 62 lignes** du tableau des métriques : l'outil 0 n'applique pas le réglage de l'outil 8 | le même réglage que l'outil 8 au-dessus de 12 canaux (8 lignes : les canaux signalés + les pires) |
+| 7 | heatmap correcte, mais **l'hypnogramme du haut est écrasé** (sa hauteur suit le nombre de canaux : les libellés des stades se chevauchent) | hauteur fixe pour l'hypnogramme, comme l'outil 8bis |
+| 9 | **illisible** : chaque figure met les 62 canaux sur une seule rangée de 20 pouces (32 pixels par canal, titres et axes superposés) | une grille de petits panneaux (8 colonnes, axes partagés, légende une seule fois), pour les figures par participant et de la base |
+| 6, participant | rapport de **19,7 Mo** par participant : 4 figures par canal, 258 figures | le détail par canal seulement pour les canaux signalés ou en alerte de comparaison, les autres dans le tableau. Une case *All channels* (décochée au-dessus de 12 canaux) remet tout |
+| 6, participant | superposition des canaux : légende de 63 noms coupée, couleurs indiscernables | en haute densité, canaux en gris fin, seuls les canaux signalés en couleur dans la légende |
+| 6, participant | nuage par électrode : noms des 62 électrodes illisibles (superposés) ; panneau *At EDF bounds* vide sur BrainVision | noms verticaux en petit ; panneau masqué sans bornes physiques (comme dans la figure voisine) |
+| 6, base | une figure par électrode (61 figures, 5,1 Mo) | en haute densité, une figure par métrique avec une boîte par électrode (6 figures) |
+| 1, 2, 3bis | listes et cases de 64 à 71 canaux, déjà vues dans Voila par toi aux phases 2 et 3 | à confirmer par toi : je ne peux pas faire de capture des pages |
+| 5 | pas de signal EEG | rien |
+
+- **Un seul seuil**, `HD_CHANNEL_THRESHOLD` (12) de `qc_rejected_epochs_lib`, pour toutes les librairies d'affichage. Rien ne change à 12
+  canaux ou moins.
+- **Test d'inertie** : `tests/refactor_check.py` sur la chaîne synthétique (EDF, 4 canaux), avant et après. Tous les fichiers doivent être
+  identiques, rapports compris. Plus un test par figure modifiée, à 62 canaux, qui vérifie la mise en page (nombre de panneaux, hauteur
+  fixe de l'hypnogramme, topographie présente).
 
 ### Phase 6 : suppression des jumeaux Curry
 
