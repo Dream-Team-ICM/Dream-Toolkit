@@ -109,99 +109,95 @@ def edf_to_yasa_ASSA(
     
     for filename in os.listdir(raw_dir):
         if filename.endswith(file_ext):
-            if overwrite == False :
+            # FIX #6: overwrite logic was inverted — new files were skipped when overwrite=False
+            if not overwrite:
                 checkname = filename[:-4] + "_hypnopred.txt"
                 if os.path.isfile(path_output_dir/checkname):
                     continue
-            else :
-                print("...Processing : ", filename, "...\n")
-                
-                #### Import & Preprocess
-                
-                raw =  mne.io.read_raw(path_raw_dir/filename, 
-                                       preload=False, verbose=None)
-                ch_select = [
-                    central_ch, 
-                    mastoid_ref, 
-                    emg_ch1, 
-                    emg_ch2, 
-                    eog_ch
-                    ]
-                raw.pick(ch_select)
-                raw.load_data()
-                raw.resample(100, npad="auto")
-                
-                mapping_type = {emg_ch1 : 'emg', emg_ch2 : 'emg'}
-                raw.set_channel_types(mapping_type, verbose=None)
-                
-                mne.set_eeg_reference(
-                    raw, ref_channels=[mastoid_ref], copy=False, projection=False, 
-                    ch_type='eeg', forward=None, verbose=None
-                    )
-                mne.set_bipolar_reference(
-                    raw, emg_ch1, emg_ch2, ch_name='EMG', ch_info=None, 
-                    drop_refs=True, copy=False, verbose=None
-                    )
-                
-                textfile = glob.glob('/Users/thandrillon/Data/ICEBERG/Hypno/**/' + '*' + filename[:-4] + '*.TXT')
-                if len(textfile)!=1:
-                    print("... For ", filename, 
-                          " found %.3f hypno files that could match the EEG" % len(textfile), 
-                          " ...\n")
-                    continue
-                hypno = np.loadtxt(
-                    textfile[0], 
-                    dtype=str
-                    )
-                d = {
-                    'M':'-1', 
-                    '3': 'N3', 
-                    '4': 'N3', 
-                    '2': 'N2', 
-                    '1': 'N1',
-                    '?':'-2'
-                    }
-                for keys, values in d.items():
-                    hypno = np.char.replace(hypno, keys, values)
-                if hypno[0]=='Score':
-                    hypno=hypno[1:]
-                
-                #### Yasa Part
-                
-                raw_filtered = raw.copy().filter(l_freq=0.4, h_freq=30)
-                sls = yasa.SleepStaging(
-                    raw_filtered, 
-                    eeg_name = central_ch, 
-                    eog_name = eog_ch, 
-                    emg_name = "EMG")
-            
-                hypno_pred = sls.predict()
-                accuracy = (
-                    hypno == hypno_pred[:len(hypno)]).sum() / hypno_pred.size
-                print("... For ", filename, 
-                      " automatic sleep staging's accuracy is: %.3f" % accuracy, 
+
+            print("...Processing : ", filename, "...\n")
+
+            #### Import & Preprocess
+
+            raw =  mne.io.read_raw(path_raw_dir/filename,
+                                   preload=False, verbose=None)
+            ch_select = [
+                central_ch,
+                mastoid_ref,
+                emg_ch1,
+                emg_ch2,
+                eog_ch
+                ]
+            raw.pick(ch_select)
+            raw.load_data()
+            raw.resample(100, npad="auto")
+
+            mapping_type = {emg_ch1 : 'emg', emg_ch2 : 'emg'}
+            raw.set_channel_types(mapping_type, verbose=None)
+
+            mne.set_eeg_reference(
+                raw, ref_channels=[mastoid_ref], copy=False, projection=False,
+                ch_type='eeg', forward=None, verbose=None
+                )
+            mne.set_bipolar_reference(
+                raw, emg_ch1, emg_ch2, ch_name='EMG', ch_info=None,
+                drop_refs=True, copy=False, verbose=None
+                )
+
+            # FIX #7: use hypno_dir parameter instead of hardcoded path
+            textfile = glob.glob(str(path_hypno_dir) + '/**/' + '*' + filename[:-4] + '*.TXT')
+            if len(textfile)!=1:
+                print("... For ", filename,
+                      " found %.3f hypno files that could match the EEG" % len(textfile),
                       " ...\n")
-                
-                table_proba = sls.predict_proba();
-                
-                #### Outputs tables
-                savename_hypno = filename[:-4] + "_hypnopred.txt"
-                np.savetxt(
-                    path_output_dir/savename_hypno, hypno_pred, fmt='%s'
-                    )
-                
-                Lildf_pred = pd.DataFrame(
-                    {
-                        'Stage': hypno, 
-                        'Pred': hypno_pred[:len(hypno)]
-                        }
-                    )
-                Bigdf_pred = pd.concat(
-                    [Lildf_pred, table_proba], 
-                    axis = 1
-                    )
-                savename_pred = filename[:-4]+'_hypnoproba.txt'
-                Bigdf_pred.to_csv(path_output_dir/savename_pred)
+                continue
+            hypno = np.loadtxt(
+                textfile[0],
+                dtype=str
+                )
+            # FIX #2: use mapping lookup instead of sequential char.replace (avoids corruption)
+            stage_map = {'M': '-1', '3': 'N3', '4': 'N3', '2': 'N2', '1': 'N1', '?': '-2'}
+            hypno = np.array([stage_map.get(s, s) for s in hypno])
+            if hypno[0]=='Score':
+                hypno=hypno[1:]
+
+            #### Yasa Part
+
+            raw_filtered = raw.copy().filter(l_freq=0.4, h_freq=30)
+            sls = yasa.SleepStaging(
+                raw_filtered,
+                eeg_name = central_ch,
+                eog_name = eog_ch,
+                emg_name = "EMG")
+
+            hypno_pred = sls.predict()
+            # FIX #5: divide by len(hypno) (compared segment), not hypno_pred.size (full prediction)
+            accuracy = (
+                hypno == hypno_pred[:len(hypno)]).sum() / len(hypno)
+            print("... For ", filename,
+                  " automatic sleep staging's accuracy is: %.3f" % accuracy,
+                  " ...\n")
+
+            table_proba = sls.predict_proba();
+
+            #### Outputs tables
+            savename_hypno = filename[:-4] + "_hypnopred.txt"
+            np.savetxt(
+                path_output_dir/savename_hypno, hypno_pred, fmt='%s'
+                )
+
+            Lildf_pred = pd.DataFrame(
+                {
+                    'Stage': hypno,
+                    'Pred': hypno_pred[:len(hypno)]
+                    }
+                )
+            Bigdf_pred = pd.concat(
+                [Lildf_pred, table_proba],
+                axis = 1
+                )
+            savename_pred = filename[:-4]+'_hypnoproba.txt'
+            Bigdf_pred.to_csv(path_output_dir/savename_pred)
          
 # %% Example Thomas
 edf_to_yasa_ASSA('/Users/thandrillon/Data/ICEBERG/PSG/EDF PD/','/Users/thandrillon/Data/ICEBERG/Hypno','/Users/thandrillon/Data/ICEBERG/YASA','.edf','C3','A2','EMG 1','EMG 2','EOG G',1)

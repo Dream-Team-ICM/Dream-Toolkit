@@ -12,7 +12,8 @@ import pandas as pd
 
 
 SLEEPFM_COMMIT = "2bcbae04c3592f61352addb7ac3d4193f0a3ca25"
-PROBABILITY_COLUMNS = ["Wake", "N1", "N2", "N3", "REM"]
+# FIX #13: import shared constant instead of redefining it in every file
+from .io import PROBABILITY_COLUMNS
 
 
 def _default_sleepfm_root() -> Path:

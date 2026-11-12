@@ -30,6 +30,8 @@ STAGE_TO_NUMBER = {
     "5": 4,
 }
 STAGE_NAMES = {0: "Wake", 1: "N1", 2: "N2", 3: "N3", 4: "REM"}
+# FIX #13: single source of truth for probability column names (was duplicated in 4+ files)
+PROBABILITY_COLUMNS = ["Wake", "N1", "N2", "N3", "REM"]
 
 
 @dataclass(frozen=True)
@@ -53,7 +55,11 @@ def read_edf_start(edf_path: str | Path) -> datetime:
         raise ValueError(f"Invalid EDF header: {edf_path}")
     date_text = raw[168:176].decode("latin-1").strip()
     time_text = raw[176:184].decode("latin-1").strip()
-    return datetime.strptime(f"{date_text} {time_text}", "%d.%m.%y %H.%M.%S")
+    # FIX #1: EDF spec uses yy<=84 → 20xx, yy>=85 → 19xx (not Python's default 69/00 cutoff)
+    dd, mm, yy = (int(x) for x in date_text.split("."))
+    hh, mi, ss = (int(x) for x in time_text.split("."))
+    year = 2000 + yy if yy <= 84 else 1900 + yy
+    return datetime(year, mm, dd, hh, mi, ss)
 
 
 def read_epoch_length(xml_path: str | Path) -> float:

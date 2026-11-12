@@ -25,7 +25,8 @@ from scipy.special import log_softmax, softmax
 from .alignment import align_manual_hypnogram, make_nap_epochs
 from .io import NapWindow
 
-PROBABILITY_COLUMNS = ["Wake", "N1", "N2", "N3", "REM"]
+# FIX #13: import shared constant instead of redefining it in every file
+from .io import PROBABILITY_COLUMNS
 FREE_BIASES = [1, 2, 4]  # N1, N2, REM; Wake and N3 fixed at 0
 
 
@@ -47,7 +48,9 @@ def prepare_recording(subject: str, five_second: pd.DataFrame, window: NapWindow
     stops = five_second["stop_seconds"].to_numpy(float)
     overlap = np.maximum(0.0, np.minimum(stops[None], epochs["stop_seconds"].to_numpy()[:, None])
                          - np.maximum(starts[None], epochs["start_seconds"].to_numpy()[:, None]))
-    weights = overlap / overlap.sum(axis=1, keepdims=True)
+    # FIX #3: guard against division by zero when an epoch has no overlap with any step
+    total = overlap.sum(axis=1, keepdims=True)
+    weights = np.where(total > 0, overlap / total, 0)
     manual = align_manual_hypnogram(hypnogram, epochs, epoch_seconds)["manual_stage_number"]
     labels = manual.fillna(-1).to_numpy(int)
     probabilities = five_second[PROBABILITY_COLUMNS].to_numpy(float)

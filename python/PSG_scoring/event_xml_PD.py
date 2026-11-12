@@ -24,6 +24,7 @@ Goal : gather the different events from the .xml file from profusion :
 
 import os, pathlib, xmltodict, pandas as pd
 
+# FIX #7 (related): parameterize this path for portability
 dir_to_xml = '/Users/thandrillon/Data/ICEBERG/PSG/EDF PD'
 path_to_dir = pathlib.Path(dir_to_xml)
 
@@ -46,7 +47,11 @@ for filename in os.listdir(dir_to_xml):
             xmltext, process_namespaces=True
             )['CMPStudyConfig']['ScoredEvents']
         
-        for i, elem in enumerate(xml['ScoredEvent']) :
+        # FIX #12: normalize to list — xmltodict returns a dict (not list) for single-event XMLs
+        events = xml['ScoredEvent']
+        if isinstance(events, dict):
+            events = [events]
+        for i, elem in enumerate(events) :
                 namelist.append(elem['Name'])
                 startlist.append(elem['Start'])
                 durationlist.append(elem['Duration'])

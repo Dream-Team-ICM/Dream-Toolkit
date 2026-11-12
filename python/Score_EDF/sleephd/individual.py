@@ -35,7 +35,8 @@ from .alignment import align_manual_hypnogram, make_nap_epochs
 from .io import NapWindow
 from .signals import EEG_DERIVATIONS, _load_edf_channels
 
-PROBABILITY_COLUMNS = ["Wake", "N1", "N2", "N3", "REM"]
+# FIX #13: import shared constant instead of redefining it in every file
+from .io import PROBABILITY_COLUMNS
 INDIVIDUAL_SFREQ = 128.0          # ieeg-sleep-staging: 4096 Hz / 32
 INDIVIDUAL_BAND = (0.1, 45.0)     # ieeg-sleep-staging: EEG_F_LO, EEG_F_HI
 INDIVIDUAL_CHANNELS = (*EEG_DERIVATIONS, "vEOG", "hEOG", "EMG")
