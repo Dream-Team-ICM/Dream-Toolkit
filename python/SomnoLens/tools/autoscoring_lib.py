@@ -35,6 +35,7 @@ import mne
 from sklearn.metrics import accuracy_score, cohen_kappa_score, f1_score, confusion_matrix
 from edf_io_lib import (   # one copy, in edf_io_lib (same folder)
     CUSTOM_STAGE_PALETTE, load_custom_stages, drop_suffix_duplicates, adapt_remap_dict_to_suffixes, load_json_lenient,
+    context_divisors, context_gain,
 )
 import recording_lib as RL
 import channel_check_lib as CC
@@ -307,6 +308,11 @@ def load_eog(edf_path, cfg_entry, sfreq, n_times, mode, reference=REFERENCE_CONT
     else:
         data = np.pad(data, ((0, 0), (0, n_times - data.shape[1])))
     by_name = dict(zip(eog.ch_names, data))
+    divisors = context_divisors(cfg_entry)     # tool 2's correction of an input gain, before the reference
+    for k, ch in found.items():
+        if sides[k] in divisors:
+            by_name[ch] = by_name[ch] / divisors[sides[k]]
+            notes.append(f'{k} ({sides[k]}) divided by {divisors[sides[k]]:g} (tool 2)')
     rows = {}
     for k, ch in found.items():
         ref = [inverse[h] for h in refs.get(k, []) if h in inverse and inverse[h] in by_name]
@@ -915,11 +921,15 @@ def read_signals(edf_path, cfg_entry, electrodes, reference, extra, eog_keys=Non
             ref_desc.startswith('contralateral') else e
         eeg[label] = data[e] - np.mean([data[r] for r in ref], axis=0) if ref else data[e]
     out_extra = {}
+    divisors = context_divisors(cfg_entry)     # tool 2's correction of an input gain, before the EOG reference
     for k, orig in extra.items():
         ch = find(orig) if orig else None
         out_extra[k] = raw.get_data(picks=[ch])[0] if ch is not None else None
         if orig and ch is None:
             notes.append(f'{k} channel {orig} not found in the recording')
+        if ch is not None and orig in divisors:
+            out_extra[k] = out_extra[k] / divisors[orig]
+            notes.append(f'{k} ({orig}) divided by {divisors[orig]:g} (tool 2)')
     for key, label in eog_keys.items():
         ref = eog_refs.get(label, [])
         if ref and out_extra.get(key) is not None and all(r in data for r in ref):
@@ -1076,11 +1086,28 @@ def stored_reference_choice(params):
     return REFERENCE_CONTRALATERAL if text.startswith('contralateral') or fell_back else REFERENCE_DECLARED
 
 
+# The context channels each model receives (tool 2's roles): the part of tool 2's context_gain that changes its input
+MODEL_CONTEXT_ROLES = {'GSSC': ('eog_left', 'eog_right'), 'YASA': ('eog_left', 'eog_right', 'emg'),
+                       'SleepFM': ('eog_left', 'eog_right', 'emg', 'ecg')}
+
+
+def model_context_gain(algo, cfg_entry):
+    """Tool 2's context_gain ({role: divide by}) on the context channels the model `algo` receives."""
+    return {role: value for role, value in context_gain(cfg_entry).items() if role in MODEL_CONTEXT_ROLES[algo]}
+
+
+def context_gain_text(block):
+    """A context_gain block in words: 'ecg 100, emg 100', or 'none'."""
+    return ', '.join(f'{role} {float(value):g}' for role, value in sorted((block or {}).items())) or 'none'
+
+
 def stored_scoring_settings(algo, params):
     """The settings a stored scoring was made with ({setting: text}), read from its _scoring_params.json, in
-    the words of tool 3bis's run_settings (the same keys and values)."""
+    the words of tool 3bis's run_settings (the same keys and values). A file without `context_gain` was made
+    without a correction (it did not exist)."""
     settings = {'reference': stored_reference_choice(params),
-                'expert hypnogram': params.get('expert_hypnogram_suffix') or 'none'}
+                'expert hypnogram': params.get('expert_hypnogram_suffix') or 'none',
+                'context channels divided by': context_gain_text(params.get('context_gain'))}
     if algo == 'GSSC':
         settings['mode'] = params.get('scoring_mode')
         settings['EEG'] = ', '.join(sorted(params.get('eeg_used') or [])) or 'none'

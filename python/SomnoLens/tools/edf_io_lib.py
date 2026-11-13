@@ -628,13 +628,38 @@ CONTEXT_ROLE_TYPE = {'eog_left': 'eog', 'eog_right': 'eog', 'emg': 'emg', 'ecg':
 CONTEXT_ROLE_LABEL = {'eog_left': 'EOG-L', 'eog_right': 'EOG-R', 'emg': 'EMG', 'ecg': 'ECG'}
 
 
+def context_gain(cfg_entry):
+    """Tool 2's `context_gain` block: {role: divide by}, for a context channel recorded through an input with its own gain
+    that the file does not declare (an auxiliary input behind an adapter such as BIP2AUX, gain 100, reads 100 times too
+    large). Only the roles that have a context channel and a factor other than 1 (a factor that is not a positive number
+    is ignored); {} without the block. Every tool that reads a context channel divides it by this factor first, before
+    any derivation."""
+    ctx = (cfg_entry or {}).get('context_channels') or {}
+    gains = {}
+    for role, value in ((cfg_entry or {}).get('context_gain') or {}).items():
+        try:
+            value = float(value)
+        except (TypeError, ValueError):
+            continue
+        if ctx.get(role) and value > 0 and value != 1:
+            gains[role] = value
+    return gains
+
+
+def context_divisors(cfg_entry):
+    """context_gain by channel: {name in the recording: divide by}."""
+    ctx = (cfg_entry or {}).get('context_channels') or {}
+    return {ctx[role]: value for role, value in context_gain(cfg_entry).items()}
+
+
 def read_context_raw(edf_path, ctx_map, eeg_sfreq, cfg_entry=None):
     """The declared context channels ({role: original EDF name}, tool 2's `context_channels` block), read
     like tool 7 does: include= at read time, renamed to their role labels (EOG-L / EOG-R / EMG / ECG),
     resampled to the EEG rate, then filtered for DISPLAY per role (AASM-like: EOG band-pass 0.3-35 Hz,
     EMG high-pass 10 Hz, ECG band-pass 0.5-40 Hz). Returns the Raw, or None when no declared channel is
-    in the file. Any format; given tool 2's entry `cfg_entry`, an EOG recorded against a BrainVision online
-    reference gets tool 2's reference, like the EEG it is shown under (recording_lib.eog_reference)."""
+    in the file. Any format; given tool 2's entry `cfg_entry`, a channel is first divided by tool 2's factor
+    (context_gain), and an EOG recorded against a BrainVision online reference gets tool 2's reference, like
+    the EEG it is shown under (recording_lib.eog_reference)."""
     import recording_lib   # here, not at the top: recording_lib imports this module
     orig_to_role = {}
     for _role in CONTEXT_ROLES:
@@ -654,6 +679,9 @@ def read_context_raw(edf_path, ctx_map, eeg_sfreq, cfg_entry=None):
         return None
     ctx_raw = ctx_probe.pick(present + [o for o in ref_orig if o in ctx_probe.ch_names and o not in present])
     ctx_raw.load_data()
+    for orig, value in context_divisors(cfg_entry).items():
+        if orig in present:
+            ctx_raw.apply_function(lambda x, value=value: x / value, picks=[orig], channel_wise=True)
     for label, ref in refs.items():
         ref_present = [inverse[h] for h in ref if inverse[h] in ctx_raw.ch_names]
         if eog[label] in present and ref_present:

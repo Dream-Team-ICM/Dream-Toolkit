@@ -958,9 +958,10 @@ def settings_differences(sidecar, current):
     """What separates a participant's params sidecar from this run's settings (`current`: the sidecar's keys, methods_run
     without the event method), as (setting, recorded, this run) rows. [] when nothing does.
     A key an older sidecar does not hold is not compared, except the notch and the PSD smoothing, which did not exist
-    (absent = off), and the epoch length (absent = 30 s). A threshold counts only if its method ran on both sides. The
-    event method varies with each file's annotations: the events are compared through the types asked for. Among the
-    channels, only those the sidecar names: a reference channel has left the epochs before it is written."""
+    (absent = off), the epoch length (absent = 30 s) and tool 2's correction of the context channels (`context_gain`,
+    absent = none). A threshold counts only if its method ran on both sides. The event method varies with each file's
+    annotations: the events are compared through the types asked for. Among the channels, only those the sidecar names:
+    a reference channel has left the epochs before it is written."""
     rows = []
 
     def compare(setting, recorded, now):
@@ -984,6 +985,9 @@ def settings_differences(sidecar, current):
 
     def reference(value):
         return value if isinstance(value, str) else ', '.join(value) or 'none'
+
+    def gain(block):
+        return ', '.join(f'{role} {float(value):g}' for role, value in sorted((block or {}).items())) or 'none'
 
     compare('epoch length', f"{sidecar.get('epoch_length_s', 30):g} s", f"{current['epoch_length_s']:g} s")
     if 'resample' in sidecar:
@@ -1025,6 +1029,7 @@ def settings_differences(sidecar, current):
     if 'manual_events' in sidecar:
         compare('manual annotations', 'on' if sidecar['manual_events'] else 'off',
                 'on' if current['manual_events'] else 'off')
+    compare('context channels divided by', gain(sidecar.get('context_gain')), gain(current.get('context_gain')))
     if sidecar.get('channels'):
         named = set(sidecar['channels']) | set(sidecar.get('bad_channels') or [])
         compare('channels kept', ', '.join(sorted(sidecar['channels'])),

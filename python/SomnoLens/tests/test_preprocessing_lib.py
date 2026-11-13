@@ -43,6 +43,15 @@ def test_same_settings_make_no_difference():
     assert differences() == []
 
 
+def test_the_correction_of_tool_2_on_the_context_channels_counts():
+    # absent on both sides (a sidecar written before the correction existed): nothing compared
+    assert differences(context_gain={}) == []
+    assert differences(context_gain={'emg': 100.0, 'ecg': 100}) == [
+        ('context channels divided by', 'none', 'ecg 100, emg 100')]
+    sidecar = dict(SIDECAR, context_gain={'emg': 100.0})
+    assert PL.settings_differences(sidecar, dict(copy.deepcopy(CURRENT), context_gain={'emg': 100})) == []
+
+
 def test_the_event_method_counts_only_through_the_types_asked_for():
     # A file without any of the types has no 'event' in methods_run, under the same settings.
     sidecar = dict(SIDECAR, methods_run=[m for m in SIDECAR['methods_run'] if m != 'event'])

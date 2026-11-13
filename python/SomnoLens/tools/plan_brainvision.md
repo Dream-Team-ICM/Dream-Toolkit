@@ -1,8 +1,7 @@
 # Plan : format BrainVision (.vhdr, .vmrk, .eeg) et une seule version de chaque outil
 
-**Statut** : version 3 du 2026-11-06, confirmée. Phases 1 à 4 faites. Le 2026-11-12 : deux ajouts à l'outil 7 (phase 4 bis) et
-les corrections de la phase 5, confirmés (avec la quatrième case pour le résumé Compumedics), en cours. Chaque phase est validée
-avant la suivante.
+**Statut** : version 3 du 2026-11-06, confirmée. Phases 1 à 5 faites (4 bis et 5 commitées le 2026-11-12). Phase 4 ter confirmée,
+en cours. Phase 5 bis (retours de ton inspection visuelle) **à relire et confirmer**. Chaque phase est validée avant la suivante.
 **Objectif immédiat** : pouvoir inspecter ces données et faire l'autoscoring (phases 1 à 3). Le reste de la chaîne suit
 (phase 4), puis l'affichage haute densité (phase 5) et la suppression des jumeaux Curry (phase 6).
 **Principe (ta remarque)** : les outils servent à d'autres jeux de données. Toute règle doit valoir pour n'importe quelle
@@ -482,6 +481,14 @@ appliqué à tous ses participants comme les canaux de contexte, avec un avertis
   sur les outils 2, 3bis, 7 et 0 (une étude BrainVision avec un ECG et un EMG 100 fois trop grands : l'avertissement, le champ, le
   JSON, puis le compagnon de l'outil 7 et l'EMG de YASA à la bonne échelle).
 - **Quand** : après ton commit des phases 4 bis et 5.
+- **Précisions apportées en faisant** (2026-11-13) :
+  - les champs *Divide by* des EOG n'ont pas de ligne d'amplitude (le contrôle porte sur l'ECG et l'EMG du menton, comme prévu) ;
+    l'EOG divisé est bien contrôlé ensuite par les outils 3bis et 7 ;
+  - chaque mesure est faite une fois par enregistrement et par canal : changer le champ recalcule la ligne sans relire le fichier ;
+  - un canal divisé est noté là où il est lu : les `notes` du fichier de paramètres de 3bis (`EMG (EMG) divided by 100 (tool 2)`),
+    une ligne du log de l'outil 7, une note de l'outil 0 ;
+  - l'outil 3bis compare aussi ce facteur dans son *Skip* (seulement la part que reçoit chaque modèle : l'EOG pour GSSC, l'EOG et
+    l'EMG pour YASA, les quatre pour SleepFM).
 
 ### Phase 5 : affichage haute densité
 
@@ -534,6 +541,84 @@ inchangé. Audit à 62 canaux :
 - **Test d'inertie** : `tests/refactor_check.py` sur la chaîne synthétique (EDF, 4 canaux), avant et après. Tous les fichiers doivent être
   identiques, rapports compris. Plus un test par figure modifiée, à 62 canaux, qui vérifie la mise en page (nombre de panneaux, hauteur
   fixe de l'hypnogramme, topographie présente).
+
+### Phase 5 bis : retours de ton inspection visuelle (2026-11-13, à confirmer)
+
+**Décidé avec toi** : la comparaison avec le canal médian devient un signalement au-dessus de 12 canaux, à seuils fixes. La PSD en
+superposition de l'outil 9 vaut au-dessus de 12 canaux. Ordre : la phase 4 ter d'abord, puis celle-ci.
+
+**Ce que la copie d'un enregistrement a montré** (copie dans `%TEMP%`, supprimée ensuite) :
+- **Aucun canal signalé par l'outil 6**, alors que 10 canaux sont bruités sur 100 % des époques par rapport au canal médian (jusqu'à
+  7 000 µV d'écart-type). Aucun des cinq critères ne vise un canal trop ample : sur un EDF, un canal débranché finit écrêté aux bornes
+  physiques (`bounds_pct`), et un BrainVision n'a pas de bornes.
+- **CP6 bimodal dans l'outil 0 et pas dans l'outil 6** : l'outil 6 a tourné rééchantillonné à 256 Hz, l'étape 5 de l'outil 0 à 500 Hz.
+  Le compte de pics dépend du nombre d'échantillons (largeur des classes de l'histogramme) : 1 pic à 256 Hz, 2 à 500 Hz.
+- **L'explorateur illisible en *as recorded*** : 9 canaux EEG dépassent 10 lignes dans l'époque médiane (le pire, 13 mV, fait 88 lignes à
+  150 µV par ligne), l'EMG 17 mV et l'ECG 137 mV (le gain 100 de la phase 4 ter). Changer l'échelle de l'EMG ne pouvait pas suffire.
+
+**1. Barres de progression (tous les outils).** Aujourd'hui quatre constructions : outils 6 et 7 (500 px, légende teintée), outils 5
+et 9 (620 px, légende grise), 3bis et 8 à part. La légende est placée par un calcul sur la largeur du libellé, d'où le décalage.
+- Une fonction `ui_lib.phase_bar(phases)` pour la barre des étapes : le libellé à part, puis la barre et sa légende dans la même colonne,
+  donc alignées par construction. La légende prend le style des outils 6 et 7 (segments teintés collés sous la barre).
+- Une seule largeur pour toutes les barres (620 px, libellé compris), le texte « i / N » et celui de l'étape en cours dans la même
+  colonne à droite. Outils 5, 6, 7, 9 (deux barres) et 1, 1bis, 2, 3bis, 4, 8, 8bis (une barre). `test_ui_lib.py` le garde.
+
+**2. Outil 6.**
+- **Au-dessus de 12 canaux, la comparaison devient un critère de signalement** : un canal bruité (plus de 3 fois le canal médian) ou
+  presque plat (moins de 0,1 fois) sur plus de 20 % des époques entre dans `suspect_reason` et `exclude`. Il est donc décoché par défaut
+  dans l'outil 7, coloré dans les superpositions, en rouge dans le nuage par électrode et dans le rapport de la base. Les seuils sont ceux
+  du contrôle de l'outil 3bis (`channel_check_lib`), écrits dans la boîte des seuils, sans champ. À 12 canaux ou moins, rien ne change
+  (avertissement seul). L'étape 5 de l'outil 0 suit (même fonction).
+- *Skip* : le nouveau critère compte dans `flag_criteria`, donc un participant déjà traité dont les signalements changent pose la question
+  *Reprocess / Keep*. Un participant traité avant le 2026-11-12 (colonnes de comparaison vides) n'a rien à comparer.
+- **Une ligne visible sur la page après le scan** pour un montage de plus de 12 canaux : le rapport de chaque participant ne détaille
+  que les canaux signalés, et la case *Per-channel detail for every channel* (boîte *Advanced*) les détaille tous.
+- La règle de CLAUDE.md *Channel checks warn, they never decide* reçoit son exception (outil 6, au-dessus de 12 canaux).
+
+**3. Heatmap de l'outil 7 (et de l'étape 6 de l'outil 0) : l'hypnogramme dépasse.** La barre de couleur prend sa largeur à la heatmap
+seule. Elle passe dans une colonne à part, comme dans la heatmap de l'outil 8 : l'hypnogramme et les époques s'alignent. **Pour tous
+les montages** (le défaut existe aussi en EDF) : la figure du rapport EDF change, rien d'autre.
+
+**4. Figures de l'outil 8bis (décision) et de l'outil 7 (heatmap), au-dessus de 12 canaux** : lignes de 0,14 pouce au lieu de 0,22 (8bis)
+et 0,2 (7), largeur plafonnée à 14 pouces, polices inchangées.
+
+**5. Panneau de détail des outils 8 et 0 (avec ton point 8, les topographies).**
+- Outil 8 : le nombre de canaux avant leur liste au chargement (`channels (62) = [...]`).
+- **Le tableau des métriques sort de la figure** : un tableau HTML à côté, qui défile quand il est plus haut que la figure. Tous les
+  canaux, dans l'ordre du fichier, les valeurs hors seuil en rouge. Le réglage *Table rows* disparaît (outil 8) et l'outil 0 n'a plus
+  de limite de 8 lignes. Pour tous les montages : à 12 canaux ou moins, le tableau tient sans défiler. Ce panneau n'écrit aucun fichier.
+- **Quatre petites topographies en 2 x 2** dans la place libérée : p-p, gradient, MAE et R² du 1/f, chacune avec ses électrodes hors
+  seuil cerclées de rouge. Comme aujourd'hui, seulement au-dessus de 12 canaux qui ont une position.
+
+**6. Outil 9.**
+- Rapport individuel, *Clean epochs per stage* : le pourcentage à côté du nombre, `123 (85 %)` = époques propres / époques de ce stade
+  dans l'enregistrement. Pour tous les montages (la figure du rapport EDF change).
+- Rapport de la base, *Clean epochs per participant* : le pourcentage d'époques propres au-dessus de chaque barre, et un tableau par
+  participant (époques de l'enregistrement, propres, %, puis propres et % par stade, et la colonne *excluded*). Pour tous les montages.
+- **Au-dessus de 12 canaux**, les deux figures PSD (*Mean PSD per stage* et *after removing the aperiodic component*), dans les deux
+  rapports : une superposition (un panneau par stade, chaque canal en trait fin gris, la moyenne des canaux en trait épais à la couleur
+  du stade), puis une section repliée *Per-electrode panels* qui contient la grille actuelle. MNE ne sait pas replier une figure : la
+  section est un `<details>` HTML avec l'image dedans.
+- Le log-log : les graduations 30 et 45 Hz se chevauchent sur les petits panneaux. 30 est retiré au-dessus de 12 canaux.
+
+**7. Outil 0.**
+- **Événements** : un menu comme pour l'hypnogramme. Les fichiers trouvés à côté de l'enregistrement (TXT, CSV, XML, celui que liraient
+  les outils 5 et 7 présélectionné), *none*, ou *Other file…* (un sélecteur, avec le même avertissement orange : les outils en lot ne
+  le trouveront pas).
+- **Étape 5** : la préparation du signal reprend celle que l'outil 6 a enregistrée pour ce participant (rééchantillonnage, passe-haut),
+  avec une ligne qui le dit. Sans table de l'outil 6, la règle de l'outil 6 (passe-haut à 0,1 Hz pour un enregistrement DC). Les deux
+  outils comparent alors la même chose. La sensibilité du compte de pics au rééchantillonnage est notée dans le SPEC.
+- **Étape 6** : la disposition de l'outil 7, une ligne par réglage, la case à cocher puis le champ puis l'unité (« Resample to [256] Hz »
+  au lieu de « Resample to Hz [256] »), les seuils alignés.
+- **Explorateur** : une option *ticked in step 6* dans le menu *Channels*, valable dans tous les modes d'affichage. Les canaux décochés
+  avant de lancer l'étape 6 sortent du montage. La règle « jamais écrêter » reste. L'EMG et l'ECG reviennent à la bonne échelle avec
+  la phase 4 ter.
+
+**Tests proposés** : quick (la barre des étapes et les pages dans `test_ui_lib`, le critère de l'outil 6 au-dessus de 12 canaux et son
+absence à 12, l'alignement de la heatmap, les tailles 8bis / 7, la superposition et la section repliée de l'outil 9, les pourcentages,
+le tableau HTML et les 4 topographies, le menu des événements de l'outil 0), puis standard sur les outils 0, 6, 7, 8, 8bis, 9.
+`refactor_check.py` sur la chaîne EDF : tout identique sauf les changements voulus, listés dans `INTENDED_CHANGES` (figure de la heatmap
+du rapport de l'outil 7, figure et tableau des époques propres des rapports de l'outil 9).
 
 ### Phase 6 : suppression des jumeaux Curry
 

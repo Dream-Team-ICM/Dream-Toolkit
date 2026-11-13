@@ -1093,7 +1093,11 @@ instead of restating them. Only tool-specific deltas are kept inline.
     outside 0.1-5 mV, or no heart rate in 30-120 per minute (*does not look like an ECG*). Chin EMG: RMS 10-100 Hz with the mains
     notched over 100 µV. Both: the mains (50 or 60 Hz, ±1 Hz) holding more than half of the 1-100 Hz power. An amplitude out of
     range comes with its factor to the typical value (1 mV, 5 µV) rounded to a power of ten (`decade`): an order of magnitude,
-    to confirm on the hardware (an auxiliary input with its own gain).
+    to confirm on the hardware (an auxiliary input with its own gain). The measures themselves are `context_amplitude(path,
+    orig, role, divide_by)` (None for a channel absent from the recording), which tool 2's `context_gain_advice` also uses.
+  - **After tool 2's correction (2026-11-13)**: a context channel (EOG, ECG, chin EMG) with a factor in tool 2's `context_gain`
+    is judged divided by it, and its warning says so (`… after the correction set in tool 2 (divided by 100)`, `divided_text`).
+    Without a factor every text is unchanged.
   - **Calibration (2026-11-12)**: 11 local EDF (4 to 12 EEG, the injected defects of `test_data_manifest.tsv`), 2 Curry nights
     (32 EEG), 3 BrainVision recordings (62 EEG). Clean channels: noisy on at most 10 % of the epochs (one Fp2 of an EDF at 53 %,
     an electrode no model uses); the dead C3 of `734` at 0.01 times the median; the electrodes next to an online reference down
@@ -1298,7 +1302,8 @@ step 1 marks 3-8, step 6 marks 7-8, step 7 marks 8 (only steps that have results
 editable checkboxes (names kept). **As recorded**: no re-reference, no filter (step 6 will preprocess). Context
 channels (EOG left / right, EMG, ECG dropdowns) = tool 2's `context_channels`, else
 `detect_context_channels` (editable, never saved), read by `edf_io_lib.read_context_raw` = tool 7's `[H]`
-block (role labels, resample to the EEG rate, per-role display filters) and epoched like tool 7's companion.
+block (role labels, resample to the EEG rate, per-role display filters) and epoched like tool 7's companion. A channel
+with a factor in tool 2's `context_gain` is divided by it (§2 *Divide by*), and a note says so.
 Hypnogram: one of the `.txt` named after the recording (tool 7's suffix pre-selected, else the recording's first
 `.txt` that is neither an export nor a toolkit hypnogram; pick tool 3bis's to look at the automatic scoring), or
 **"Other file…"** (`OTHER_FILE`): a file chooser (`fc_hypno`, opened in the
@@ -1518,6 +1523,30 @@ produced without using Section 3 stay byte-identical. Absent/`null` entries mean
 consumer must treat that as non-fatal. Tool 3bis (the EOG / EMG inputs of its models) and tool 7 (the context
 companion shown under each epoch in tool 8) read it; the other tools ignore it (they read only the `remap` keys).
 
+**Divide by: an input gain the file does not declare (2026-11-13, phase 4 ter of `tools/plan_brainvision.md`)**. A context
+channel recorded through an input with its own gain reads that many times too large, and nothing in the file says so: on the
+BrainVision study of the plan, the ECG and the chin EMG go through a BIP2AUX adapter (gain 100, confirmed on the hardware)
+that the Recorder workspace does not compensate. Beside each context menu, a **Divide by** field (`BoundedFloatText`, 1 by
+default = as recorded, 0.001-10 000), per configuration and fanned out like the menus. Under the menus, a line per ECG / chin
+EMG (`channel_check_lib.context_gain_advice`) gives their amplitude on the **first 3 recordings** of the configuration
+(`AMPLITUDE_CHECK_RECORDINGS`, `context_amplitude`, the one channel read, measured once per recording and channel), divided
+by the field: green within the usual range (R waves 0.1-5 mV, RMS up to 100 µV), amber outside it with the factor that brings
+the median recording to the usual value, rounded to a power of ten (*… about 100 times the usual 1 mV: its input may have a
+gain the file does not declare (an adapter such as BIP2AUX amplifies by 100). Set Divide by to 100?*). It proposes, it never
+fills the field. The EOG fields have no amplitude line (tools 3bis and 7 check the EOG). Saved as an **additive, optional**
+`context_gain` block after `context_channels`, `{role: factor}` for the factors other than 1 only (`100`, not `100.0`), **omitted
+when every field is 1**, so a configuration without a correction stays byte-identical:
+```json
+"TT001": { "config": "config. 1", "remap": {…}, "ref_channels": [],
+           "context_channels": {"eog_right": "IO", "emg": "EMG", "ecg": "ECG"},
+           "context_gain": {"emg": 100, "ecg": 100} }
+```
+**Every tool that reads a context channel divides it first, before any derivation** (`edf_io_lib.context_gain` = the block
+cleaned: only a positive number other than 1 for a declared channel; `context_divisors` = by channel name): tool 3bis
+(`autoscoring_lib.load_eog`, `read_signals`: the models' EOG, chin EMG, ECG; the EOG divided before it gets the EEG's
+reference), `edf_io_lib.read_context_raw` (tool 7's `[H]` companion, tool 0's context channels) and the channel checks
+(*Cross-cutting → Channel checks*). The EEG channels are never divided.
+
 **Section 6: Preview & save JSON**: section 6 exposes a single "Preview & Save" button. Clicking it builds the per-participant dict for the participants configured this session and **merges** it into any existing `<study_folder>/config_param/<file name>` (entries for re-configured participants are replaced, all others kept), so the file stays the full cumulative configuration. The saved file is sorted by participant id. The on-screen preview lists this session's participants first, then the previous ones, with a note of how many were added/updated and the new total. There is no separate save step. `mne_reref_plan.json` is no longer generated (it was redundant with the channel configuration, which already carries `ref_channels` per participant).
 
 **File name** (2026-11-04): the file is `channel_config.json` in a new study. A study keeps its name
@@ -1683,7 +1712,16 @@ tool 2's reference for want of a mastoid counts as contralateral, from its notes
 found; compared like a path) for every model; GSSC's mode, electrodes (only those the night has: a ticked electrode
 it lacks would not change its scoring) and EOG mode; YASA's electrode (its derivation `C4-M1` read back as `C4`), EOG
 and chin-EMG choices; SleepFM's tail context (`SLEEPFM_FULL_TAIL`). The choice is compared, not its effect: an EOG
-mode changed on a night without EOG is reported too.
+mode changed on a night without EOG is reported too. Since 2026-11-13, also tool 2's **Divide by** on the context channels
+the model receives (`context channels divided by`, `MODEL_CONTEXT_ROLES`: GSSC the EOG, YASA the EOG and the chin EMG,
+SleepFM the four; `model_context_gain`, `context_gain_text`); a file without `context_gain` was made without one.
+
+**Context channels divided by tool 2's factor (2026-11-13, see §2 *Divide by*)**: the EOG, chin EMG and ECG a model receives
+are divided before any derivation (`load_eog`, `read_signals`), each one noted (`EMG (EMG) divided by 100 (tool 2)` in the
+`notes`). The part of tool 2's `context_gain` the model receives is written in the additive `context_gain` key of
+`_scoring_params.json` and a *Context channels divided by (tool 2)* report row, both absent without a factor. The channel checks
+judge the divided signal. On the BrainVision study of the plan, the EMG can then go back to YASA (it was left out while the gain
+was unknown).
 
 **Section 4, comparison of the models (step 2)** (`autoscoring_compare_lib`, Score_EDF's `sleephd/alignment.py`,
 `recalibration.py`, `scoredf/plots.py`): reads only step 1's outputs and the expert hypnogram (Section 1 suffix,
@@ -2412,7 +2450,10 @@ the EDF branch is the former call; the online reference of a BrainVision recordi
 the `.txt` event export is placed with `edf_io_lib.read_start_datetime` (the `.vmrk` start; not converted for a paused
 recording), and the `[H]` companion is `edf_io_lib.read_context_raw` (the former inline lines, lifted there for tool 0), with
 `sub_config` so that an EOG recorded against the online reference gets tool 2's reference, like the EEG shown above it in
-tool 8. **The online reference** is not in tool 6's table (flat as recorded, left out there): Load adds it to the channels
+tool 8. **Since phase 4 ter (2026-11-13)** it also divides a context channel by tool 2's factor (§2 *Divide by*): the params
+sidecar records it in an additive `context_gain` key (absent without one), a log line says it (`[id] Context channels
+divided by the factor set in tool 2: emg 100, ecg 100`), and the Skip comparison counts it (`settings_differences`:
+*context channels divided by*, absent = none, so a participant processed before a factor was set is asked about). **The online reference** is not in tool 6's table (flat as recorded, left out there): Load adds it to the channels
 of the participant when tool 2 declares a reference (it is then a real signal, e.g. Cz − TP9), and leaves it out without one.
 **Since phase 4 bis (2026-11-12)** the rule holds whatever the source of the channels: without a declared reference
 (`recording_lib.flat_online_reference(path, cfg_entry)` = its harmonized name, None for an EDF, when tool 2 keeps it in the

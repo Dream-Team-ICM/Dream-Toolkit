@@ -36,7 +36,10 @@ The "what to do / what not to break" reminders, grouped by theme. Each points to
   optional** `context_channels` block of the channel configuration (`channel_config.json`; a study keeps
   `remap_reref_persubject.json`, **`study_files_lib.find_input`** finds either) (**omitted when empty** → JSONs
   without context stay byte-identical). Analysis tools 6/7 ignore it. Only tools that explicitly ask (e.g.
-  tool 8's per-epoch inspector) load these channels on demand. The Curry
+  tool 8's per-epoch inspector) load these channels on demand. Tool 2's **Divide by** (an input gain the file does not
+  declare, e.g. BIP2AUX ×100) is a second additive block, `context_gain` (`{role: factor}`, omitted when all 1): **every
+  reader of a context channel divides it first, before any derivation** (`edf_io_lib.context_gain` / `context_divisors`;
+  `read_context_raw`, `autoscoring_lib`, `channel_check_lib` already do), and records the factor it applied. → SPEC §2. The Curry
   twin is **regenerated** via `tools_curry/_make_tool2_curry.py` (new code passes through, no generator
   edit needed). Re-run it after editing the EDF Voila.
 - **`get_phys_bounds_uV`**: scale MNE's physical bounds by `units[ch]*1e6`, otherwise mV channels

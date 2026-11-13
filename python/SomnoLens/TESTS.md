@@ -299,6 +299,19 @@ have a position (an eye electrode without one no longer removes them), tool 6's 
 scatter by electrode writes the names upright; then tool 6 on a 20-channel study details only the dead electrode and draws one
 figure per metric in the database report. That nothing moves at 12 channels or fewer is proven by `refactor_check.py`.
 
+`test_context_gain.py` checks the **Divide by** of tool 2 (an ECG and a chin EMG recorded through an adapter that amplifies them
+100 times, which the file does not say):
+
+- **The reading**: the models' EOG, chin EMG and ECG, and the context channels of tools 7 and 0, are divided before the EOG gets
+  the reference of the EEG; the channel checks judge the divided signal and say so; a factor of 1, a negative number or a text
+  is no correction;
+- **Tool 2** measures the ECG and the chin EMG of the first recordings, proposes 100 without ever filling the field, and saves
+  the factor in the channel configuration, only when it is not 1 (a configuration without a correction stays the same);
+- **Tools 3bis, 7 and 0** on two recordings of the same signal, the second 100 times too large on its ECG and EMG and corrected
+  in tool 2: YASA gives the same hypnogram, tool 7's companion and tool 0's traces are the same, and the parameters files say
+  what was divided;
+- **Skip** in tools 3bis and 7 counts the factor as a setting (`test_preprocessing_lib.py` for tool 7).
+
 Tool 6's comparison of each channel with the median channel of the same epoch (`test_quality_lib.py`): a channel 10 times larger
 than the others is said in its own columns, never as a flag, so tool 7 unticks nothing more. Its flat measure counts only what
 holds still for 50 ms: a quiet channel at a high sampling rate is not flat, a 6-s flat stretch is, at any rate. Since this changed
