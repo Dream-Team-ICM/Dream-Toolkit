@@ -21,7 +21,7 @@ import mne
 
 import participant_selection_lib as PSL     # the excluded-participant banner of the report (same folder)
 from edf_io_lib import (   # one copy, in edf_io_lib (same folder)
-    BASE_STAGE_COLORS, CUSTOM_STAGE_PALETTE, load_custom_stages, parse_custom_field,
+    BASE_STAGE_COLORS, CUSTOM_STAGE_PALETTE, load_custom_stages, parse_custom_field, HD_CHANNEL_THRESHOLD,
 )
 
 # numpy 2 renamed trapz -> trapezoid; keep both working
@@ -798,7 +798,60 @@ def _fig_width(n_ch):
     return min(5.0 * max(n_ch, 1), 20.0)
 
 
+# A high-density montage (more than HD_CHANNEL_THRESHOLD channels): the per-channel figures become a grid of small panels,
+# HD_GRID_COLUMNS per row, instead of one row of n_ch panels squeezed into 20 inches. At 12 channels or fewer, one row.
+HD_GRID_COLUMNS = 8
+HD_PANEL_W_IN = 2.5
+
+
+def _hd(n_ch):
+    return n_ch > HD_CHANNEL_THRESHOLD
+
+
+def _channel_grid(n_ch, n_measures=1, panel_h=2.3, sharex=True, sharey=True):
+    """The panels of a high-density figure: one block of `n_measures` rows (e.g. exponent / offset) per row of
+    HD_GRID_COLUMNS channels. Returns (fig, axes), axes[m][ci] = the panel of measure m for channel ci; the unused
+    panels of the last block are hidden. The panels of one measure share x (and y when sharey)."""
+    n_blocks = -(-n_ch // HD_GRID_COLUMNS)
+    n_cols = min(n_ch, HD_GRID_COLUMNS)
+    fig, grid = plt.subplots(n_blocks * n_measures, n_cols, squeeze=False,
+                             figsize=(HD_PANEL_W_IN * n_cols, panel_h * n_blocks * n_measures + 0.8))
+    axes = [[grid[b * n_measures + m][c] for b in range(n_blocks) for c in range(n_cols)] for m in range(n_measures)]
+    for m in range(n_measures):
+        for ax in axes[m][n_ch:]:
+            ax.set_visible(False)
+        for ax in axes[m][1:n_ch]:
+            if sharex:
+                ax.sharex(axes[m][0])
+            if sharey:
+                ax.sharey(axes[m][0])
+    return fig, axes
+
+
+def _finish_grid(axes, n_ch, ylabel=None):
+    """High-density grid only: the y label on the first panel of each row of channels, the x label only under the last
+    panel of each column. Nothing at HD_CHANNEL_THRESHOLD channels or fewer."""
+    if not _hd(n_ch):
+        return
+    for ci, ax in enumerate(axes[:n_ch]):
+        if ylabel and ci % HD_GRID_COLUMNS == 0:
+            ax.set_ylabel(ylabel)
+        if ci + HD_GRID_COLUMNS < n_ch:
+            ax.set_xlabel('')
+
+
+def _tight(fig, n_ch):
+    """tight_layout; on a high-density grid, half an inch kept on top for the title (it overlapped the first row)."""
+    if _hd(n_ch):
+        fig.tight_layout(rect=(0, 0, 1, 1 - 0.5 / fig.get_figheight()))
+    else:
+        fig.tight_layout()
+
+
 def _axes_row(n_ch, height=4.2, sharey=True):
+    if _hd(n_ch):
+        fig, axes = _channel_grid(n_ch, sharey=sharey)
+        return fig, axes[0]
     fig, axes = plt.subplots(1, max(n_ch, 1), figsize=(_fig_width(n_ch), height), sharey=sharey)
     return fig, np.atleast_1d(axes)
 
@@ -910,9 +963,10 @@ def plot_psd_per_stage(freqs, masks, ch_names, custom_stages, min_epochs, title,
         if ci == 0:
             ax.set_ylabel(ylabel)
             ax.legend(fontsize=8)
+    _finish_grid(axes, len(ch_names), ylabel)
     fig.suptitle(title + (' (solid: log-space average, dashed: linear-space average)'
                           if secondary is not None else ''))
-    fig.tight_layout()
+    _tight(fig, len(ch_names))
     return fig
 
 
@@ -949,9 +1003,10 @@ def plot_loglog_with_fit(freqs, psds_uV2, ap_log10, masks, ch_names, custom_stag
         if ci == 0:
             ax.set_ylabel('PSD (dB/Hz)')
             ax.legend(fontsize=8)
+    _finish_grid(axes, len(ch_names), 'PSD (dB/Hz)')
     fig.suptitle('log-log PSD per stage with the aperiodic fit (dashed); '
                  f'shaded = fit range {fit_range[0]:g}-{fit_range[1]:g} Hz')
-    fig.tight_layout()
+    _tight(fig, len(ch_names))
     return fig
 
 
@@ -963,8 +1018,11 @@ def plot_aperiodic_over_night(meta, res, ch_names, custom_stages):
     epoch_idx = meta['epoch_idx'].values
     stages = meta['stage'].astype(str).values
     n_ch = len(ch_names)
-    fig, axes = plt.subplots(2, max(n_ch, 1), figsize=(_fig_width(n_ch), 6.0),
-                             sharex=True, squeeze=False)
+    if _hd(n_ch):
+        fig, axes = _channel_grid(n_ch, n_measures=2, panel_h=1.9, sharey=False)
+    else:
+        fig, axes = plt.subplots(2, max(n_ch, 1), figsize=(_fig_width(n_ch), 6.0),
+                                 sharex=True, squeeze=False)
     for ci, ch in enumerate(ch_names):
         for row, key, lab in [(0, 'exponent', 'Exponent'), (1, 'offset', 'Offset')]:
             ax = axes[row][ci]
@@ -985,8 +1043,10 @@ def plot_aperiodic_over_night(meta, res, ch_names, custom_stages):
                              if np.isfinite(res['exponent']).any() else (0, 1))
     if n_ch:
         axes[0][0].legend(fontsize=8, markerscale=2)
+    _finish_grid(axes[0], n_ch, 'Exponent')
+    _finish_grid(axes[1], n_ch, 'Offset')
     fig.suptitle('Aperiodic parameters across the night (one point per epoch)')
-    fig.tight_layout()
+    _tight(fig, n_ch)
     return fig
 
 
@@ -1030,8 +1090,9 @@ def plot_band_power(band_vals, ch_names, masks, custom_stages, measure, measure_
                for s in stages]
     if len(axes):
         axes[0].legend(handles=handles, fontsize=8, ncol=2)
+    _finish_grid(axes, len(ch_names), measure_label)
     fig.suptitle(f'Band power per stage - {measure_label}')
-    fig.tight_layout()
+    _tight(fig, len(ch_names))
     return fig
 
 
@@ -1210,8 +1271,9 @@ def plot_group_psd(psd_df, custom_stages, value_col=None,
         if ci == 0:
             ax.set_ylabel(ylabel)
             ax.legend(fontsize=8)
+    _finish_grid(axes, len(ch_names), ylabel)
     fig.suptitle(title)
-    fig.tight_layout()
+    _tight(fig, len(ch_names))
     return fig
 
 
@@ -1255,8 +1317,9 @@ def plot_group_band(stage_df, column, label, custom_stages):
                for s in stages]
     if len(axes):
         axes[0].legend(handles=handles, fontsize=8, ncol=2)
+    _finish_grid(axes, len(ch_names), label)
     fig.suptitle(f'{label} across participants (one point per participant)')
-    fig.tight_layout()
+    _tight(fig, len(ch_names))
     return fig
 
 
@@ -1267,8 +1330,12 @@ def plot_group_aperiodic(ap_df, custom_stages):
     _, colors, _, _ = stage_style(custom_stages)
     ch_names = sorted(ap_df['channel'].unique())
     stages = [s for s in AASM_STAGES + list(custom_stages) if s in set(ap_df['stage'])]
-    fig, axes = plt.subplots(2, max(len(ch_names), 1), figsize=(_fig_width(len(ch_names)), 6.4),
-                             squeeze=False)
+    if _hd(len(ch_names)):
+        # the stages of a panel may differ from channel to channel: no shared axis
+        fig, axes = _channel_grid(len(ch_names), n_measures=2, panel_h=1.9, sharex=False, sharey=False)
+    else:
+        fig, axes = plt.subplots(2, max(len(ch_names), 1), figsize=(_fig_width(len(ch_names)), 6.4),
+                                 squeeze=False)
     for ci, ch in enumerate(ch_names):
         sub_ch = ap_df[ap_df['channel'] == ch]
         for row, col_name, lab in [(0, 'exponent_mean', 'Exponent'), (1, 'offset_mean', 'Offset')]:
@@ -1293,8 +1360,10 @@ def plot_group_aperiodic(ap_df, custom_stages):
                 ax.set_ylabel(lab)
             if row == 0:
                 ax.set_title(ch)
+    _finish_grid(axes[0], len(ch_names), 'Exponent')
+    _finish_grid(axes[1], len(ch_names), 'Offset')
     fig.suptitle('Aperiodic parameters per stage across participants')
-    fig.tight_layout()
+    _tight(fig, len(ch_names))
     return fig
 
 

@@ -21,6 +21,7 @@ from scipy.signal import find_peaks, savgol_filter
 from scipy.stats import kurtosis as scipy_kurtosis, skew as scipy_skew
 
 import channel_check_lib as CC
+from edf_io_lib import HD_CHANNEL_THRESHOLD   # the dense layout of the figures above 12 channels (same folder)
 
 
 # ---------------------------------------------------------------------------------------------------------
@@ -252,28 +253,57 @@ def _channel_colors(n):
     return [cmap(i / max(1, n - 1)) for i in range(n)] if n > 1 else [cmap(0.5)]
 
 
-def _overlay_legend(ax):
-    """Compact per-channel legend placed to the right of the axes."""
+def _overlay_styles(ch_names, flagged=None):
+    """The plot keywords of each channel of an overlay (color, alpha, label; 'thin' = a thinner line). Up to
+    HD_CHANNEL_THRESHOLD channels: one colour per channel, all in the legend. Above (a high-density cap): the channels
+    within thresholds in thin grey, under one legend entry, and only the `flagged` ones in colour, on top and named in
+    the legend (63 names neither fit nor can be told apart by colour)."""
+    n = len(ch_names)
+    if n <= HD_CHANNEL_THRESHOLD:
+        colors = _channel_colors(n)
+        alpha = max(0.3, min(0.8, 10.0 / max(1, n)))  # more channels -> more transparent
+        return [dict(color=colors[i], alpha=alpha, label=ch) for i, ch in enumerate(ch_names)]
+    flagged = [ch for ch in ch_names if ch in set(flagged or [])]
+    # saturated qualitative colours: a single turbo colour is a pale green, lost among the grey lines
+    colors = {ch: plt.get_cmap('tab10')(i % 10) for i, ch in enumerate(flagged)}
+    grey_label = f'{n - len(flagged)} channels within thresholds'
+    styles = []
+    for ch in ch_names:
+        if ch in colors:
+            styles.append(dict(color=colors[ch], alpha=0.9, label=f'{ch} (flagged)', zorder=3))
+        else:
+            styles.append(dict(color='#9e9e9e', alpha=0.35, label=grey_label, zorder=2, thin=True))
+            grey_label = '_nolegend_'
+    return styles
+
+
+def _overlay_legend(ax, thick=False):
+    """Compact per-channel legend placed to the right of the axes. `thick` (a high-density overlay): the legend lines
+    drawn opaque and 2 points wide, the thin transparent traces leaving them invisible."""
     handles, labels = ax.get_legend_handles_labels()
     ncol = 1 if len(labels) <= 16 else 2
-    ax.legend(handles, labels, loc='upper left', bbox_to_anchor=(1.01, 1.0),
-              ncol=ncol, fontsize=6.5, frameon=False, handlelength=1.2, columnspacing=0.8)
+    legend = ax.legend(handles, labels, loc='upper left', bbox_to_anchor=(1.01, 1.0),
+                       ncol=ncol, fontsize=6.5, frameon=False, handlelength=1.2, columnspacing=0.8)
+    if thick:
+        for line in legend.get_lines():
+            line.set_linewidth(2.0)
+            line.set_alpha(1.0)
 
 
-def plot_overlay_timeseries(raw, sf, y_lim=None):
+def plot_overlay_timeseries(raw, sf, y_lim=None, flagged=None):
     """Butterfly view: every channel's time series overlaid on one uV axis.
     Reads one channel at a time from `raw` (a cheap slice of the preloaded data) so the
-    whole multi-channel recording is never held as a second float64 array."""
+    whole multi-channel recording is never held as a second float64 array. `flagged`: see _overlay_styles."""
     ch_names = raw.ch_names
     n_times = raw.n_times
     step = max(1, int(sf / 10))   # ~10 Hz display resolution
     t_h = np.arange(0, n_times, step) / sf / 3600
-    colors = _channel_colors(len(ch_names))
-    _alpha = max(0.3, min(0.8, 10.0 / max(1, len(ch_names))))  # more channels -> more transparent
+    styles = _overlay_styles(ch_names, flagged)
     fig, ax = plt.subplots(figsize=(10, 3.4))
     for i, ch in enumerate(ch_names):
         sig = raw.get_data(picks=[i])[0] * 1e6
-        ax.plot(t_h, sig[::step], lw=0.3, color=colors[i], alpha=_alpha, label=ch, rasterized=True)
+        style = dict(styles[i])
+        ax.plot(t_h, sig[::step], lw=0.3 * (0.6 if style.pop('thin', False) else 1.0), rasterized=True, **style)
         del sig
     ax.set_xlim(0, n_times / sf / 3600)
     if y_lim is not None:
@@ -283,17 +313,16 @@ def plot_overlay_timeseries(raw, sf, y_lim=None):
     ax.set_ylabel('µV', fontsize=11)
     for sp in ['right', 'top']:
         ax.spines[sp].set_visible(False)
-    _overlay_legend(ax)
+    _overlay_legend(ax, thick=len(ch_names) > HD_CHANNEL_THRESHOLD)
     fig.subplots_adjust(right=0.82)
     return fig
 
 
-def plot_overlay_distribution(raw, x_lim=None):
+def plot_overlay_distribution(raw, x_lim=None, flagged=None):
     """Amplitude distribution (density) of every channel overlaid as outline curves
-    (one channel at a time)."""
+    (one channel at a time). `flagged`: see _overlay_styles."""
     ch_names = raw.ch_names
-    colors = _channel_colors(len(ch_names))
-    _alpha = max(0.3, min(0.8, 10.0 / max(1, len(ch_names))))  # more channels -> more transparent
+    styles = _overlay_styles(ch_names, flagged)
     fig, ax = plt.subplots(figsize=(9, 3.6))
     for i, ch in enumerate(ch_names):
         sig = raw.get_data(picks=[i])[0] * 1e6
@@ -303,7 +332,8 @@ def plot_overlay_distribution(raw, x_lim=None):
         total = histo.sum()
         dens = histo / (total * width) if (total > 0 and width > 0) else histo.astype(float)
         centers = (edges[:-1] + edges[1:]) / 2
-        ax.plot(centers, dens, lw=1.0, color=colors[i], alpha=_alpha, label=ch)
+        style = dict(styles[i])
+        ax.plot(centers, dens, lw=1.0 * (0.6 if style.pop('thin', False) else 1.0), **style)
         del sig
     if x_lim is not None:
         ax.set_xlim(-x_lim, x_lim)
@@ -311,18 +341,18 @@ def plot_overlay_distribution(raw, x_lim=None):
     ax.set_ylabel('Density', fontsize=11)
     for sp in ['right', 'top']:
         ax.spines[sp].set_visible(False)
-    _overlay_legend(ax)
+    _overlay_legend(ax, thick=len(ch_names) > HD_CHANNEL_THRESHOLD)
     fig.subplots_adjust(right=0.82)
     return fig
 
 
-def plot_overlay_psd(raw, sf):
-    """Welch PSD (4 s windows) of every channel overlaid on one axis (one channel at a time)."""
+def plot_overlay_psd(raw, sf, flagged=None):
+    """Welch PSD (4 s windows) of every channel overlaid on one axis (one channel at a time). `flagged`: see
+    _overlay_styles."""
     ch_names = raw.ch_names
     n_per_seg = int(4 * sf)
     n_overlap = n_per_seg // 2
-    colors = _channel_colors(len(ch_names))
-    _alpha = max(0.3, min(0.8, 10.0 / max(1, len(ch_names))))  # more channels -> more transparent
+    styles = _overlay_styles(ch_names, flagged)
     fig, ax = plt.subplots(figsize=(9, 3.6))
     freqs = None
     for i, ch in enumerate(ch_names):
@@ -331,7 +361,8 @@ def plot_overlay_psd(raw, sf):
             sig[np.newaxis, :], sfreq=sf, fmin=0.5, fmax=min(100.0, sf / 2 - 0.5),
             n_per_seg=n_per_seg, n_overlap=n_overlap, n_fft=n_per_seg, verbose=False)
         psd_db = 10 * np.log10(np.maximum(psds[0], 1e-10))
-        ax.plot(freqs, psd_db, lw=0.9, color=colors[i], alpha=_alpha, label=ch)
+        style = dict(styles[i])
+        ax.plot(freqs, psd_db, lw=0.9 * (0.6 if style.pop('thin', False) else 1.0), **style)
         del sig, psds
     if freqs is not None:
         ax.set_xlim(0.5, float(freqs[-1]))
@@ -339,7 +370,7 @@ def plot_overlay_psd(raw, sf):
     ax.set_ylabel('Power (dB/Hz)', fontsize=11)
     for sp in ['right', 'top']:
         ax.spines[sp].set_visible(False)
-    _overlay_legend(ax)
+    _overlay_legend(ax, thick=len(ch_names) > HD_CHANNEL_THRESHOLD)
     fig.subplots_adjust(right=0.82)
     return fig
 
@@ -701,23 +732,29 @@ def plot_participant_electrode_scatter(df_sub, custom_stages=None):
     file_id = str(df_sub["file_id"].iloc[0]) if "file_id" in df_sub.columns and len(df_sub) else ""
     channels = list(df_sub["channel"])
     x = np.arange(len(channels))
+    hd = len(channels) > HD_CHANNEL_THRESHOLD
     ncols = min(3, len(OVERVIEW_KEY_METRICS))
     nrows = int(np.ceil(len(OVERVIEW_KEY_METRICS) / ncols))
     fig, axes = plt.subplots(nrows, ncols, figsize=(6 * ncols, 4 * nrows), squeeze=False)
     axes = axes.flatten()
     for ax, m in zip(axes, OVERVIEW_KEY_METRICS):
-        if m not in df_sub.columns:
+        # a metric without values (At EDF bounds: no declared range, e.g. BrainVision): no panel, as in the pooled view
+        if m not in df_sub.columns or not df_sub[m].notna().any():
             ax.set_visible(False)
             continue
         vals = df_sub[m].values
         flags = (df_sub["exclude"].fillna(False).astype(bool).values
                  if "exclude" in df_sub.columns else np.zeros(len(vals), dtype=bool))
         colors = ["#c0392b" if f else "#555555" for f in flags]
-        ax.scatter(x, vals, color=colors, s=40, alpha=0.85, zorder=3, linewidths=0)
+        ax.scatter(x, vals, color=colors, s=14 if hd else 40, alpha=0.85, zorder=3, linewidths=0)
         ax.set_title(OVERVIEW_METRIC_LABELS.get(m, m), fontsize=11, fontweight="bold")
         ax.set_xticks(x)
-        rot = 30 if len(channels) > 4 else 0
-        ax.set_xticklabels(channels, rotation=rot, fontsize=9, ha="right" if rot else "center")
+        if hd:
+            # a high-density cap: the electrode names written upright, small, so that 64 of them do not overlap
+            ax.set_xticklabels(channels, rotation=90, fontsize=5.5, ha="center")
+        else:
+            rot = 30 if len(channels) > 4 else 0
+            ax.set_xticklabels(channels, rotation=rot, fontsize=9, ha="right" if rot else "center")
         ax.margins(x=0.05)
         for sp in ["right", "top"]:
             ax.spines[sp].set_visible(False)

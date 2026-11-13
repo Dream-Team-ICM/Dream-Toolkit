@@ -241,6 +241,30 @@ def select_event_suffix(suffix_counts):
     return min(suffix_counts.items(), key=lambda x: (-x[1], len(x[0])))
 
 
+# The event files of a study, declared in tool 4 under 'event_files' of the names registry: the companions read beside
+# a recording for the scored events (the text export, the CSV, the <recording>.XML) and for tool 5's lights (the
+# summary export), e.g. {'txt': '_ScoredEvents_Export.txt', 'csv': None, 'xml': False, 'summary': None}. Tools 4, 5, 7
+# and 0 then look only for the kinds declared, with the suffix recorded. Without a declaration every kind is looked for.
+EVENT_FILES_KEY = 'event_files'
+EVENT_FILE_KINDS = {'txt': 'TXT export', 'csv': 'CSV', 'xml': 'XML', 'summary': 'Summary export (lights)'}
+NO_EVENTS_DECLARED = 'no scored events in this study (declared in tool 4)'
+
+
+def declared_event_files(names):
+    """Tool 4's declaration, as {'txt': suffix or None, 'csv': suffix or None, 'xml': True / False, 'summary': suffix or
+    None} (None / False = the study has none of that kind), or None when the study declares nothing."""
+    value = recorded(names, EVENT_FILES_KEY)
+    if not isinstance(value, dict):
+        return None
+    return {'txt': value.get('txt') or None, 'csv': value.get('csv') or None, 'xml': bool(value.get('xml')),
+            'summary': value.get('summary') or None}
+
+
+def declares_no_events(declared):
+    """True when tool 4 declared that the study has no scored-event file (no text export, CSV or XML)."""
+    return declared is not None and not (declared['txt'] or declared['csv'] or declared['xml'])
+
+
 def output_suffix(names, key, counts, new_default, former_default):
     """The output suffix a tool proposes, so that a study keeps its names: the one recorded under `key`, else the
     former default when the study already has files with it, else the new default."""

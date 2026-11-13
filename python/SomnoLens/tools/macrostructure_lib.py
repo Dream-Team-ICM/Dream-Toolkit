@@ -923,7 +923,8 @@ def run_checks(metrics, extras, lights, n_hyp, cls, event_info):
                               f'Re-map them with tool 3 if they should be scored as a stage.'})
     if event_info.get('source') is None and event_info.get('enabled'):
         out.append({'check': 'events_source', 'status': 'info',
-                    'detail': 'no scored-event companion found - event indices are NaN'})
+                    'detail': ('no scored events in this study (declared in tool 4)' if event_info.get('declared_none')
+                               else 'no scored-event companion found') + ' - event indices are NaN'})
     if event_info.get('n_bad_onset'):
         out.append({'check': 'event_onsets_in_recording', 'status': 'warning',
                     'detail': f"{event_info['n_bad_onset']} event(s) with a missing / unreadable onset "
@@ -1408,7 +1409,7 @@ def _clock(start_dt, epoch_idx, epoch_s):
 
 
 def compute_recording(p, cfg, custom_stages, event_remap, subject, hypno_suffix, evt_txt_suffix,
-                      evt_csv_suffix, phase=None, stages=None):
+                      evt_csv_suffix, phase=None, stages=None, evt_xml=True):
     """The computation of tool 5's process_participant for one recording, moved unchanged: EDF header,
     hypnogram, lights-off / lights-on, macrostructure, scored events (+ ODI), SpO2 (T90 / T88), consistency
     checks and provenance. It writes nothing (tool 5 writes the tables, tool 0 shows them).
@@ -1416,6 +1417,7 @@ def compute_recording(p, cfg, custom_stages, event_remap, subject, hypno_suffix,
     `cfg`: tool 5's parameters (get_params); `subject`: its participant-table row or None;
     `phase(name, add)`: progress callback (tool 5's progress bar), None = silent; `stages`: a hypnogram
     to use instead of the file (tool 0: the hypnogram in use, rescorings included). A fatal step raises.
+    A kind of event file the study declares absent in tool 4 is not looked for (suffix None, evt_xml=False).
     Returns a dict: metrics, checks, provenance, lights, extras, event_info, cls, stages, header, events (the
     scored events as read, Name / Start / Duration, or None)."""
     if phase is None:
@@ -1456,11 +1458,13 @@ def compute_recording(p, cfg, custom_stages, event_remap, subject, hypno_suffix,
     phase('counting the scored events', COST_LIGHTS)
     event_info = {'enabled': cfg['events'] or cfg['odi'], 'source': None, 'n_total': 0,
                   'n_outside': 0, 'n_bad_onset': 0, 'n_unmapped': 0}
+    if not (evt_txt_suffix or evt_csv_suffix or evt_xml):
+        event_info['declared_none'] = True     # tool 4: the study has no scored-event file
     odi_rule = ''
     events_df = None                    # returned for the night figure of the per-recording report
     if cfg['events'] or cfg['odi']:
         remap = event_remap
-        events_df, source = load_events(p['edf'], evt_txt_suffix, evt_csv_suffix)
+        events_df, source = load_events(p['edf'], evt_txt_suffix, evt_csv_suffix, xml=evt_xml)
         event_info['source'] = source
         if events_df is not None:
             event_info['n_total'] = int(len(events_df))

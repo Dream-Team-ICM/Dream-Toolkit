@@ -94,8 +94,10 @@ The "what to do / what not to break" reminders, grouped by theme. Each points to
   `config_param/file_names.json` (only its own keys, never at a scan, an unreadable file never overwritten); the
   pre-choice follows them first, and never pre-chooses a hypnogram the toolkit wrote (3bis, tool 0's `_rescored`).
   A study keeps its names (`output_suffix`): the short defaults `_hypno_remapped.txt` / `_hypno_<algo>.txt` are for
-  new studies, the test data keep the former ones. → SPEC *Cross-cutting → Names registry* + *Hypnogram-suffix
-  auto-detection*.
+  new studies, the test data keep the former ones. Tool 4 **declares the event files of the study** (`event_files`:
+  text export, CSV, XML, summary export): tools 4, 5, 7, 0 look only for those (`declared_event_files`; no declaration
+  = every kind, unchanged). → SPEC *Cross-cutting → Names registry* + *Hypnogram-suffix auto-detection* + *Event
+  sourcing → Declared event files*.
 - **Scored events (`load_events`)**: tool 4 reads three Compumedics companions **TXT-first**: the
   `*_ScoredEvents_Export.txt` text export (French, UTF-16-or-UTF-8, no header, clock-time, parsed inline like
   `curry_io._parse_events_txt`), then `*_event_xml.csv`, then the `<ScoredEvents>` of `*.edf.XML`. The scan
@@ -141,10 +143,11 @@ The "what to do / what not to break" reminders, grouped by theme. Each points to
   **montage companion** → written **beside the `.fif` in `derivatives/preproc_epo/`** (like `_context-epo.fif`),
   **not** in `reports_preproc/` (tool 8 never reads the reports tree). Optional/additive. Passes
   through the Curry generator. → SPEC *Cross-cutting → Event-onset sidecar* + §7.
-- **High-density montages (32–64 ch) = channel-count-keyed, never format-keyed**: every adaptation lives in
-  `qc_rejected_epochs_lib` and is **inert at or below `HD_CHANNEL_THRESHOLD` (12)**, so the 3–6 channel PSG
-  path stays byte-identical: keep it that way when touching the montage geometry, the detail panel, the
-  channel triage, the flagging heatmap or the 1/f subsample. Two traps: `recompute_reject` must reproduce
+- **High-density montages (32–64 ch) = channel-count-keyed, never format-keyed**: one threshold,
+  `HD_CHANNEL_THRESHOLD` (12, in `edf_io_lib`, re-exported by `qc_rejected_epochs_lib`), for every display library
+  (qc, preprocessing, spectral, quality: tools 0, 6, 7, 8, 9), each adaptation **inert at or below it**, so the 3–6
+  channel PSG path stays byte-identical (prove it with `tests/refactor_check.py`): keep it that way when touching the
+  montage geometry, the detail panel, the channel triage, the flagging heatmap, the 1/f subsample or a per-channel figure. Two traps: `recompute_reject` must reproduce
   tool 7's `reject_flag` exactly when every channel is kept and the rule is `any` (methods with no
   per-channel column are **broadcast** across kept channels, else the 1/f contribution vanishes on the
   recomputed fallback), and the channel layer must be engaged **only** when the user actually uses it (the
@@ -272,6 +275,8 @@ The "what to do / what not to break" reminders, grouped by theme. Each points to
   same-id copies at the old `derivatives/<subtree>/` location on reprocess (first run only). A former `derivatives/raw_epo/` is renamed once
   at Run (the former `reports_preprocessing/` is not migrated): the remaining `'raw_epo'` strings in tool 7 are
   that migration, keep them. → SPEC §7 *Migration notes*.
+  **A BrainVision online reference left flat** (tool 2 declares no reference: `recording_lib.flat_online_reference`) is
+  left out of the montage, never read nor flagged (tools 7 and 0); with a declared reference it is kept, re-referenced.
   **Deselected channels are kept as `bads`** (→ SPEC §7): in the `.fif` and the sidecar (`bad_channels`),
   out of the average reference and of the flagging (dropped right after epoching, put back at save), but
   **re-referenced by hand** (MNE leaves bads in their original reference). Every tool-7 table stays

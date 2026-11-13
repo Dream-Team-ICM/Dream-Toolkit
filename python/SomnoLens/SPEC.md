@@ -334,7 +334,16 @@ test must point it at a copied `preproc_epo`.
   markers `tool0`, `tool4`, `tool5`, `tool7`, `tool8bis`): the reads of `edf_io_lib` / `macrostructure_lib` for any format (a
   paused recording's clock not used), the reference stages of 8bis, then tools 4, 5, 6, 7 and 8bis on a two-nap study (events
   placed from the `.vmrk` start, the online reference kept and re-referenced, the EOG of the companion referenced like the EEG,
-  every stage pre-ticked).
+  every stage pre-ticked). Phase 4 bis: `flat_online_reference`, the event kinds declared absent not looked for (quick); tool 7
+  and tool 0 leave a flat online reference out (no reference declared) and keep it re-referenced (TP9); a study declared with a
+  text export only (tool 4's boxes and its saved declaration, the CSV / XML / summary fields hidden in tools 5 and 7, tool 5's
+  table equal to the same study without a declaration) and one declared without scored events (tool 4 *nothing to scan*, tool 7
+  without its event method, tool 5's line and check). `test_high_density.py` (quick + 1 standard, markers `tool0`, `tool6`,
+  `tool7`, `tool8`, `tool9`, phase 5): each figure changed, at 62 channels against 4 (tool 7's hypnogram strip about 1 in,
+  tool 9's grid of 8 columns, the topomaps drawn without the eye electrode IO and absent without positions, tool 6's overlays
+  naming the flagged channel only, its scatter by electrode), then tool 6 on a 20-channel BrainVision study (the dead electrode
+  alone detailed, one figure per metric in the database report). That nothing moves at 12 channels or fewer: `refactor_check.py`
+  on the chain and on `outside_chain.py 6variant 7variant`.
 - `test_tools_1_3_4.py` (standard): on a fresh synthetic database. Tool 1: 4 files × 4 channels at 256 Hz,
   the ±50 µV Fp1 of sim01 as bad dynamic range, headers anonymous. Tool 3: a raw Compumedics-style export
   (`0-5 / W / R / ?`, N3 coded `3` or `4`) remaps back to the generated stages, the mid-night `?` listed in
@@ -776,7 +785,14 @@ instead of restating them. Only tool-specific deltas are kept inline.
   hypnogram in the run); `hypnogram_rescored` (tool 0, the list of the rescored suffixes saved); `channel_config`
   (tool 2, at *Preview & Save*) and `event_remap` (tool 4, at *Preview & Save*), a path; `sleep_metrics_table` (tool 5,
   only when the table is outside its default place: an output folder other than the study folder, then kept up to date,
-  so the chain's outputs gain no file); `preproc_output` (tool 7, the same rule, its output folder, for tools 8, 8bis, 9).
+  so the chain's outputs gain no file); `preproc_output` (tool 7, the same rule, its output folder, for tools 8, 8bis, 9);
+  `event_files` (tool 4, at *Preview & Save* or *Save the declaration*): the **event files of the study**,
+  `{"txt": suffix or null, "csv": suffix or null, "xml": true/false, "summary": suffix or null}` (scored-event text
+  export, event CSV, `<recording>.XML`, Profusion summary export of tool 5's lights). Read by
+  `declared_event_files(names)` (None without a declaration) and `declares_no_events(declared)`: tools 4, 5, 7 and 0
+  look only for the kinds declared, with the suffix recorded, before their detection rule; a kind declared absent is
+  not looked for even when a file exists, and its suffix field and messages are hidden (*Event sourcing → Declared
+  event files*). **No declaration = every kind looked for, as before.**
   A path is relative to the study folder when inside it, else absolute
   (`path_to_record`). Written only
   when a tool really writes its files, never at a scan. The rules of the exclusion registry: each tool rewrites
@@ -855,6 +871,22 @@ instead of restating them. Only tool-specific deltas are kept inline.
   gains an **additive `Desaturation` column** (the XML `<Desaturation>` depth in %, NaN elsewhere) for the ODI
   threshold: tool 7 is unchanged. Since the tool-0 redesign (phase 3) tool 5 imports this chain from
   `edf_io_lib` (through `macrostructure_lib`); its former copy was identical, checked function by function.
+  - **Declared event files (2026-11-12, `tools/plan_brainvision.md` phase 4 bis)**: tool 4 declares which kinds of
+    companion the study has (*Names registry*, key `event_files`), so that a study with a text export only, or with
+    no scored events at all, gets no message about the others. `event_companion_paths(edf, txt_suffix, csv_suffix,
+    xml=True)` and `load_events(…, xml=True)` (edf_io_lib, tool 4's and tool 7's copies identical,
+    `tests/test_edf_io_sync.py`) do not look for a kind given as a `None` suffix or `xml=False`; tool 5 passes
+    `compute_recording(…, evt_xml=…)`. **Tool 4** (Section 1, under the inputs): *Event files of this study* = four
+    boxes (*TXT export*, *CSV*, *XML*, *Summary export (lights)*), pre-ticked from the declaration saved, else from
+    the files found (ticked = at least one recording has one; the counts are shown); a suffix field shows only for a
+    box ticked (the summary export has its own field and menu); a box unticked while files exist is warned about.
+    Saved with the mapping at *Preview & Save*, or alone with **Save the declaration** (a study without scored
+    events: every box unticked, then save; its Scan then says *nothing to scan*). The Scan and the 1bis check read
+    only the kinds ticked. **Tools 5, 7, 0**: the suffix recorded is pre-chosen; a kind declared absent is not looked
+    for and its field is hidden (tools 5 and 7 say which kinds are left out). A study declared without scored
+    events: tool 7 hides its *event* method (*no scored events in this study (declared in tool 4): the event method is
+    not available*), tool 5 shows that line instead of its *no event_remap.json* warning and its checks table reads
+    *no scored events in this study (declared in tool 4) - event indices are NaN*; tool 0 says it on its loading line.
   - **Event-onset sidecar (`{file_id}_event_onsets.tsv`, tool 7 → tool 8)**: alongside the per-epoch event
     flags, tool 7 persists the **onset of every scored event** that maps to a canonical type, columns
     `type`, `onset_s` (seconds from recording start), `duration_s`, via `build_event_onsets(events_df,
@@ -919,8 +951,10 @@ instead of restating them. Only tool-specific deltas are kept inline.
 - **High-density montage support (32–64 channel Curry / HD-EEG)**: every adaptation is keyed on the
   **channel count**, never on the file format (a dense EDF montage gets it, a sparse Curry one does not)
    and is **inert at or below `HD_CHANNEL_THRESHOLD` (12)**, so the 3–6 channel PSG tools render
-  byte-identically. Constants live once in `qc_rejected_epochs_lib`: `HD_CHANNEL_THRESHOLD`,
-  `MONTAGE_ROW_IN` (0.50 in/row), `MONTAGE_ROW_MIN_IN` (0.16), `MONTAGE_MAX_H_IN` (13.0),
+  byte-identically. **One threshold for every display library**: `HD_CHANNEL_THRESHOLD` lives in `edf_io_lib`
+  (every library imports it; `qc_rejected_epochs_lib` imports `preprocessing_lib`, so it could not live there) and
+  `qc_rejected_epochs_lib` re-exports it (`L.HD_CHANNEL_THRESHOLD` in tools 0 and 8). The montage constants live in
+  `qc_rejected_epochs_lib`: `MONTAGE_ROW_IN` (0.50 in/row), `MONTAGE_ROW_MIN_IN` (0.16), `MONTAGE_MAX_H_IN` (13.0),
   `N_1F_SUBSAMPLE_HD` (250), `DEFAULT_TABLE_ROWS` (8).
   - **Why it is not just a resize.** With 3 channels `reject = any channel flagged` is sound. With 32 it
     is pathological. Measured on the Curry test night (`o_S007`, 32 ch, 1314 epochs): **72.6 % of epochs
@@ -943,12 +977,33 @@ instead of restating them. Only tool-specific deltas are kept inline.
     12 + a `… +N more` proxy. The metric table keeps **every breaching channel + `table_rows` worst by p-p**
     (title gains a second line `X/Y channels shown (Z flagged)`: a second line, because appended
     horizontally it collides with the PSD title). `table_rows=None` = every channel (classic).
-  - **Topomaps** (`has_positions` + `_draw_channel_topomap`): a third figure column with **peak-to-peak**
+  - **Topomaps** (`positioned_channels` + `_draw_channel_topomap`): a third figure column with **peak-to-peak**
     and **1/f MAE** across the head, red-ringed on breaching channels (public `mask`/`mask_params` API, no
-    private MNE call). Auto-enabled when the epochs carry electrode positions **and** the montage is dense.
-    Curry keeps a real `DigMontage` through tool 7 (verified: 32 channels + 3 fiducials, all `loc` finite).
+    private MNE call). Auto-enabled when the montage is dense **and** more than `HD_CHANNEL_THRESHOLD` of its
+    channels carry an electrode position; drawn on those channels, the others named under the title (`no position:
+    IO`). Since 2026-11-12 (phase 5): it was every channel, and the eye electrode of a BrainVision cap recorded on an
+    EEG input (no position in the file) removed the topomaps of the whole cap. Curry keeps a real `DigMontage`
+    through tool 7 (verified: 32 channels + 3 fiducials, all `loc` finite): all its channels are drawn, as before.
     Position-less Compumedics EDF simply never gets the panel, and any layout failure prints a note in the
     panel instead of raising.
+  - **The other figures (2026-11-12, `tools/plan_brainvision.md` phase 5, audited on a synthetic 62-channel BrainVision
+    study)**, each inert at 12 channels or fewer: **tool 0's detail panel** keeps `DEFAULT_TABLE_ROWS` metric rows
+    above the threshold, as tool 8 does; **tool 7's rejection heatmap** (`preprocessing_lib.plot_rejection_heatmap`)
+    gives its hypnogram strip a fixed 1 in and each channel row 0.2 in (it followed the channel count: 0.12 in at 62
+    channels, the stage labels overlapping); **tool 9's per-channel figures** (`spectral_lib`: PSD per stage, log-log
+    with fit, aperiodic over the night, band power, and their database versions) become a grid of `HD_GRID_COLUMNS`
+    (8) columns of 2.5 in panels, axes shared per measure (not for the per-stage aperiodic boxes), y label on the
+    first panel of each row, x label under the last panel of each column, legend once (`_channel_grid`,
+    `_finish_grid`), instead of one row squeezed into 20 in; **tool 6's overlays** (`quality_lib._overlay_styles`,
+    `flagged=` argument, tools 6 and 0) draw the channels within thresholds in thin grey under one legend entry and
+    only the flagged ones in colour, on top and named; **tool 6's scatter by electrode** writes the names upright in
+    small type (and, for any montage, hides a metric without values, e.g. *At EDF bounds* without a declared range, as
+    the pooled view next to it does); **tool 6's participant report** details only the flagged channels and those the
+    comparison points at, unless *Per-channel detail for every channel* is ticked (Advanced box, a report choice, not a
+    recorded setting); **tool 6's database report** draws one figure per metric with a box per electrode (each
+    participant a dot) instead of the side-by-side comparison and the per-electrode sections. Tool 8bis's heatmap and
+    tool 8's montage were already readable at 62 channels; tools 1, 2 and 3bis (lists and boxes of 64-71 channels)
+    were checked by the user in Voila.
   - **Channel triage** (`load_channel_flags` / `recompute_channel_flags` / `channel_badness` /
     `channels_over_threshold` + `recompute_reject`'s new optional arguments): per-(epoch, channel) flags,
     per-channel badness (% of **in-scope** epochs flagged, the same definition as 8bis, so both tools rank
@@ -1196,8 +1251,14 @@ annotations and its inspection report, on an explicit action). Built by the tool
 `edf_io_lib`'s reading functions, which read any format (`read_eeg_raw`, `read_context_raw` with the EOG referenced like
 the EEG, `phys_bounds_for_remap`: no bounds for BrainVision, so step 5 caps its figures at ±500 µV like tool 6), and
 `macrostructure_lib.read_header_info` for step 4. Step 3 shows the channel checks of tool 3bis with its notes. The
-explorer and the other steps work on the loaded Raw, so they are unchanged; their figures are not audited at 62 channels
-yet (phase 5).
+explorer and the other steps work on the loaded Raw, so they are unchanged.
+**Phase 4 bis (2026-11-12)**: the **online reference** follows tools 6 and 7. Left out at loading when it would stay
+flat (tool 2 declares no reference: `recording_lib.flat_online_reference`, a line in the loading notes), left out of
+step 5 always (tool 6 never reads it), kept in step 6 when a reference is declared (re-referenced, a real signal, like
+tool 7). The **event files declared in tool 4** are the only ones looked for (*Cross-cutting → Event sourcing →
+Declared event files*). **Phase 5**: above 12 channels the detail panel keeps `DEFAULT_TABLE_ROWS` metric rows (it
+showed all 62), the topomaps use the electrodes that have a position, and step 5's overlays name only the flagged
+channels (*High-density montage support*).
 
 **Core rule: never re-implement a computation.** Each step calls the very functions of the batch tool it
 mirrors, which live in the shared libraries (see *Cross-cutting → Shared computation libraries*), so the numbers
@@ -1808,6 +1869,12 @@ of the recording from `recording_lib.read_start_datetime` (the `.vmrk` for Brain
 its clock no longer following the samples: the line says so). A BrainVision recording has no `*.edf.XML`, so the check
 lists it as *missing XML*. The tool's former copy of `read_edf_start_datetime` is gone (`test_edf_io_sync.py` updated).
 
+**Event files of this study (2026-11-12, phase 4 bis)**: four boxes under the inputs (*TXT export*, *CSV*, *XML*,
+*Summary export (lights)*), widgets `cb_files` / `suffix_boxes` / `save_files_button` / `out_files`, saved as the
+`event_files` key of `config_param/file_names.json` with the mapping or alone (**Save the declaration**). Their rules:
+*Cross-cutting → Event sourcing → Declared event files*. The summary export, read by tool 5 only, gets its own suffix
+field here (`summary_suffix`, detection: the `.txt` whose name contains `summary`) so that the declaration carries it.
+
 **Configurable event suffixes**: two editable text fields, **`TXT suffix:`** (default `_ScoredEvents_Export.txt`) and **`CSV suffix:`** (default `_event_xml.csv`), drive `event_companion_paths(edf_path, txt_suffix, csv_suffix)`, so datasets exported with different suffixes are supported. On folder selection **both** are **auto-detected** (mirroring the hypnogram-suffix detection of `6_quality_overview`, see *Cross-cutting procedures*): for the TXT the `.txt` files **whose name contains `event`** are scanned (so hypnogram `.txt` are not counted), for the CSV the `.csv` files. Candidate suffixes are counted and each suffix menu (*Voila page conventions → Suffix menus*) pre-set on the **most frequent** suffix (shortest on ties), with the number of recordings that have it and the ones that miss it under it (the Curry twin keeps a single menu, the event export). The XML fallback (`.edf.XML`) is auto-derived, no field.
 
 **Existing mapping and file name** (2026-11-04): the existing mapping is a line of the *Inputs found* list (`fc_mapping`,
@@ -1853,6 +1920,13 @@ A recording without a usable start (no date, or paused: its clock no longer foll
 unreadable EDF header, since the lights and the event exports are clock times. The optional `Light` / `SpO2` reads go
 through `recording_lib.read_raw`. The scored events come from `edf_io_lib.load_events`, whose recording start is now
 `recording_lib.read_start_datetime`.
+
+**Event files declared in tool 4 (2026-11-12, phase 4 bis)**: `event_files_in_use()` gives the scan and the run the
+suffixes of the kinds declared (None for a kind declared absent, every kind without a declaration);
+`compute_recording(…, evt_xml=…)`; the fields of the kinds declared absent are hidden (`event_file_boxes`,
+`lbl_event_files` says which). A study declared without scored events: *no scored events in this study (declared in
+tool 4)* in the scan header instead of the *no event_remap.json* warning, and the `events_source` check reads *no scored
+events in this study (declared in tool 4) - event indices are NaN* (event indices NaN, as without events).
 
 **Code location** (tool-0 redesign, phase 3): the constants and helpers (former setup cell: `METRICS`,
 `METRIC_INFO`, `METRIC_KEYS`, `PROVENANCE_KEYS`, `REFERENCE_RANGES` / `_SOURCES`, `REFERENCES`,
@@ -2184,6 +2258,18 @@ a flag**: not in `suspect_reason` / `exclude`, so tool 7 unticks nothing more an
 (an amber *Compared with the other channels* box in the Overview, two rows and a line in each channel's metrics) and the log. No
 setting, so nothing to add to the Skip comparison; a participant processed before has blank columns until reprocessed.
 
+**Reports of a high-density cap (2026-11-12, `tools/plan_brainvision.md` phase 5)**: above `HD_CHANNEL_THRESHOLD` (12)
+channels, measured on a synthetic 62-channel study (19.7 MB and 258 figures per participant report, 61 figures in the
+database report). **Participant report**: the per-channel sections (histogram, PSD, time series, spectrogram, metrics) only for
+the flagged channels and those `compare_channels` points at, an Overview line saying how many (*Per-channel detail below for X of
+Y channels…*); the box **Per-channel detail for every channel** (`cb_all_channels`, Advanced box of Section 1, unticked, marks
+the box *default changed* when ticked) restores every section. It changes only the reports, so it is not a recorded setting:
+with Skip ticked, a report already made stays as it is. The overlays name only the flagged channels, the scatter by electrode
+writes the names upright. **Database report** (`dataset_overview.html`): one figure per key metric with a box per electrode
+(`_metric_by_electrode`, each participant a dot, red when flagged; a metric without values left out) replaces the
+side-by-side comparison and the per-electrode sections (their values stay in `quality_summary.tsv`). At 12 channels or fewer
+every report is unchanged (*Cross-cutting → High-density montage support*).
+
 **Shared library (`tools/quality_lib.py`, tool-0 redesign phase 4)**: the computation and the figures live in
 the library, **moved verbatim** and shared with tool 0's step 5 (same code, same numbers). It holds (a) the
 former shared-function cell: `compute_signal_metrics`, `flag_channel`, `HIST_CLIP_PCT`, the per-channel and
@@ -2328,6 +2414,17 @@ recording), and the `[H]` companion is `edf_io_lib.read_context_raw` (the former
 `sub_config` so that an EOG recorded against the online reference gets tool 2's reference, like the EEG shown above it in
 tool 8. **The online reference** is not in tool 6's table (flat as recorded, left out there): Load adds it to the channels
 of the participant when tool 2 declares a reference (it is then a real signal, e.g. Cz − TP9), and leaves it out without one.
+**Since phase 4 bis (2026-11-12)** the rule holds whatever the source of the channels: without a declared reference
+(`recording_lib.flat_online_reference(path, cfg_entry)` = its harmonized name, None for an EDF, when tool 2 keeps it in the
+montage or when a reference is declared), it is left out of the channels from the configuration too (it was then read flat
+and flagged in every epoch), and of a participant's channels restored from an earlier run's sidecar (`start_channels`: the
+settings check then asks). The Scan says *Online reference left out of the montage (flat: tool 2 declares no reference):
+id (Cz)*, the log *[id] Online reference Cz left out of the montage…*. A declared reference is unchanged (Cz kept,
+re-referenced, then the declared channels dropped by `preprocess_raw`: a reference channel is never flagged).
+**Declared event files** (phase 4 bis): only the kinds declared in tool 4 are looked for (`event_files_in_use()`, the
+fields `event_txt_box` / `event_csv_box` hidden for a kind declared absent, `event_files_info` says which); a study declared
+without scored events hides `cb_event_reject` (unticked) with `event_none_info` (*Cross-cutting → Event sourcing*).
+**Heatmap** (phase 5): above 12 channels the hypnogram strip of `plot_rejection_heatmap` keeps a fixed height.
 **Channel checks** (`channel_check_lib`, before the read): the reference channels declared in tool 2 against the median
 EEG channel, and the amplitude / mains of the declared ECG and chin EMG, as `⚠ channel check:` lines of the log only (no
 output changes). An EDF study gives the same outputs (the test chain's golden). The event-chain copies of the notebook
@@ -2924,6 +3021,12 @@ the writes (data before the report, `_spectral_stage.tsv` last), Re-aggregate on
 two former computation / plotting cells are gone. Proven output-neutral by `tests/refactor_check.py` on the whole
 chain. Edit the library, never a copy.
 
+**Figures of a high-density cap (2026-11-12, `tools/plan_brainvision.md` phase 5)**: above `HD_CHANNEL_THRESHOLD` (12)
+channels, every per-channel figure, of the participant and of the database, is a grid of 8 columns of small panels
+(`_channel_grid` / `_finish_grid`, *Cross-cutting → High-density montage support*): at 62 channels the single row gave
+32 pixels per channel, titles and axes overlapping. At 12 channels or fewer, one row as before. (Observed on the same
+synthetic study: 15 min for 2 naps of 2 h at 62 channels; nothing changed for the run time.)
+
 **Section 1: Study folder and scan** (2026-11-04): the **Study folder** (supplies `config_param/custom_stages.json` and
 the exclusion registry) and the *Inputs found* list: the required **Preprocessed-epochs folder** (tool 7 `*_all-epo.fif`,
 `fc_raw`, `study_files_lib.epoch_folders`, a menu with several runs), the **Decision folder** (`fc_decision`, the
@@ -3307,7 +3410,10 @@ Not placed in this order yet: *BrainVision format and one version of each tool* 
 Read BrainVision recordings (`.vhdr` + `.vmrk` + `.eeg`), first to inspect them and score them automatically, then through
 the whole chain, with **one version of each tool** instead of a third set of twins, and later remove the Curry twins the
 same way. The plan, with what was measured on real recordings, is `tools/plan_brainvision.md`. Done: the reader (phase 1),
-tools 1, 2, 3, 6 (phase 2), tool 3bis with the channel checks and tool 6's comparison with the median channel (phase 3). **The Curry twins are frozen until their removal (phase 6)**: their notebooks stay as they are and
+tools 1, 2, 3, 6 (phase 2), tool 3bis with the channel checks and tool 6's comparison with the median channel (phase 3),
+tools 4, 5, 7, 0 and 8bis (phase 4), a flat online reference left out and the event files declared in tool 4 (phase 4 bis),
+the high-density display of tools 0, 6, 7, 8, 9 (phase 5). Left: the removal of the Curry twins (phase 6), then the
+documentation (phase 7). **The Curry twins are frozen until their removal (phase 6)**: their notebooks stay as they are and
 their generators are no longer re-run (their match strings no longer apply), so a fix to an EDF tool does not reach them.
 
 ### Task triggers: reading, checks, trigger-locked analyses (TODO, after the slow-wave and spindle extraction)

@@ -53,6 +53,7 @@ except Exception:
 from preprocessing_lib import smooth_psd_median, smooth_psd_lowess
 from edf_io_lib import (   # one copy, in edf_io_lib (same folder)
     BASE_STAGE_COLORS, CUSTOM_STAGE_PALETTE, load_custom_stages, parse_custom_field, custom_stage_style,
+    HD_CHANNEL_THRESHOLD,
 )
 
 mne.set_log_level('ERROR')
@@ -110,7 +111,7 @@ MANUAL_EVENT_COLUMNS = ['type', 'onset_s', 'duration_s', 'epoch_idx', 'epoch_num
 # rejected, and 451 of them (34% of the file) are flagged on a SINGLE electrode out of 32 - where the
 # right action is to drop that electrode, not to throw away 30 s of 32-channel EEG. Hence the channel
 # triage helpers (channel_badness / channels_over_threshold / recompute_reject's epoch rule) below.
-HD_CHANNEL_THRESHOLD = 12       # channels above which the high-density layout/behaviour kicks in
+# HD_CHANNEL_THRESHOLD (12, from edf_io_lib): channels above which the high-density layout/behaviour kicks in
 MONTAGE_ROW_IN       = 0.50     # inches per channel row (classic)
 MONTAGE_ROW_MIN_IN   = 0.16     # floor: thinner rows are unreadable anyway
 MONTAGE_MAX_H_IN     = 13.0     # cap on the montage figure height (inches)
@@ -1344,23 +1345,34 @@ def plot_epoch_montage(P, ei, thresholds, context=1, ctx=None, onsets=None, titl
     return fig
 
 
-def has_positions(P):
-    """True when the epochs carry usable electrode positions (Curry `.cdt` keeps a real DigMontage
-    through tool 7; Compumedics EDF has none). Gates the topomap panel — non-fatal when absent."""
+def positioned_channels(P):
+    """Indices of the channels with a usable electrode position: they gate and carry the topomap panel. All of them on a
+    Curry montage (a real DigMontage through tool 7); on a BrainVision cap, every EEG electrode but an eye electrode
+    recorded on an EEG input (it has none); none on a Compumedics EDF."""
     try:
         loc = np.array([c['loc'][:3] for c in P['epochs'].info['chs']], dtype=float)
     except Exception:
-        return False
-    return bool(loc.shape[0] and np.isfinite(loc).all() and (np.abs(loc).sum(axis=1) > 0).all())
+        return np.array([], dtype=int)
+    if not loc.shape[0]:
+        return np.array([], dtype=int)
+    return np.flatnonzero(np.isfinite(loc).all(axis=1) & (np.abs(loc).sum(axis=1) > 0))
 
 
 def _draw_channel_topomap(ax, P, values, title, cmap='viridis', mask=None):
-    """Small per-channel topomap of `values` (one per channel) for the current epoch. `mask` (bool per
-    channel) rings the flagged electrodes in red so a bad sensor is identifiable without reading the
-    colour scale. Non-fatal: any MNE/layout failure prints a note in the panel instead of raising."""
+    """Small per-channel topomap of `values` (one per channel) for the current epoch, drawn on the channels that have a
+    position (the others are named under the title). `mask` (bool per channel) rings the flagged electrodes in red so
+    a bad sensor is identifiable without reading the colour scale. Non-fatal: any MNE/layout failure prints a note in
+    the panel instead of raising."""
     try:
+        idx = positioned_channels(P)
         info = P['epochs'].info
         vals = np.asarray(values, dtype=float)
+        if len(idx) < len(vals):
+            left_out = [P['ch_names'][c] for c in range(len(vals)) if c not in set(idx.tolist())]
+            info = mne.pick_info(info, idx)
+            vals = vals[idx]
+            mask = None if mask is None else np.asarray(mask, dtype=bool)[idx]
+            title += f"\n(no position: {', '.join(left_out[:3])}{'…' if len(left_out) > 3 else ''})"
         good = np.isfinite(vals)
         if not good.any():
             raise ValueError('no finite value')
@@ -1404,14 +1416,15 @@ def plot_epoch_detail(P, ei, freqs, psds_uV2, thresholds, spectro_ch_idx=0, fmin
         this many worst-by-p-p ones in the metric table, instead of one row per channel (illegible past
         ~15 rows). None (default) = every channel, i.e. the classic behaviour.
     `topomap` (optional bool): draw the spatial panels (peak-to-peak + 1/f MAE). None (default) = auto:
-        on when the epochs carry electrode positions AND the montage is dense. Curry keeps a real
+        on when the montage is dense AND more than HD_CHANNEL_THRESHOLD of its channels carry an electrode
+        position (drawn on those: a BrainVision eye electrode on an EEG input has none). Curry keeps a real
         DigMontage through tool 7; position-less EDF simply never gets the panel."""
     from scipy.signal import welch as _welch   # only used by the commented-out 50 Hz-ratio block
     data, sf, ch = P['data_uV'], P['sfreq'], P['ch_names']
     stg = P['stages'][ei]
     n_ch = len(ch)
     if topomap is None:
-        topomap = (n_ch > HD_CHANNEL_THRESHOLD) and has_positions(P)
+        topomap = (n_ch > HD_CHANNEL_THRESHOLD) and len(positioned_channels(P)) > HD_CHANNEL_THRESHOLD
     fits = [fit_1f(freqs, psds_uV2[ei, c], fmin=fmin) for c in range(n_ch)]
     mae_thr = thresholds['1f_mae_max']
     r2_thr = thresholds['1f_r2_min']

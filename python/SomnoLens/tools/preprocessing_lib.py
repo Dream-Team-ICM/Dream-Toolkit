@@ -22,6 +22,7 @@ from specparam import SpectralModel
 from statsmodels.nonparametric.smoothers_lowess import lowess
 from edf_io_lib import (   # one copy, in edf_io_lib (same folder)
     BASE_STAGE_COLORS, CUSTOM_STAGE_PALETTE, load_custom_stages, parse_custom_field, custom_stage_style,
+    HD_CHANNEL_THRESHOLD,
 )
 
 
@@ -265,12 +266,17 @@ def plot_rejection_heatmap(combined_matrix, ch_names, hypno_epochs, file_id, cus
     pct_rejected = 100.0 * (combined_matrix > 0).mean()
 
     fig_w = max(8, min(n_epochs / 6, 20))
-    # Fixed-ish height: rows get thinner as the montage grows (capped so a 32-channel Curry
-    # montage stays compact instead of a ~16 in tall figure). Unchanged for <=14 channels.
-    fig_h = max(3, min(0.45 * n_channels + 2.0, 8.0))
+    if n_channels > HD_CHANNEL_THRESHOLD:
+        # High-density montage: the hypnogram strip keeps a fixed height (1 in, as in tool 8bis's heatmap) and
+        # each channel row 0.2 in, so the stage labels never overlap. At 12 channels or fewer, unchanged.
+        h_hyp, h_mat = 1.0, min(max(0.2 * n_channels, 0.8), 12.0)
+        fig_h, height_ratios = h_hyp + h_mat + 0.8, [h_hyp, h_mat]
+    else:
+        # Fixed-ish height: rows get thinner as the montage grows. Unchanged for <=14 channels.
+        fig_h, height_ratios = max(3, min(0.45 * n_channels + 2.0, 8.0)), [1.2, n_channels]
     fig, axes = plt.subplots(
         2, 1, figsize=(fig_w, fig_h),
-        gridspec_kw={'height_ratios': [1.2, n_channels], 'hspace': 0.04}
+        gridspec_kw={'height_ratios': height_ratios, 'hspace': 0.04}
     )
 
     # --- Hypnogram strip ---

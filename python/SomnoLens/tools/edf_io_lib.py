@@ -425,20 +425,21 @@ def read_start_datetime(path):
     return recording_lib.read_start_datetime(path)
 
 
-def event_companion_paths(edf_path, txt_suffix='_ScoredEvents_Export.txt', csv_suffix='_event_xml.csv'):
-    """Return (txt_path_or_None, csv_path_or_None, xml_path_or_None) for an EDF stem."""
+def event_companion_paths(edf_path, txt_suffix='_ScoredEvents_Export.txt', csv_suffix='_event_xml.csv', xml=True):
+    """Return (txt_path_or_None, csv_path_or_None, xml_path_or_None) for an EDF stem. A kind the study declares absent
+    in tool 4 (suffix None, xml=False: study_files_lib.declared_event_files) is not looked for."""
     edf_path = Path(edf_path)
-    txt = edf_path.with_name(f'{edf_path.stem}{txt_suffix}')
-    txt = txt if txt.exists() else None
-    csv = edf_path.with_name(f'{edf_path.stem}{csv_suffix}')
-    csv = csv if csv.exists() else None
-    xml = None
-    for cand in (f'{edf_path.name}.XML', f'{edf_path.name}.xml'):
+    txt = edf_path.with_name(f'{edf_path.stem}{txt_suffix}') if txt_suffix else None
+    txt = txt if txt is not None and txt.exists() else None
+    csv = edf_path.with_name(f'{edf_path.stem}{csv_suffix}') if csv_suffix else None
+    csv = csv if csv is not None and csv.exists() else None
+    xml_path = None
+    for cand in ((f'{edf_path.name}.XML', f'{edf_path.name}.xml') if xml else ()):
         p = edf_path.with_name(cand)
         if p.exists():
-            xml = p
+            xml_path = p
             break
-    return txt, csv, xml
+    return txt, csv, xml_path
 
 
 def _events_df_from_txt(txt_path, rec_start):
@@ -550,19 +551,20 @@ def augment_remap_for_manual(event_remap, events_df):
 
 
 def load_events(edf_path, txt_suffix='_ScoredEvents_Export.txt', csv_suffix='_event_xml.csv',
-                manual_suffix='_manual_events.tsv', include_manual=False):
+                manual_suffix='_manual_events.tsv', include_manual=False, xml=True):
     """Load scored events next to the EDF, TXT-first then CSV then *.edf.XML fallback.
     Returns (DataFrame Name/Start/Duration in seconds, source) with source in
     {'txt', 'csv', 'xml'}, or (None, None) when no usable event companion is found.
     The .txt onsets need the recording-start datetime (read_start_datetime), so a .txt present
     without a usable start datetime is skipped in favour of the CSV/XML companions.
+    A kind the study declares absent (suffix None, xml=False) is not looked for (event_companion_paths).
 
     With include_manual=True the tool-8 manual annotations ({stem}_manual_events.tsv) are APPENDED to
     whichever scored source won the priority chain (source tag e.g. 'csv+manual'), or used alone when
     there is no scored companion at all ('manual'). They are an ADDITION to the scored corpus, never an
     alternative source, so the priority chain above is untouched. Default False -> byte-identical to the
     pre-annotation tool."""
-    txt, csv, xml = event_companion_paths(edf_path, txt_suffix, csv_suffix)
+    txt, csv, xml = event_companion_paths(edf_path, txt_suffix, csv_suffix, xml)
     df, source = None, None
     # FIX #10: log exceptions instead of silently swallowing them
     if txt is not None:
@@ -731,3 +733,11 @@ def custom_stage_style(custom_stages):
     ytick_pos = [y for _, y in ordered]
     ytick_labels = ['REM' if s == 'R' else s for s, _ in ordered]
     return stage_y, stage_colors, ytick_pos, ytick_labels
+
+
+# ---------------------------------------------------------------------------------------------------------
+# High-density montages: one threshold for every display library (qc_rejected_epochs_lib, preprocessing_lib,
+# spectral_lib, quality_lib). Above it the figures switch to their dense layout; at or below it they are drawn
+# as before, so a 3-6 channel PSG study is unchanged. Here because every library already imports this module.
+# ---------------------------------------------------------------------------------------------------------
+HD_CHANNEL_THRESHOLD = 12

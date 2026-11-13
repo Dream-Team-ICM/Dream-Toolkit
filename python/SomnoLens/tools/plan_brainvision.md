@@ -1,7 +1,8 @@
 # Plan : format BrainVision (.vhdr, .vmrk, .eeg) et une seule version de chaque outil
 
 **Statut** : version 3 du 2026-11-06, confirmée. Phases 1 à 4 faites. Le 2026-11-12 : deux ajouts à l'outil 7 (phase 4 bis) et
-l'audit de la phase 5, à confirmer avant de coder. Chaque phase est validée avant la suivante.
+les corrections de la phase 5, confirmés (avec la quatrième case pour le résumé Compumedics), en cours. Chaque phase est validée
+avant la suivante.
 **Objectif immédiat** : pouvoir inspecter ces données et faire l'autoscoring (phases 1 à 3). Le reste de la chaîne suit
 (phase 4), puis l'affichage haute densité (phase 5) et la suppression des jumeaux Curry (phase 6).
 **Principe (ta remarque)** : les outils servent à d'autres jeux de données. Toute règle doit valoir pour n'importe quelle
@@ -81,6 +82,10 @@ Elles servent à vérifier les règles.
 
 ## Canaux AUX : inférer le gain
 
+**Confirmé le 2026-11-12** : l'EMG et l'ECG passent par un adaptateur BIP2AUX (gain 100) avant l'entrée AUX, et le workspace laisse
+le gradient à 1 mV/mV. Le facteur 100 vient donc du matériel, non compensé à l'enregistrement. La ceinture et les capteurs de
+pression ne passent pas par l'adaptateur.
+
 **Oui, on peut l'inférer, mais seulement en ordre de grandeur.**
 
 | Mesure | Ces 3 enregistrements | 4 nuits EDF locales (référence) | Ce que ça dit |
@@ -122,7 +127,8 @@ sur ces canaux, de 1 sur C3. Les capteurs de pression et la ceinture ne sont pas
 scoring expert (sans EMG, EMG tel quel, EMG corrigé sur une copie) : ça dira ce que le choix change vraiment.
 
 **Pour les autres formats** : pas de correction simple. Le message propose YASA sans EMG. Un facteur par canal dans l'outil 2 reste
-possible (additif, absent par défaut), je ne l'ajoute que si un cas réel se présente.
+possible (additif, absent par défaut), je ne l'ajoute que si un cas réel se présente. **Le cas réel est là** (BIP2AUX confirmé) : voir
+la phase 4 ter, que tu préfères à la modification des `.vhdr`.
 
 **Outil 1** : il ne lit pas le signal. Il affiche seulement une ligne d'information pour un ECG ou un EMG en AUX avec un gradient de
 1 mV/mV, et renvoie au contrôle.
@@ -431,8 +437,51 @@ réponse. Dans toutes les phases, **le golden EDF synthétique ne doit pas bouge
   7 restent identiques (`test_edf_io_sync`).
 - **Tests** : une étude déclarée sans CSV ni XML (aucun message sur eux dans 4, 5, 7, mêmes sorties) ; une étude déclarée sans
   événements (l'outil 7 sans méthode *event*, l'outil 5 avec la ligne d'information).
-- **Question ouverte** : le résumé Compumedics (`_Summary_Export.txt`, source des lumières de l'outil 5) peut suivre la même
-  déclaration, avec une quatrième case. Je le propose.
+- **Décidé** : le résumé Compumedics (`_Summary_Export.txt`, source des lumières de l'outil 5) suit la même déclaration, avec une
+  quatrième case.
+- **Précisions apportées en faisant** (2026-11-12) :
+  - **un bouton *Save the declaration*** dans l'outil 4, à côté des cases : une étude sans événements n'a rien à harmoniser, donc
+    son *Save* de la section 4 restait inaccessible. La déclaration part aussi avec le *Save* de la correspondance ;
+  - **le résumé a son champ de suffixe** dans l'outil 4 (détecté sur les `.txt` qui contiennent `summary`), pour que la déclaration
+    le porte ;
+  - **une case décochée alors que des fichiers existent** : l'outil 4 le dit en orange ;
+  - **l'outil 7 retire aussi la référence plate d'un participant déjà traité** (ses canaux relus dans le fichier de paramètres) :
+    la comparaison des réglages demande alors *Reprocess / Keep*.
+
+### Phase 4 ter : corriger le gain d'un canal de contexte dans l'outil 2 (demandé le 2026-11-12, confirmé avec ses tests)
+
+**Pourquoi** : l'EMG et l'ECG de cette étude passent par un adaptateur BIP2AUX (gain 100, confirmé sur le matériel) que le workspace
+ne compense pas. Plutôt que de modifier les `.vhdr`, la correction se règle dans les notebooks, pour tout format.
+
+**Décidé avec toi** : dans l'outil 2, sur les canaux de contexte seulement (EOG gauche / droit, EMG, ECG, les EEG restent tels
+qu'enregistrés), un nombre « diviser par » par canal (1 par défaut = aucune correction), réglé par configuration de canaux et
+appliqué à tous ses participants comme les canaux de contexte, avec un avertissement qui dit si une correction semble nécessaire.
+
+- **Outil 2, à côté de chaque menu de canal de contexte** : un champ *Divide by* (1 par défaut, de 0,001 à 10 000).
+- **L'avertissement** : dès que les canaux de contexte d'une configuration sont choisis, le contrôle d'amplitude déjà écrit
+  (`channel_check_lib.context_amplitude_warnings`, ECG : onde R attendue entre 0,1 et 5 mV, EMG du menton : RMS jusqu'à 100 µV) tourne
+  sur les trois premiers enregistrements de la configuration (lecture du seul canal concerné, rien d'écrit). Une ligne sous les menus :
+  - *ECG (ECG): R waves of 59-124 mV in 3/3 recordings, about 100 times the usual 1 mV: an adapter (e.g. BIP2AUX, gain 100) may
+    amplify it before the input. Set Divide by to 100?*
+  - une fois le champ à 100 : *ECG divided by 100: R waves of 0.59-1.24 mV ✓* ;
+  - rien d'anormal : une ligne verte. Le contrôle ne remplit jamais le champ lui-même : il propose, tu décides.
+  - Trois enregistrements par configuration pour que le scan reste rapide sur une grande étude (un EDF de nuit se lit en entier pour
+    un seul canal) : la ligne le dit.
+- **Enregistré** dans la configuration des canaux, bloc **additif et optionnel** `context_gain` par participant (`{"emg": 100, "ecg":
+  100}`), **omis quand tout vaut 1** : un JSON sans correction reste identique octet par octet.
+- **Appliqué partout où ces canaux sont lus**, avant toute dérivation (le signal enregistré est divisé, puis l'EOG reçoit la référence
+  de l'EEG s'il y a lieu) :
+  - l'outil 3bis (l'EMG de YASA, les canaux donnés à SleepFM, l'EOG des trois modèles), et son fichier de paramètres le note ;
+  - le compagnon de contexte de l'outil 7 (`edf_io_lib.read_context_raw`) et l'outil 0, qui passent par la même fonction ; le fichier
+    de paramètres de l'outil 7 le note, et sa comparaison des réglages (*Skip*) le prend en compte ;
+  - les contrôles de canaux des outils 3bis et 7 : ils jugent le signal corrigé, et le disent (*after the correction set in tool 2*).
+- **Rien ne change** sans correction (tous les champs à 1) : mêmes JSON, mêmes sorties (preuve par `refactor_check.py`).
+- **L'outil 1** garde sa ligne d'information sur un ECG / EMG en AUX, qui renvoie désormais à ce réglage de l'outil 2.
+- **Pour cette étude** : une fois le facteur réglé, YASA peut reprendre l'EMG (décision prise tant que le gain était inconnu).
+- **Tests proposés** : quick (la lecture divisée, le JSON sans correction inchangé, le contrôle avant / après la correction) et standard
+  sur les outils 2, 3bis, 7 et 0 (une étude BrainVision avec un ECG et un EMG 100 fois trop grands : l'avertissement, le champ, le
+  JSON, puis le compagnon de l'outil 7 et l'EMG de YASA à la bonne échelle).
+- **Quand** : après ton commit des phases 4 bis et 5.
 
 ### Phase 5 : affichage haute densité
 
@@ -468,11 +517,20 @@ inchangé. Audit à 62 canaux :
 | 6, participant | superposition des canaux : légende de 63 noms coupée, couleurs indiscernables | en haute densité, canaux en gris fin, seuls les canaux signalés en couleur dans la légende |
 | 6, participant | nuage par électrode : noms des 62 électrodes illisibles (superposés) ; panneau *At EDF bounds* vide sur BrainVision | noms verticaux en petit ; panneau masqué sans bornes physiques (comme dans la figure voisine) |
 | 6, base | une figure par électrode (61 figures, 5,1 Mo) | en haute densité, une figure par métrique avec une boîte par électrode (6 figures) |
-| 1, 2, 3bis | listes et cases de 64 à 71 canaux, déjà vues dans Voila par toi aux phases 2 et 3 | à confirmer par toi : je ne peux pas faire de capture des pages |
+| 1, 2, 3bis | listes et cases de 64 à 71 canaux, déjà vues dans Voila par toi aux phases 2 et 3 | confirmées lisibles par toi : rien |
 | 5 | pas de signal EEG | rien |
 
 - **Un seul seuil**, `HD_CHANNEL_THRESHOLD` (12) de `qc_rejected_epochs_lib`, pour toutes les librairies d'affichage. Rien ne change à 12
   canaux ou moins.
+- **Précisions apportées en faisant** (2026-11-12) :
+  - **le seuil est passé dans `edf_io_lib`** (`qc_rejected_epochs_lib` le reprend) : `qc_rejected_epochs_lib` importe déjà
+    `preprocessing_lib`, qui ne pouvait donc pas l'importer en retour ;
+  - **la case *All channels* de l'outil 6** s'appelle *Per-channel detail for every channel*, dans la boîte *Advanced*. Elle ne change que
+    les rapports, donc ce n'est pas un réglage enregistré : avec *Skip* coché, un rapport déjà fait reste tel quel ;
+  - **le panneau vide *At EDF bounds*** du nuage par électrode est masqué pour toute étude dès que la métrique n'a aucune valeur (pas
+    seulement au-dessus de 12 canaux), comme la figure voisine ;
+  - **l'outil 0** reçoit aussi les superpositions de l'outil 6 (canaux signalés en couleur), sans la case : son étape 5 détaille déjà un
+    canal choisi à la fois dans l'explorateur.
 - **Test d'inertie** : `tests/refactor_check.py` sur la chaîne synthétique (EDF, 4 canaux), avant et après. Tous les fichiers doivent être
   identiques, rapports compris. Plus un test par figure modifiée, à 62 canaux, qui vérifie la mise en page (nombre de panneaux, hauteur
   fixe de l'hypnogramme, topographie présente).

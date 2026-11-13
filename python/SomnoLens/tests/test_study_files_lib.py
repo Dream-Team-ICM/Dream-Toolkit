@@ -97,6 +97,21 @@ def test_the_notes_under_the_suffix():
     assert SF.choice_notes('detected', 'expert', 'unreadable') == [('warn', 'unreadable')]
 
 
+@pytest.mark.tool4
+def test_the_event_files_declared_in_tool_4(tmp_path):
+    assert SF.declared_event_files({}) is None and not SF.declares_no_events(None)   # nothing declared: every kind
+    declared = {'txt': '_ScoredEvents_Export.txt', 'csv': None, 'xml': False, 'summary': None}
+    assert SF.write_names(tmp_path, '4', {SF.EVENT_FILES_KEY: declared}) is None
+    names, _ = SF.load_names(tmp_path)
+    assert SF.declared_event_files(names) == declared and not SF.declares_no_events(declared)
+    none = {'txt': None, 'csv': None, 'xml': False, 'summary': '_Summary_Export.txt'}
+    assert SF.declares_no_events(none)                       # a summary export holds no scored event
+    # an empty suffix counts as absent, a value that is not a declaration as no declaration
+    assert SF.declared_event_files({SF.EVENT_FILES_KEY: {'value': {'txt': '', 'xml': 1}}}) == \
+        {'txt': None, 'csv': None, 'xml': True, 'summary': None}
+    assert SF.declared_event_files({SF.EVENT_FILES_KEY: {'value': '_x.txt'}}) is None
+
+
 def test_a_study_keeps_its_output_names():
     old = {'_Hypnogram_Export.txt': 3, '_Hypnogram_remapped.txt': 3}
     new = {'_Hypnogram_Export.txt': 3}

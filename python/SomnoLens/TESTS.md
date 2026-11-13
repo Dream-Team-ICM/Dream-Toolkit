@@ -286,7 +286,18 @@ every data format, and a `[Comment]` that is missing, cut short or written diffe
   reference (Cz) once re-referenced, writes the EOG of the companion with the reference of the EEG, and runs the channel checks;
 - **Tool 8bis** pre-ticks every stage as a reference stage when the participants have few N2 / N3 / R epochs (a night study
   keeps N2 / N3 / R);
-- **A paused recording**: its clock no longer follows the samples, so the clock times of an event export are not placed on it.
+- **A paused recording**: its clock no longer follows the samples, so the clock times of an event export are not placed on it;
+- **The online reference** (Cz) is left out by tools 7 and 0 when tool 2 declares no reference (it would stay flat and be flagged
+  in every epoch), and kept, re-referenced, when it declares one;
+- **The event files declared in tool 4**: a study with a text export only gets no CSV / XML / summary field in tools 5 and 7, and the
+  same tool-5 table as without the declaration; a study declared without scored events gets no event method in tool 7 and one
+  information line in tool 5.
+
+`test_high_density.py` checks the display of a high-density cap (62 channels) against the same figure at 4 channels: tool 7's
+hypnogram strip keeps about one inch, tool 9's figures become a grid of 8 columns, the topomaps are drawn on the electrodes that
+have a position (an eye electrode without one no longer removes them), tool 6's overlays name only the flagged channels and its
+scatter by electrode writes the names upright; then tool 6 on a 20-channel study details only the dead electrode and draws one
+figure per metric in the database report. That nothing moves at 12 channels or fewer is proven by `refactor_check.py`.
 
 Tool 6's comparison of each channel with the median channel of the same epoch (`test_quality_lib.py`): a channel 10 times larger
 than the others is said in its own columns, never as a flag, so tool 7 unticks nothing more. Its flat measure counts only what

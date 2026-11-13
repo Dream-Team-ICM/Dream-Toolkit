@@ -66,6 +66,20 @@ def online_reference(path):
     return channels_on_online_reference(path)
 
 
+def flat_online_reference(path, cfg_entry):
+    """The harmonized name of the online reference when it would stay flat in the montage of tool 2, else None.
+    A BrainVision online reference (e.g. Cz) is recreated as a channel of zeros. Re-referenced, it becomes a real signal
+    (Cz - TP9), so it is kept when tool 2 declares a reference (a list of channels or 'average'). Without one it would
+    stay at 0 and be flagged in every epoch: tools 7 and 0 leave it out. None for an EDF (no online reference) and when
+    tool 2 did not keep the online reference in the montage."""
+    online, _ = online_reference(path)
+    target = (cfg_entry or {}).get('remap', {}).get(online) if online else None
+    ref = (cfg_entry or {}).get('ref_channels', [])
+    if not target or ref == 'average' or (isinstance(ref, list) and ref):
+        return None
+    return target
+
+
 def recreate_online_reference(raw, name):
     """Add the online reference `name` to a Raw whose data are loaded (a channel of zeros, which becomes a signal once
     the data are re-referenced): for a read that first opens every channel lazily, then loads only those it needs."""
