@@ -1,7 +1,8 @@
 # Plan : format BrainVision (.vhdr, .vmrk, .eeg) et une seule version de chaque outil
 
-**Statut** : version 3 du 2026-11-06, confirmée. Phases 1 à 5 et 4 ter faites et commitées. Phase 5 bis (retours de ton
-inspection visuelle) confirmée et faite le 2026-11-14, à vérifier à l'écran. Restent la phase 6 (jumeaux Curry) et la phase 7.
+**Statut** : version 3 du 2026-11-06, confirmée. Phases 1 à 5, 4 ter et 5 bis faites et commitées. Phase 5 ter (deuxième
+inspection visuelle) écrite le 2026-11-17, à confirmer. Restent ensuite la phase 6 (jumeaux Curry), les phases 6 bis (bouton Stop)
+et 6 ter (numérotation des dossiers de rapports), puis la phase 7.
 Chaque phase est validée avant la suivante.
 **Objectif immédiat** : pouvoir inspecter ces données et faire l'autoscoring (phases 1 à 3). Le reste de la chaîne suit
 (phase 4), puis l'affichage haute densité (phase 5) et la suppression des jumeaux Curry (phase 6).
@@ -632,6 +633,104 @@ du rapport de l'outil 7, figure et tableau des époques propres des rapports de 
 - outil 0, étape 5 : la préparation de l'outil 6 est reprise au choix du participant, et une ligne la dit ;
 - la superposition de l'outil 9 trace les canaux en gris clair : le gris de l'éveil, celui de la moyenne, se confondait avec eux.
 
+### Phase 5 ter : deuxième inspection visuelle (2026-11-17, à confirmer)
+
+**Décidé avec toi** : le bouton Stop passe dans une phase à part (6 bis, avec `jupyter-ui-poll`), la numérotation des dossiers de
+rapports après la phase 6 (6 ter), l'interpolation des canaux rejetés plus tard, hors de ce plan (noté dans les modules prévus du SPEC).
+Pour la lenteur de l'outil 0, on mesure d'abord.
+
+**Réponses sans changement de code** :
+- **Outil 1, premier fichier plus lent** : normal. Le premier fichier charge les parties de MNE, SciPy et matplotlib qu'il utilise.
+- **Outil 8, boîtes rouges de la section 2** : la distribution des époques rejetées (bleu = gardées). Le titre de la figure le dit.
+- **SleepFM sur les 64 électrodes** : non. Il ne reconnaît que les noms de sa liste de canaux (`channel_groups.json`) et met en commun
+  les canaux d'une même modalité. Il a été entraîné sur des PSG cliniques de quelques EEG : 64 électrodes ne lui apporteraient pas
+  d'information spatiale et sortiraient de son entraînement. Il garde les dérivations AASM présentes (F3, F4, C3, C4, O1, O2).
+- **Outil 9, minimum de 20 époques propres** : il vaut **par participant**, pour chaque case participant × stade × canal. Une case
+  sous le minimum vaut NaN et le participant manque à la figure de groupe de ce stade. Le champ *Min epochs per cell* existe déjà :
+  le baisser puis *Re-aggregate only* inclut les siestes sans recalculer les PSD.
+- **Interpolation** : aucun outil n'interpole. Les outils 8 et 8bis écartent les canaux, l'outil 9 les calcule mais les laisse hors des
+  figures et des statistiques de groupe.
+
+**1. Bug : un stade absent et un canal décoché (outils 7 et 0).** `preprocessing_lib.set_bads_aside` recrée les époques des canaux
+décochés avec les codes de tous les stades (W à R). MNE refuse un code sans époque (`No matching events found for N3`). Tout participant
+sans un des stades et avec un canal décoché échoue, dans l'outil 7 comme à l'étape 6 de l'outil 0. Correction : `on_missing='ignore'`
+dans cet appel. Les autres cas ne changent pas. Test : un enregistrement synthétique sans N3, un canal décoché, outils 7 et 0.
+
+**2. Barres de progression (tous les outils).**
+- **Texte tronqué** quand la page est étroite : le texte de droite passe sous la barre et revient à la ligne au lieu d'être coupé.
+- **Nouvelle règle (SPEC, rappel court dans CLAUDE.md)** : une barre ne reste jamais immobile pendant qu'une étape travaille.
+  - Une étape qui boucle (canaux, époques, morceaux, figures) fait avancer la barre à chaque élément.
+  - Une étape qui ne peut pas le dire (une lecture MNE, la prédiction de YASA) affiche un petit signe animé à côté de son nom. Le
+    navigateur l'anime lui-même, donc il bouge même quand Python est occupé.
+- **Où** :
+  - 3bis : une barre d'étapes par participant, un segment par modèle. Les combinaisons de GSSC et les morceaux de SleepFM la font
+    avancer. La barre des participants compte les participants.
+  - 9 : la PSD par blocs d'époques, les bandes, puis le rapport figure par figure.
+  - 0 : le chargement de l'étape 1 et chaque étape.
+  - 5, 6, 7, 8, 8bis : vérifiés sur l'enregistrement synthétique de 62 canaux (point 8), corrigés là où la barre reste immobile.
+
+**3. Journal des runs coloré.** Les `⚠` que tu as vus sont des lignes du journal (`print`), en texte brut. Une fonction
+`UI.log(kind, text)` les écrit en couleur, avec les codes ANSI que Voila affiche en couleur : `⚠` orange, `❌` rouge, `✅` vert, comme
+les messages de la page. Toutes les pages l'utilisent. Aucun outil n'écrit son journal dans un fichier, donc aucune sortie ne change.
+
+**4. Outil 3bis.**
+- **Menus limités à ce que l'outil 2 déclare.** Aujourd'hui les modes EOG sont fixes. Avec un seul EOG déclaré (à droite), GSSC propose
+  encore *L − R bipolar* par défaut, et YASA *Left*.
+  - EOG : seuls les modes que les canaux de contexte permettent (un EOG droit seul : GSSC *Right only* / *None*, YASA *Right* /
+    *None*), avec le côté présent par défaut.
+  - Avec plusieurs configurations, une option absente de certaines est marquée `(n/N)`. Cela vaut aussi pour les électrodes EEG et
+    l'EMG.
+  - Une ligne sous les menus nomme les enregistrements où un canal choisi manque, et dit ce que le modèle fait alors (règles déjà en
+    place).
+- **Rappel avant le run** : une ligne SleepFM, ses EEG (dérivations présentes), EOG, EMG, ECG et respiration trouvés, par configuration.
+- **Progression** : point 2 (la barre n'avançait qu'à la fin du premier modèle).
+
+**5. Outil 8bis, au-dessus de 12 canaux** : la figure de décision tient sur une page. L'hypnogramme passe de 1,0 à 0,6 pouce et la
+bande des époques de 0,4 à 0,2 pouce.
+
+**6. Panneau de détail des outils 8 et 0.**
+- **Topographies.** Aujourd'hui, l'échelle de couleur va du minimum au maximum de l'époque. Un seul canal très mauvais écrase les
+  autres dans une seule couleur, et sur le crête-à-crête un canal plat est cerclé sur une valeur proche de zéro.
+  - L'échelle est centrée sur le seuil (le seuil au milieu, saturée au-delà), et le seuil est marqué sur la barre de couleur.
+  - Les cercles sont rouges au-dessus du seuil et cyan sous le seuil de plat (carte p-p). Le titre de chaque carte dit sa règle.
+- **PSD face à la référence propre.**
+  - La référence est tracée au-dessus des canaux, dans un style qu'on ne confond pas avec l'époque : trait noir et son IQR en
+    deux traits noirs pointillés (plus de remplissage gris dessous).
+  - L'époque garde sa bande gris clair et sa médiane grise.
+  - Pour tous les montages : à 12 canaux ou moins, les traits gris des canaux restent et la référence passe dessus.
+
+**7. Outil 9.**
+- **Au-dessus de 12 canaux, chaque figure dessinée canal par canal** devient une figure agrégée sur les canaux gardés, suivie d'une
+  section repliée avec les panneaux par électrode (comme la PSD en phase 5 bis).
+  - Rapport individuel : log-log avec l'ajustement, paramètres apériodiques au fil de la nuit, puissance par bande et par stade.
+  - Rapport de la base : puissance par bande entre participants, paramètres apériodiques par stade.
+- **Titre tronqué** (*after removing the aperiodic component*) : les titres des figures reviennent à la ligne à la largeur de la figure.
+- **Minimum d'époques par case.**
+  - Au scan, une ligne par stade dit combien de participants atteignent le minimum (et la médiane de leurs époques propres). Sous
+    le minimum, la ligne propose de baisser *Min epochs per cell*.
+  - Le rapport de la base nomme les stades absents de ses figures et dit pourquoi.
+  - La valeur ne change pas seule : c'est un choix de méthode.
+
+**8. Outil 0.**
+- **Mesures d'abord** : un enregistrement synthétique de 62 canaux à 500 Hz (la fréquence de l'étude), durée à confirmer avec toi.
+  - Je chronomètre l'étape 1 (lecture, PSD de chaque époque × canal, spectrogramme du navigateur) et chaque étape face à son outil
+    séparé.
+  - Les résultats vont dans ce plan, et la correction t'est proposée avant d'être codée.
+- **Explorateur** :
+  - Un menu *Hypnogram shown* : celui en usage (modifiable, par défaut) ou un autre trouvé à côté de l'enregistrement (scorings de
+    3bis, celui de l'étape 3). Un autre est en lecture seule : le rescoring est coupé, une ligne le dit.
+  - Tant que l'étape 6 n'a pas tourné, une ligne dit que le montage se lit mieux après elle (*Signal: preprocessed*, *Channels:
+    ticked in step 6*).
+- **Étape 5** : la légende de chaque canal coloré dit pourquoi il est signalé (`C3: flat_vs_median 85 %`). Fonction de `quality_lib`,
+  donc les superpositions du rapport de l'outil 6 la gagnent aussi, pour tous les montages.
+- **Étape 6** : *Tick all* et *Untick all* à côté de *Untick step 5's flagged channels*. L'erreur `N3` est le point 1.
+
+**Tests proposés** : quick (le bug du point 1, `UI.log`, le retour à la ligne des barres, les menus de 3bis avec un seul EOG, les
+échelles et cercles des topographies, les figures agrégées et repliées de l'outil 9 et leur absence à 12 canaux, la ligne du minimum
+d'époques, le menu d'hypnogramme et les boutons de l'outil 0), puis standard sur les outils 0, 3bis, 6, 7, 8, 8bis, 9. `refactor_check.py`
+sur la chaîne EDF : toutes les tables identiques. Changent les rapports des outils 6 (légende des canaux signalés) et 9 (titres).
+Le panneau de détail des outils 8 et 0 est seulement à l'écran. Puis ton inspection visuelle.
+
 ### Phase 6 : suppression des jumeaux Curry
 
 **Faisable, et je le recommande.** D'après le SPEC, ce que font les jumeaux tient en peu de choses :
@@ -663,6 +762,19 @@ chacun) permettent de la vérifier.
 4. Tu vérifies dans Voila sur Curry, comme le SPEC le demandait déjà.
 
 - **Tests proposés** : full, plus cette comparaison.
+
+### Phase 6 bis : bouton Stop (demandé le 2026-11-17, à détailler)
+
+Pendant un run, Voila ne traite aucun clic. La petite bibliothèque `jupyter-ui-poll` (conda-forge, installation à te demander) permet de
+lire le clic sur *Stop* à chaque avancée de barre. Le participant en cours est abandonné proprement et *Skip* le reprend. Les réglages
+de la page sont grisés pendant le run, pour qu'aucun ne change en cours de route. Après la phase 6, il y a moins de pages à équiper.
+Plan détaillé et tests à écrire au début de la phase.
+
+### Phase 6 ter : numérotation des dossiers de rapports (demandé le 2026-11-17, à détailler)
+
+`reports_01_inspection` … `reports_09_features_spectral`, pour retrouver d'un coup d'œil le rapport qu'on vient d'écrire. Chaque outil
+renomme une fois les anciens dossiers d'une étude au Run, et les outils qui se retrouvent par le nom de dossier (8bis, 9, 0) sont
+adaptés. On décidera alors si `derivatives/` est numéroté aussi. Après la phase 6, car les jumeaux Curry écrivent encore les anciens noms.
 
 ### Phase 7 : documentation et fin
 
