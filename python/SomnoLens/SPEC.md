@@ -551,7 +551,15 @@ instead of restating them. Only tool-specific deltas are kept inline.
     puts `⚠️ default changed: output folder` in its title, so a change is not forgotten; the tool compares with the value
     it proposed for this study.
   - **Progress**: `UI.progress_bar(description)` → (bar, row with `i / N`), `UI.finish_progress(bar, n_failed)`
-    (green, orange when something failed). Tools 1, 1bis, 2, 3 and 4 have one over their files.
+    (green, orange when something failed). Tools 1, 1bis, 2, 3 and 4 have one over their files. **Since 2026-11-13**
+    (phase 5 bis of `tools/plan_brainvision.md`, the user saw them misaligned and of four styles): every bar of every page
+    is built by `ui_lib`, at one width (`PROGRESS_WIDTH` = 620 px, label included), its label in a column of `LABEL_WIDTH`
+    and its text on the right; the bar itself carries no label (its inner margins shifted a legend placed by calculation).
+    The second bar of a run is `UI.phase_bar(description)` → (bar, row, `set_phases`, step text): the legend of its steps
+    is glued under the bar in the same column, so they line up by construction; `set_phases([(label, cost, tooltip),
+    ...])` sizes a segment per step (colours `PHASE_COLORS` in turn), `[]` hides it. Tools 5, 6, 7, 9 (participants +
+    pipeline), 8 (its report bar) and 3bis (its SleepFM download) use them; `test_ui_lib.py` refuses an `IntProgress`
+    built in a page. `progress_bar`'s `width` is ignored, kept for the frozen Curry twins until their removal.
   - **Details blocks** (2026-11-04): a `<details>` of a Markdown cell opens with the line `UI.details_open(title, hint)`
     returns (a box with a bold title and *(click to open)*, otherwise nothing shows that the small arrow can be clicked),
     written out since a Markdown cell cannot call Python, then a blank line. Guarded by `tests/test_ui_lib.py`. The HTML
@@ -974,12 +982,18 @@ instead of restating them. Only tool-specific deltas are kept inline.
     numerically identical to the former code.
   - **Detail panel** (`plot_epoch_detail`): unflagged channels collapse from one grey line each into a
     **p5–p95 band + median** (readability *and* legend size). Flagged-channel legend entries are capped at
-    12 + a `… +N more` proxy. The metric table keeps **every breaching channel + `table_rows` worst by p-p**
-    (title gains a second line `X/Y channels shown (Z flagged)`: a second line, because appended
-    horizontally it collides with the PSD title). `table_rows=None` = every channel (classic).
-  - **Topomaps** (`positioned_channels` + `_draw_channel_topomap`): a third figure column with **peak-to-peak**
-    and **1/f MAE** across the head, red-ringed on breaching channels (public `mask`/`mask_params` API, no
-    private MNE call). Auto-enabled when the montage is dense **and** more than `HD_CHANNEL_THRESHOLD` of its
+    12 + a `… +N more` proxy. **The metric table is HTML beside the figure since 2026-11-13** (phase 5 bis,
+    `epoch_metric_table_html`): every channel in file order, the value over its threshold in red bold and the channel name
+    too, a header that stays, a box that scrolls past `DETAIL_TABLE_HEIGHT_PX` (340). Drawn in the figure, a 64-channel
+    table had to be cut to the breaching channels + `table_rows` worst ones (tool 8's *Table rows* field, now removed;
+    `table_rows` and `DEFAULT_TABLE_ROWS` stay, ignored, for the frozen Curry twin of tool 8). The values are computed once
+    for the figure and the table (`epoch_channel_values`: p-p, gradient, 1/f MAE and R², the thresholds of the epoch's stage,
+    `breached` per channel). For every montage: interactive only (tools 8 and 0), no output file changes.
+  - **Topomaps** (`positioned_channels` + `_draw_channel_topomap`): **four small maps in 2 x 2** beside the PSD since
+    2026-11-13 (peak-to-peak, gradient, 1/f MAE, 1/f R², the R² scale reversed so a bad electrode is bright on all four;
+    before, two maps: peak-to-peak and 1/f MAE), each ringed in red on the channels over **its own** threshold (public
+    `mask`/`mask_params` API, no private MNE call), the figure `DETAIL_TOPO_FIG_HEIGHT_IN` (4.4) tall. Auto-enabled when
+    the montage is dense **and** more than `HD_CHANNEL_THRESHOLD` of its
     channels carry an electrode position; drawn on those channels, the others named under the title (`no position:
     IO`). Since 2026-11-12 (phase 5): it was every channel, and the eye electrode of a BrainVision cap recorded on an
     EEG input (no position in the file) removed the topomaps of the whole cap. Curry keeps a real `DigMontage`
@@ -1004,6 +1018,18 @@ instead of restating them. Only tool-specific deltas are kept inline.
     participant a dot) instead of the side-by-side comparison and the per-electrode sections. Tool 8bis's heatmap and
     tool 8's montage were already readable at 62 channels; tools 1, 2 and 3bis (lists and boxes of 64-71 channels)
     were checked by the user in Voila.
+  - **After the user's visual inspection (2026-11-13, `tools/plan_brainvision.md` phase 5 bis)**, above 12 channels:
+    **tool 7's heatmap** rows of 0.14 in (0.2 before) and **tool 8bis's decision figure** rows of 0.14 in (0.22), both at
+    most 14 in wide, the fonts unchanged (a smaller figure on the page); **tool 9's two PSD figures** (*Mean PSD per
+    stage*, *after removing the aperiodic component*, in both reports) become an overlay (`plot_psd_overlay`,
+    `plot_group_psd_overlay`: one panel per stage, each channel in thin light grey `OVERLAY_CHANNEL_GREY`, the mean of the
+    channels in the stage's colour), the grid of panels going to a section that opens (`figure_details_html`: a
+    `<details>` with the PNG embedded, since MNE's report cannot fold a figure; `group_psd_items` builds the database
+    items); the log-log panels of the grid drop the 30 Hz tick (it overlapped 45 Hz); **tool 6** flags a channel far from
+    the median channel of its epochs (*Cross-cutting → Channel checks*, §6). For every montage: **tool 7's heatmap**
+    gives its colour bar a column of its own (`plot_rejection_heatmap`, a 2 x 2 grid as tool 8's heatmap), so the
+    hypnogram spans exactly the epochs of the matrix (taken from the matrix alone, the colour bar made the hypnogram
+    wider: the figure of every tool-7 report, EDF included, changed).
   - **Channel triage** (`load_channel_flags` / `recompute_channel_flags` / `channel_badness` /
     `channels_over_threshold` + `recompute_reject`'s new optional arguments): per-(epoch, channel) flags,
     per-channel badness (% of **in-scope** epochs flagged, the same definition as 8bis, so both tools rank
@@ -1079,7 +1105,9 @@ instead of restating them. Only tool-specific deltas are kept inline.
   were found by comparing tool 9 against an external pipeline (`tools/Thomas4Carl_extract_features.py`,
   which has both). Tool 9's Welch path was never affected.
 - **Channel checks (`tools/channel_check_lib.py`, 2026-11-12, `tools/plan_brainvision.md`)**: checks of the channels a tool
-  receives, every format (read through `recording_lib`, without the online reference), no torch. **They warn, they never decide
+  receives, every format (read through `recording_lib`, without the online reference), no torch. **One exception since
+  2026-11-13: above 12 channels, tool 6's comparison with the median channel is a flag** (§6, `quality_lib.comparison_flag`).
+  Otherwise **they warn, they never decide
   or change anything.** Used by tool 3bis (each model's channels, §3bis) and tool 0's step 3; tool 7's reference channels in
   phase 4 of the plan.
   - `channel_quality_warnings(path, cfg_entry, pool, checked, eog)`: 60 epochs of 30 s spread over the recording
@@ -1260,9 +1288,26 @@ explorer and the other steps work on the loaded Raw, so they are unchanged.
 flat (tool 2 declares no reference: `recording_lib.flat_online_reference`, a line in the loading notes), left out of
 step 5 always (tool 6 never reads it), kept in step 6 when a reference is declared (re-referenced, a real signal, like
 tool 7). The **event files declared in tool 4** are the only ones looked for (*Cross-cutting → Event sourcing →
-Declared event files*). **Phase 5**: above 12 channels the detail panel keeps `DEFAULT_TABLE_ROWS` metric rows (it
-showed all 62), the topomaps use the electrodes that have a position, and step 5's overlays name only the flagged
-channels (*High-density montage support*).
+Declared event files*). **Phase 5**: the topomaps use the electrodes that have a position, and step 5's overlays name only
+the flagged channels (*High-density montage support*). **Phase 5 bis (2026-11-13, after the user's inspection)**:
+- **Scored events in a menu** (`dd_events`, like the hypnogram's): *as tools 5 and 7* (the TXT → CSV → XML chain of the
+  declared kinds, its file named, the default), every event file beside the recording (a `.txt` / `.csv` whose name holds
+  `event`, a `.xml`), *(none)*, or *Other file…* (a picker, with the orange note that the batch tools will not find it).
+  A file is read by `edf_io_lib.load_event_file` (by its kind; a text export needs the recording start). The choice is what
+  the explorer marks; steps 4 and 6 read the events as tools 5 and 7 do, so that their results match theirs (said under
+  the menu).
+- **Step 5 starts as tool 6 prepared the participant** (`prefill_quality_preparation`, at the choice of the participant):
+  the resampling and the high-pass of the `signal_preparation` of tool 6's table, else tool 6's own start (a high-pass at
+  0.1 Hz for a DC-coupled recording, `brainvision_lib.read_vhdr_acquisition`), said in `html_prep5`, editable. Found on a
+  real cap: tool 6 had run resampled to 256 Hz, step 5 at 500 Hz, and the histogram of one channel had 1 peak in one, 2 in
+  the other (`n_peaks` depends on the number of samples through the width of the histogram's bins).
+- **Step 6 laid out like tool 7**: one row per setting, the checkbox in a column of fixed width, then the field, then its
+  unit (`row6`); the widgets and their names are unchanged.
+- **The explorer's *Channels* menu** gains *ticked in step 6* (`step6`), in every display mode: a disconnected electrode,
+  hundreds of times the scale of a row (the montage never clips a trace), is put aside before step 6 runs; the explorer
+  redraws when a box of step 6 changes.
+- The detail panel's table scrolls beside the figure (every channel, no 8-row limit), its four topomaps (*High-density
+  montage support*).
 
 **Core rule: never re-implement a computation.** Each step calls the very functions of the batch tool it
 mirrors, which live in the shared libraries (see *Cross-cutting → Shared computation libraries*), so the numbers
@@ -2291,10 +2336,24 @@ standard deviation) but one. `quality_lib.compare_channels` (called at the end o
 it too) takes every 30-s epoch of the night, filtered 0.3-35 Hz, and compares each channel's standard deviation with the median
 channel of that epoch (`channel_check_lib`, same rule and thresholds as tool 3bis's check: over 3 times on more than 20 % of the
 epochs = noisy, under 0.1 times = nearly flat). Three additive columns of `{file_id}_quality_metrics.tsv` and `quality_summary.tsv`:
-`noisy_vs_median_pct`, `flat_vs_median_pct`, `comparison_alert` (text, empty without alert); NaN with fewer than 3 channels. **Never
-a flag**: not in `suspect_reason` / `exclude`, so tool 7 unticks nothing more and the EDF flags are unchanged. Shown in the report
-(an amber *Compared with the other channels* box in the Overview, two rows and a line in each channel's metrics) and the log. No
-setting, so nothing to add to the Skip comparison; a participant processed before has blank columns until reprocessed.
+`noisy_vs_median_pct`, `flat_vs_median_pct`, `comparison_alert` (text, empty without alert); NaN with fewer than 3 channels. **Up to
+12 channels, never a flag**: not in `suspect_reason` / `exclude`, so tool 7 unticks nothing more and the EDF flags are unchanged.
+Shown in the report (an amber *Compared with the other channels* box in the Overview, two rows and a line in each channel's
+metrics) and the log. A participant processed before has blank columns until reprocessed.
+
+**Above 12 channels, also a flag (2026-11-13, `tools/plan_brainvision.md` phase 5 bis)**: on the BrainVision study of the plan,
+10 channels of a cap were noisy on 100 % of the epochs (up to 7 000 µV of standard deviation) and tool 6 flagged none of them:
+none of the five criteria aims at a channel too large, since a disconnected electrode of an EDF ends up clipped at its physical
+bounds (`bounds_pct`) and a BrainVision recording has none. On a cap the median channel of an epoch is a sound reference, so
+`quality_lib.comparison_flag` adds the comparison to `suspect_reason` / `exclude` (`noisy_vs_median=100% of the epochs > 20%
+(over 3 times the median channel)`, or `flat_vs_median=…`), with the thresholds of `channel_check_lib` (no field). Tool 7 then
+unticks the channel by default, the overlays colour it, the scatter by electrode and the database report draw it red; the amber
+box and the *(not a flag)* lines are left out (the channel is in the flagged box). Up to 12 channels (a PSG, whose electrodes
+differ more from one another) nothing changes. Skip: `settings_differences` runs `comparison_flag` on the stored columns with
+`flag_channel`, so a participant processed with the alert apart has its flags compared (*Reprocess / Keep*). Tool 0's step 5
+follows (same function). **A box above Run** (`hd_info`) says, as soon as the channel configuration names more than 12 channels,
+that each report details only the flagged channels and that *Per-channel detail for every channel* (Advanced box) details them
+all, and that a channel far from the median channel is flagged (it follows the box's tick).
 
 **Reports of a high-density cap (2026-11-12, `tools/plan_brainvision.md` phase 5)**: above `HD_CHANNEL_THRESHOLD` (12)
 channels, measured on a synthetic 62-channel study (19.7 MB and 258 figures per participant report, 61 figures in the
@@ -2465,7 +2524,9 @@ re-referenced, then the declared channels dropped by `preprocess_raw`: a referen
 **Declared event files** (phase 4 bis): only the kinds declared in tool 4 are looked for (`event_files_in_use()`, the
 fields `event_txt_box` / `event_csv_box` hidden for a kind declared absent, `event_files_info` says which); a study declared
 without scored events hides `cb_event_reject` (unticked) with `event_none_info` (*Cross-cutting → Event sourcing*).
-**Heatmap** (phase 5): above 12 channels the hypnogram strip of `plot_rejection_heatmap` keeps a fixed height.
+**Heatmap** (phase 5): above 12 channels the hypnogram strip of `plot_rejection_heatmap` keeps a fixed height. Phase 5 bis
+(2026-11-13): the colour bar has its own column, so the hypnogram spans exactly the epochs of the matrix (every montage), and
+above 12 channels the rows are 0.14 in and the figure at most 14 in wide (*High-density montage support*).
 **Channel checks** (`channel_check_lib`, before the read): the reference channels declared in tool 2 against the median
 EEG channel, and the amplitude / mains of the declared ECG and chin EMG, as `⚠ channel check:` lines of the log only (no
 output changes). An EDF study gives the same outputs (the test chain's golden). The event-chain copies of the notebook
@@ -2829,8 +2890,8 @@ annotations are listed in `{file_id}_manualreject_report.html`.
 
 **Section 3: Per-epoch navigator**: walks the recomputed rejected set through **two combinable dropdowns**, **Stage** and **Method**, the latter listing the non-event methods, then `event (any)` and **one entry per event type** (`event: hypopnea`, …). Per-event-type filtering is the enabler for the common workflow *"check a few hypopnea-flagged epochs, see the EEG is unaffected, keep them all"*: the **"Apply to all shown"** button sets the current Keep/Reject toggle on **every epoch of the active filter**, with a homogeneity hint beside it (`all keep` / `all reject` / `MIXED: n keep / m reject`) so the bulk action is taken knowingly. The header line shows the recomputed `reject_method` (resolving `multiple` to **the actual method names**) plus `events: <type(s)>` from the `evt_<type>` metadata columns. The **keep / reject** toggle still overrides one epoch at a time in both directions.
 - **`Show` dropdown** (`dd_show`, before Stage): which epochs the navigator walks, built from the **automatic** decision (`base_reject`, never the final one, so the list does not shift while toggling), always **within the focus stages**. `flagged` (**default**: the classic list, outputs unchanged) = focus ∧ flagged. `kept` = focus ∧ not flagged: rejecting one is saved as **`manual_added`** (review-log `action = added`), the only UI path to it. `all` = every focus epoch. (The former `out of scope (view only)` mode, its grey banner and grey strip cells are gone: since the decision covers every epoch there is no out-of-scope epoch left; tick a stage and click Apply to review it.) The Method dropdown follows the mode: on `flagged`/`all` the selected methods (and event types) that flagged a focus epoch, on `kept` it lists `not counted: <method>` for the methods unticked in Section 1 that tool 7 still flagged on a kept epoch (`flag_<m>` metadata). A **`Contains event`** dropdown (every mode, default `(any)` = no filtering) keeps the epochs holding the **onset** of an event of that type, from `_event_onsets.tsv` (every mapped event, not only the flagging types) + the manual annotations. Outside `flagged`, **Apply to all shown** takes a confirming second click (`Confirm: set N epochs to reject/keep`, + Cancel; any re-render cancels it), since `all` + Reject would reject every focus epoch. What each output uses, stated in the Section-2 and Section-4 introductions: the Section-2 report = the **automatic** flags of the selection; Section 4, the saved decision tables and tool 9 = the **final** decision on **every** epoch. `n_seen` / `pct_seen` keep their denominator (focus ∧ flagged); the per-epoch `seen` column records kept epochs opened too.
-- **Widget order** (one screen for montage + PSD + table while navigating): navigator row (`Start navigator`, Show / Stage / Method / Contains event) + help line, then `◀ Prev` / slider / `Next ▶` / `Epoch n° offset` with the position line and the `reviewed n/N` strip **right above the plots** (montage, then detail panel), then the **Decision** row (Keep / Reject / Apply to all shown) + the status banner **right under them** (the most visible control), then the annotation box, then a *Display settings* group (`± context` + `Show EOG/EMG context`, `Channels` + `Table rows`, `Scale (µV/row)`), rarely touched during a review.
-- **Montage** (± context): stacked traces with the current epoch shaded, each current-epoch trace coloured by its recomputed flagging method, the steepest-gradient jump boxed, and method-coloured channel labels. **Fixed clinical display scales per channel type** with a left-margin **scale bar** each (see *Cross-cutting → Fixed clinical display scales*, four editable `Scale (µV/row)` fields). **Scored-event onsets** are drawn as vertical lines labelled **horizontally under the top border**, read from the `{file_id}_event_onsets.tsv` companion (no raw reload). A **right-side legend** gives the colour code (methods present in this epoch + context types + event onset). The **"Show EOG/EMG context"** checkbox now defaults **ON** (no-op when the `{file_id}_context-epo.fif` companion is absent). Two high-density controls sit on their own row: a **`Channels:`** dropdown (`all` / `flagged only` / `flagged + neighbours` / `worst 16`, defaulting to `flagged only` above the channel threshold) and a **`Table rows`** field for the detail panel's metric table (`DEFAULT_TABLE_ROWS` = 8 above the threshold, 0 = every channel below). Channels unticked in the Section-1 triage are removed from the montage too: a dropped channel is out of the decision, so it must not appear as flagging the epoch.
+- **Widget order** (one screen for montage + PSD + table while navigating): navigator row (`Start navigator`, Show / Stage / Method / Contains event) + help line, then `◀ Prev` / slider / `Next ▶` / `Epoch n° offset` with the position line and the `reviewed n/N` strip **right above the plots** (montage, then detail panel), then the **Decision** row (Keep / Reject / Apply to all shown) + the status banner **right under them** (the most visible control), then the annotation box, then a *Display settings* group (`± context` + `Show EOG/EMG context`, `Channels`, `Scale (µV/row)`), rarely touched during a review. The detail panel shows the figure and, beside it, the metric table of every channel in a box that scrolls (*High-density montage support*, 2026-11-13: the former `Table rows` field is gone). At load, the channel list says how many there are (`channels (62) = [...]`).
+- **Montage** (± context): stacked traces with the current epoch shaded, each current-epoch trace coloured by its recomputed flagging method, the steepest-gradient jump boxed, and method-coloured channel labels. **Fixed clinical display scales per channel type** with a left-margin **scale bar** each (see *Cross-cutting → Fixed clinical display scales*, four editable `Scale (µV/row)` fields). **Scored-event onsets** are drawn as vertical lines labelled **horizontally under the top border**, read from the `{file_id}_event_onsets.tsv` companion (no raw reload). A **right-side legend** gives the colour code (methods present in this epoch + context types + event onset). The **"Show EOG/EMG context"** checkbox now defaults **ON** (no-op when the `{file_id}_context-epo.fif` companion is absent). A high-density control sits on its own row: a **`Channels:`** dropdown (`all` / `flagged only` / `flagged + neighbours` / `worst 16`, defaulting to `flagged only` above the channel threshold). Channels unticked in the Section-1 triage are removed from the montage too: a dropped channel is out of the decision, so it must not appear as flagging the epoch.
 - **Detail panel** (one row): **PSD** (left) in **semilogy (the same units and scale as the Section-2 overlay**, so a non-expert reads both the same way) with the **median + IQR of the clean epochs of the current stage** drawn behind as a reference, the channels whose 1/f fit breaches a threshold drawn in their **method colour** with their **aperiodic fit dashed** (and their exponent in the legend) while unflagged channels stay grey and labelled once (*"this epoch, channels not flagged"*). There is deliberately **no "worst channel" emphasis** anymore: what matters is which channels actually breach a threshold. The **per-channel metric table** sits **right beside the PSD** (right), each value shown with its threshold and printed **red + bold when it breaches it**. The two topomaps take the remaining columns on a dense montage. The former **bottom row, mean band power (δ/θ/α/σ/β) + the 50 Hz / 40–47 Hz ratio, and the epoch spectrogram, is COMMENTED OUT** (with its channel selector in the navigator): neither drove the call on a single epoch, the band bars restating what the PSD above already shows and the spectrogram needing its own selector to say what the montage says faster. The code is kept verbatim in `plot_epoch_detail` behind a restore note (put back the 2-row gridspec, uncomment `ax_band`/`ax_spec` and blocks (c)/(d), and the selector row in the notebook). `spectro_ch_idx` stays in the signature, unused, so every caller keeps working. The figure is 13×3.3 in (18×3.3 with topomaps), height `DETAIL_FIG_HEIGHT_IN` in the lib (4.8 before 2026-10-05), low enough that the montage, the PSD and the table fit on one screen; the metric-table rows have a fixed height in points, so up to the 12-channel threshold the table still fits, and above it `Table rows` (default 8) keeps it short.
 
 **Section 4: Manual override, save & decision report**: a review strip (hypnogram + final keep/reject for **every** epoch, overridden epochs marked; `plot_review_strip(in_scope=None)`, the parameter only greys something for callers that still pass a mask) and counts (every epoch, the review focus, kept / rejected / rescued / newly-rejected). **Save** follows the toolkit's **`derivatives/` (data) vs `reports_*` (reports) split**, both output folders are precomputed once at participant load (`S['out_folder']` / `S['reports_folder']`), and writes **data before reports**:
@@ -3238,6 +3299,15 @@ closes with a **"Where to look"** section mapping every table the run produced, 
 question, which column to read (named for the averaging space actually selected), what to check before
 trusting a value, how to redraw each figure from the tables, and how to regroup participants by population
 variables.
+
+**Shares of clean epochs (2026-11-13, phase 5 bis of `tools/plan_brainvision.md`, every montage)**: the participant report's
+*Clean epochs per stage* writes `123 (85 %)` (clean epochs / epochs of that stage in the recording, `plot_clean_hypnogram`'s
+`stage_totals`); the database report's *Clean epochs per participant* writes the share kept above each bar (clean / clean +
+rejected + out of scope, in the stages shown, `clean_epoch_counts` from the stage table's `n_epochs`, `n_epochs_rejected`,
+`n_epochs_out_of_scope`; no share for a table written before those columns), followed by a table per participant
+(`clean_epochs_html`: epochs of the stages analysed, clean, the share, then `clean / every (share)` per stage, the excluded
+participants said). Above 12 channels, the two PSD figures of both reports are an overlay with the panels in a section that
+opens (*Cross-cutting → High-density montage support*). Reports only: every table is unchanged.
 
 **Validated** on `tools/test_data/test_spectral` (a tool-8bis-like fixture built from the tool-7 outputs of
 8_N1, 73 and 100 by `make_test_spectral.py`, 702 / 625 / 359 clean epochs and 3 / 2 / 4 channels, to

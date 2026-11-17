@@ -361,10 +361,12 @@ def plot_decision_heatmap(piv, dec, fid, custom_stages):
 
     # The channels x epochs matrix height scales with the channel count (like tool 7's heatmap); the
     # hypnogram and epoch-decision strips keep a FIXED height so they stay readable on dense montages.
-    fig_w   = max(8, min(n_ep / 6, 20))
+    # Above HD_CHANNEL_THRESHOLD channels: 0.14 in per row and at most 14 in wide, the fonts unchanged (a smaller figure).
+    hd      = n_ch > L.HD_CHANNEL_THRESHOLD
+    fig_w   = max(8, min(n_ep / 6, 14 if hd else 20))
     h_hyp   = 1.0                                                 # inches, fixed
     h_strip = 0.4                                                 # inches, fixed
-    h_mat   = min(max(0.22 * n_ch, 0.8), 12.0)                   # inches, ~0.22 in / channel row
+    h_mat   = min(max((0.14 if hd else 0.22) * n_ch, 0.8), 12.0)  # inches per channel row
     fig, (ax_h, ax_s, ax_m) = plt.subplots(
         3, 1, figsize=(fig_w, h_hyp + h_strip + h_mat + 0.7), sharex=True, layout='constrained',
         gridspec_kw={'height_ratios': [h_hyp, h_strip, h_mat]})

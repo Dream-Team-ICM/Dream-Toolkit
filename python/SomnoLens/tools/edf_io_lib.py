@@ -609,6 +609,24 @@ def load_events(edf_path, txt_suffix='_ScoredEvents_Export.txt', csv_suffix='_ev
     return df, source
 
 
+def load_event_file(path, recording_path):
+    """One scored-event file chosen by hand (tool 0's menu), read by its kind: a text export (.txt, its clock times
+    placed with the start of `recording_path`), a CSV (.csv) or a Profusion XML (.xml). Returns (DataFrame
+    Name/Start/Duration in seconds, source) like load_events, or (None, None): a .txt without a usable recording start
+    (e.g. a paused BrainVision recording), another kind of file."""
+    path = Path(path)
+    kind = path.suffix.lower()
+    df = None
+    if kind == '.txt':
+        rec_start = read_start_datetime(recording_path)
+        df = _events_df_from_txt(path, rec_start) if rec_start is not None else None
+    elif kind == '.csv':
+        df = _events_df_from_csv(path)
+    elif kind == '.xml':
+        df = _events_df_from_xml(path)
+    return (df, kind[1:]) if df is not None else (None, None)
+
+
 def load_event_remap(path):
     """Lenient loader for event_remap.json (strict parse, then repair one trailing comma
     before a closing } or ]). Returns {raw_label: canonical_label_or_None}."""

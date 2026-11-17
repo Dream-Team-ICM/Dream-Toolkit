@@ -921,7 +921,9 @@ def settings_differences(stored, do_resample, target_freq, do_highpass, hp_freq_
     for _, channel_row in stored.iterrows():
         reason = channel_row['suspect_reason']
         old = flag_criteria(reason.split(';')) if isinstance(reason, str) and reason.strip() else []
-        new = flag_criteria(flag_channel(channel_row, thresholds))
+        new = flag_criteria(flag_channel(channel_row, thresholds)
+                            + comparison_flag(channel_row.get('noisy_vs_median_pct', np.nan),
+                                              channel_row.get('flat_vs_median_pct', np.nan), len(stored)))
         if old != new:
             flag_rows.append((f"flags of {channel_row['channel']}", ', '.join(old) or 'none', ', '.join(new) or 'none'))
     if flag_rows and 'flag_thresholds' in stored.columns:
@@ -1097,15 +1099,39 @@ def compute_channel_metrics(raw, sf, file_id, thresholds, hypno_vec, custom_stag
     comparison = compare_channels(raw, sf)
     for row in file_rows:
         row.update(comparison[row['channel']])
+        extra = comparison_flag(row['noisy_vs_median_pct'], row['flat_vs_median_pct'], len(raw.ch_names))
+        if extra:
+            ch_flags[row['channel']] = ch_flags[row['channel']] + extra
+            row['suspect_reason'] = '; '.join(ch_flags[row['channel']])
+            row['exclude'] = True
     return ch_metrics, ch_flags, file_rows, file_stage_rows
+
+
+def comparison_flag(noisy_pct, flat_pct, n_channels):
+    """The comparison with the median channel as a flag criterion, above HD_CHANNEL_THRESHOLD channels only: [] or one
+    reason, e.g. 'noisy_vs_median=100% of the epochs > 20% (over 3 times the median channel)'. On a cap, the median
+    channel of an epoch is a sound reference, and a disconnected electrode clips nothing (no physical range): none of the
+    criteria of flag_channel sees it. With fewer channels (a PSG), the electrodes differ too much from one another: the
+    comparison stays an alert apart (compare_channels)."""
+    if n_channels <= HD_CHANNEL_THRESHOLD:
+        return []
+    share = 100 * CC.SHARE
+    if noisy_pct > share:      # NaN (fewer than 3 channels, a table written before the columns) is never over
+        return [f'noisy_vs_median={noisy_pct:.0f}% of the epochs > {share:g}% (over {CC.NOISY_RATIO:g} times the median '
+                'channel)']
+    if flat_pct > share:
+        return [f'flat_vs_median={flat_pct:.0f}% of the epochs > {share:g}% (under {CC.DEAD_RATIO:g} times the median '
+                'channel)']
+    return []
 
 
 def compare_channels(raw, sf):
     """Every channel compared with the median channel of the same 30-s epoch (channel_check_lib, every epoch of the
     night, filtered 0.3-35 Hz): {channel: {'noisy_vs_median_pct', 'flat_vs_median_pct', 'comparison_alert'}}. The flags
     judge each channel alone; this sees what only a comparison shows on a dense montage: a disconnected electrode is
-    many times larger than its neighbours. An alert apart, never a flag (not in suspect_reason / exclude, so tool 7
-    unticks nothing more). NaN and no alert with fewer than 3 channels (no median)."""
+    many times larger than its neighbours. Up to HD_CHANNEL_THRESHOLD channels an alert apart, never a flag (not in
+    suspect_reason / exclude, so tool 7 unticks nothing more); above, also a flag (comparison_flag). NaN and no alert
+    with fewer than 3 channels (no median)."""
     names = list(raw.ch_names)
     empty = {ch: {'noisy_vs_median_pct': np.nan, 'flat_vs_median_pct': np.nan, 'comparison_alert': ''} for ch in names}
     epochs = np.arange(int(raw.n_times // (CC.EPOCH_S * sf)))

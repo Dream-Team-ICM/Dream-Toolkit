@@ -298,6 +298,14 @@ hypnogram strip keeps about one inch, tool 9's figures become a grid of 8 column
 have a position (an eye electrode without one no longer removes them), tool 6's overlays name only the flagged channels and its
 scatter by electrode writes the names upright; then tool 6 on a 20-channel study details only the dead electrode and draws one
 figure per metric in the database report. That nothing moves at 12 channels or fewer is proven by `refactor_check.py`.
+Since phase 5 bis it also checks that tool 7's hypnogram spans exactly the epochs of its heatmap (4 and 62 channels), that tool
+8bis's decision figure is smaller at 62 channels, that the detail table of tools 8 and 0 lists every channel in a box that scrolls
+(the detail panel has four topomaps), that tool 6 flags a channel ten times larger than the others above 12 channels and not at
+12, and asks about a participant made before, that tool 9 writes the shares of clean epochs (both reports, any montage) and, at
+62 channels, overlays the PSD with the panels in a section that opens. Tool 6 on the 20-channel study shows the box above Run.
+`test_ui_lib.py` checks that a pipeline bar and its legend line up with the bar above, and that no page builds its own bar;
+`test_brainvision_chain.py` checks tool 0's menu of scored-event files, its step 5 starting as tool 6 prepared the participant,
+and the explorer showing the channels ticked in step 6.
 
 `test_context_gain.py` checks the **Divide by** of tool 2 (an ECG and a chin EMG recorded through an adapter that amplifies them
 100 times, which the file does not say):

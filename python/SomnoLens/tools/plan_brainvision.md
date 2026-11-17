@@ -1,7 +1,8 @@
 # Plan : format BrainVision (.vhdr, .vmrk, .eeg) et une seule version de chaque outil
 
-**Statut** : version 3 du 2026-11-06, confirmée. Phases 1 à 5 faites (4 bis et 5 commitées le 2026-11-12). Phase 4 ter confirmée,
-en cours. Phase 5 bis (retours de ton inspection visuelle) **à relire et confirmer**. Chaque phase est validée avant la suivante.
+**Statut** : version 3 du 2026-11-06, confirmée. Phases 1 à 5 et 4 ter faites et commitées. Phase 5 bis (retours de ton
+inspection visuelle) confirmée et faite le 2026-11-14, à vérifier à l'écran. Restent la phase 6 (jumeaux Curry) et la phase 7.
+Chaque phase est validée avant la suivante.
 **Objectif immédiat** : pouvoir inspecter ces données et faire l'autoscoring (phases 1 à 3). Le reste de la chaîne suit
 (phase 4), puis l'affichage haute densité (phase 5) et la suppression des jumeaux Curry (phase 6).
 **Principe (ta remarque)** : les outils servent à d'autres jeux de données. Toute règle doit valoir pour n'importe quelle
@@ -619,6 +620,17 @@ absence à 12, l'alignement de la heatmap, les tailles 8bis / 7, la superpositio
 le tableau HTML et les 4 topographies, le menu des événements de l'outil 0), puis standard sur les outils 0, 6, 7, 8, 8bis, 9.
 `refactor_check.py` sur la chaîne EDF : tout identique sauf les changements voulus, listés dans `INTENDED_CHANGES` (figure de la heatmap
 du rapport de l'outil 7, figure et tableau des époques propres des rapports de l'outil 9).
+
+**Précisions apportées en faisant** (2026-11-14) :
+- les rapports HTML ne sont pas comparés au golden (seulement les tables) : `INTENDED_CHANGES` n'a rien à recevoir.
+  `refactor_check.py` montre les 9 rapports changés de la chaîne synthétique (4 de l'outil 7, 5 de l'outil 9), toutes les tables
+  identiques ;
+- les jumeaux Curry, gelés, passent encore une largeur de barre et un nombre de lignes de tableau : ces deux paramètres sont gardés,
+  ignorés, jusqu'à la phase 6 ;
+- outil 0, menu des événements : le choix vaut pour ce que montre l'explorateur ; les étapes 4 et 6 lisent les événements comme les
+  outils 5 et 7, pour que leurs résultats restent les leurs (dit sous le menu) ;
+- outil 0, étape 5 : la préparation de l'outil 6 est reprise au choix du participant, et une ligne la dit ;
+- la superposition de l'outil 9 trace les canaux en gris clair : le gris de l'éveil, celui de la moyenne, se confondait avec eux.
 
 ### Phase 6 : suppression des jumeaux Curry
 

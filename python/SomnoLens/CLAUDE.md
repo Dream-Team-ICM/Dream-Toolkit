@@ -158,8 +158,9 @@ The "what to do / what not to break" reminders, grouped by theme. Each points to
   → SPEC *Cross-cutting → High-density montage support* + §8.
 - **Channel checks warn, they never decide (`tools/channel_check_lib.py`)**: each channel against the median channel of the
   same epoch (noisy / nearly flat), the EOG, the ECG / chin EMG amplitude and mains. Tool 3bis checks each model's channels
-  (additive `channel_quality_warnings`), tool 6 shows the comparison in its own columns, **never as a flag** (tool 7 unticks
-  nothing more). An EOG recorded against a BrainVision online reference gets the EEG's reference in 3bis (`eog_reference`).
+  (additive `channel_quality_warnings`), tool 6 shows the comparison in its own columns, **not a flag up to 12 channels**
+  (tool 7 unticks nothing more). **The one exception: above 12 channels tool 6 flags it** (`quality_lib.comparison_flag`,
+  a cap's median channel is a sound reference and a disconnected electrode clips nothing) → SPEC §6. An EOG recorded against a BrainVision online reference gets the EEG's reference in 3bis (`eog_reference`).
   → SPEC *Cross-cutting → Channel checks* + §3bis + §6.
 - **Per-epoch montage scales are FIXED, never autoscaled** (`DISPLAY_SCALE_UV` = EEG 150 / EOG 300 /
   EMG 100 / ECG 1000 µV per row, clinical conventions): window-based autoscaling made the same waveform
@@ -201,7 +202,8 @@ The "what to do / what not to break" reminders, grouped by theme. Each points to
   (machine) + HTML (human). → SPEC *Cross-cutting → Single delivery*.
 - **Voila page conventions = `tools/ui_lib.py`** (imported as `UI` by every page and Curry twin): intro template
   + References, `section_html` / `subsection_html` (continuous numbering), message colours, buttons by role
-  (`run` / `save` green, `read` blue = **Scan** as the entry button, `caution`, `helper`), widths, `picker_title`
+  (`run` / `save` green, `read` blue = **Scan** as the entry button, `caution`, `helper`), widths, **every progress bar**
+  (`progress_bar`, and `phase_bar` for a pipeline bar with its legend of steps: never an `IntProgress` in a page), `picker_title`
   / `help_html` / `text_block` (a long widget text needs one: a widget HTML spaces wrapped lines by 28 px),
   progress bars, suffix menus (`suffix_menu`: the field stays what the tool reads), the **Inputs found** list
   (`input_row`: the study folder is the only picker to use, the tool finds the rest, **the picker stays what the run

@@ -178,21 +178,63 @@ def log_output(max_height='400px'):
 
 
 # ---------------------------------------------------------------------------
-# Progress bar: blue while running, green when done, orange when some items failed
+# Progress bars: blue while running, green when done, orange when some items failed. Every bar of every page has the
+# same width, its label in a column of LABEL_WIDTH and its text on the right: two bars one under the other, and the
+# legend of steps glued under a pipeline bar, line up by construction (the bar itself carries no label, whose inner
+# margins shifted a legend placed by calculation).
 # ---------------------------------------------------------------------------
-def progress_bar(description='Participants:', width=FIELD_WIDTH):
+PROGRESS_WIDTH = WIDE_WIDTH                                                     # label included
+PROGRESS_TRACK = f'{int(PROGRESS_WIDTH[:-2]) - int(LABEL_WIDTH[:-2])}px'        # the bar itself
+PHASE_COLORS = ['#e7ecff', '#eef7e7', '#fff4dc', '#ffeaea', '#f1e8fb', '#e6f4f6']   # the steps of a pipeline bar, in turn
+
+
+def _progress_parts(description):
+    """The label column, the bar and the text on its right, shared by both bars."""
+    label = widgets.HTML(f'<div style="text-align:right; padding-right:8px;">{description}</div>',
+                         layout=widgets.Layout(width=LABEL_WIDTH, min_width=LABEL_WIDTH, margin='0'))
+    bar = widgets.IntProgress(value=0, min=0, max=1, bar_style='info',
+                              layout=widgets.Layout(width=PROGRESS_TRACK, margin='0'))
+    text = widgets.HTML('', layout=widgets.Layout(margin='0 0 0 8px'))
+    return label, bar, text
+
+
+def progress_bar(description='Participants:', width=None):
     """A progress bar followed by its 'i / N' text. Returns (bar, row): set bar.max and bar.value as usual
-    and put `row` in the page; the text follows the bar by itself. `width` (label included) lines it up with
-    a second bar under it (the 'pipeline' bar of tools 5, 7, 9)."""
-    bar = widgets.IntProgress(value=0, min=0, max=1, description=description, bar_style='info',
-                              style=LABEL_STYLE, layout=widgets.Layout(width=width))
-    text = widgets.Label('')
+    and put `row` in the page; the text follows the bar by itself. `width` is ignored (every bar has PROGRESS_WIDTH):
+    kept for the frozen Curry twins, which still pass one, until their removal (tools/plan_brainvision.md, phase 6)."""
+    label, bar, text = _progress_parts(description)
 
     def _update_text(_=None):
         text.value = f'{bar.value} / {bar.max}' if bar.value else ''
 
     bar.observe(_update_text, names=['value', 'max'])
-    return bar, widgets.HBox([bar, text])
+    return bar, widgets.HBox([label, bar, text], layout=widgets.Layout(align_items='flex-start'))
+
+
+def phase_bar(description='Pipeline:'):
+    """The second bar of a run, under the progress_bar of the participants: one participant's steps, in units of time
+    cost, with the legend of its steps glued under the bar (a segment per step, its width following its cost).
+    Returns (bar, row, set_phases, step_text): set bar.max and bar.value as usual, call set_phases([(label, cost,
+    tooltip), ...]) when the steps are known ([] hides the legend), and write the current step into step_text.value
+    (HTML, on the right of the bar)."""
+    label, bar, step_text = _progress_parts(description)
+    legend = widgets.HTML('', layout=widgets.Layout(width=PROGRESS_TRACK, margin='0'))
+
+    def set_phases(phases):
+        total = max(1, sum(cost for _, cost, _ in phases))
+        segments = []
+        for k, (name, cost, tip) in enumerate(phases):
+            border = '' if k == len(phases) - 1 else 'border-right:1px solid #bbb;'
+            segments.append(f'<div title="{tip}" style="width:{100 * cost / total:.1f}%;{border}text-align:center;'
+                            f'background:{PHASE_COLORS[k % len(PHASE_COLORS)]};overflow:hidden;white-space:nowrap;">'
+                            f'{name}</div>')
+        legend.value = ('<div style="display:flex;width:100%;box-sizing:border-box;height:14px;font-size:9px;'
+                        'line-height:14px;color:#444;border:1px solid #bbb;border-top:none;border-radius:0 0 3px 3px;'
+                        'overflow:hidden;">' + ''.join(segments) + '</div>') if phases else ''
+
+    row = widgets.HBox([label, widgets.VBox([bar, legend], layout=widgets.Layout(margin='0')), step_text],
+                       layout=widgets.Layout(align_items='flex-start'))
+    return bar, row, set_phases, step_text
 
 
 def finish_progress(bar, n_failed=0):

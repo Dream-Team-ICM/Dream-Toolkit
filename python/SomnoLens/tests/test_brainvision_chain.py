@@ -309,6 +309,36 @@ def test_tool0_leaves_the_online_reference_out_like_tools_6_and_7(tmp_path):
     assert 'Cz' not in set(step5['channel']) and 'C3' in set(step5['channel'])   # left out of step 5, like tool 6
 
 
+@pytest.mark.tool0
+def test_tool0_events_menu_preparation_of_tool_6_and_channels_of_step_6(tmp_path):
+    """Phase 5 bis: the scored-event file chosen in a menu, step 5 starting as tool 6 prepared the participant (resampled
+    here), the explorer showing only the channels ticked in step 6."""
+    data, _ = make_nap_study(tmp_path / 'data', {'bv01': entry()}, events=True)
+    (data / 'bv01_other_events.csv').write_text('Name,Start,Duration\nMy event,100.0,5.0\n', encoding='utf-8')
+    reports = data / 'reports_quality_overview'
+    reports.mkdir()
+    pd.DataFrame({'file_id': ['bv01'], 'channel': ['C3'], 'signal_preparation': ['resampled to 128 Hz'],
+                  'suspect_reason': [''], 'exclude': [False]}).to_csv(reports / 'bv01_quality_metrics.tsv', sep='\t',
+                                                                       index=False)
+    with NotebookSession(T0) as nb:
+        nb.pick('fc_data', data)
+        nb.set('dd_part', 'bv01')
+        assert nb.value('cb_resample5.value') and nb.value('it_target5.value') == 128 and not nb.value('cb_hp5.value')
+        assert 'resampled to 128 Hz' in nb.value('html_prep5.value')
+        menu = nb.value('[v for _, v in dd_events.options]')
+        assert menu[0] == 'as tools 5 and 7' and menu[-2:] == ['(none)', 'Other file…']
+        assert 'bv01_ScoredEvents_Export.txt' in menu and 'bv01_other_events.csv' in menu
+        nb.set('dd_events', 'bv01_other_events.csv')
+        nb.click('btn_run1')
+        assert nb.value("STATUS['1']") == 'up_to_date', nb.widget_text()[-2000:]
+        assert nb.value("STATE['events_source']") == 'csv'
+        assert nb.value("list(STATE['events']['Name'])") == ['My event']
+        assert any('chosen here' in note for note in nb.value("STATE['notes']"))
+        nb.set("CH6['C3']", False)
+        nb.set('dd_channels', 'step6')
+        assert 'Montage error' not in nb.widget_text()
+
+
 @pytest.mark.tool4
 @pytest.mark.tool5
 @pytest.mark.tool7

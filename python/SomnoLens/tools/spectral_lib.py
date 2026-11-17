@@ -8,8 +8,10 @@ PSD in uV^2/Hz (Welch or multitaper with normalization='full'), the specparam ap
 (the band powers always use the raw PSD), band integrals as rectangular sums, the peak model at specparam's
 defaults (deliberately not tool 7's: see SPEC section 9).
 """
+import io
 import os
 import json
+import base64
 import hashlib
 from pathlib import Path
 
@@ -872,9 +874,10 @@ def stage_curves(values, masks, min_epochs):
 
 
 # --- 1. hypnogram of the epochs that survived the rejection ------------------
-def plot_clean_hypnogram(meta, custom_stages, file_id, n_total=None):
+def plot_clean_hypnogram(meta, custom_stages, file_id, n_total=None, stage_totals=None):
     """Stage of every surviving epoch against its ORIGINAL epoch index, so the epochs removed
-    by tools 7/8/8bis show up as gaps, plus the clean-epoch count per stage."""
+    by tools 7/8/8bis show up as gaps, plus the clean-epoch count per stage. `stage_totals` {stage: epochs of
+    that stage in the recording} adds the share kept beside each count, '123 (85 %)'."""
     stage_y, colors, ytick_pos, ytick_lab = stage_style(custom_stages)
     epoch_idx = meta['epoch_idx'].values
     stages = meta['stage'].astype(str).values
@@ -900,8 +903,12 @@ def plot_clean_hypnogram(meta, custom_stages, file_id, n_total=None):
     ax.set_xticklabels(['REM' if s == 'R' else s for s in order])
     ax.set_ylabel('clean epochs')
     ax.set_title('Clean epochs per stage')
-    for i, c in enumerate(counts):
-        ax.text(i, c, str(c), ha='center', va='bottom', fontsize=8)
+    for i, (s, c) in enumerate(zip(order, counts)):
+        total_s = (stage_totals or {}).get(s)
+        text = f'{c} ({100.0 * c / total_s:.0f} %)' if total_s else str(c)
+        ax.text(i, c, text, ha='center', va='bottom', fontsize=8)
+    if stage_totals:
+        ax.set_ylim(0, max(counts, default=0) * 1.15 + 1)      # room for the label of the tallest bar
     fig.tight_layout()
     return fig
 
@@ -994,7 +1001,8 @@ def plot_loglog_with_fit(freqs, psds_uV2, ap_log10, masks, ch_names, custom_stag
                 ax.plot(freqs, ap_curves[stage][0][ci], color=col, ls='--', lw=1.0, alpha=0.8)
         ax.axvspan(fit_range[0], fit_range[1], color='#000000', alpha=0.04)
         ax.set_xscale('log')
-        ax.set_xticks([0.5, 1, 2, 4, 8, 16, 30, 45])
+        # 30 and 45 Hz overlap on the small panels of a high-density grid: 30 left out there
+        ax.set_xticks([0.5, 1, 2, 4, 8, 16, 45] if _hd(len(ch_names)) else [0.5, 1, 2, 4, 8, 16, 30, 45])
         ax.get_xaxis().set_major_formatter(plt.ScalarFormatter())
         ax.set_xlim(freqs[0], freqs[-1])
         ax.set_title(ch)
@@ -1367,15 +1375,28 @@ def plot_group_aperiodic(ap_df, custom_stages):
     return fig
 
 
+def clean_epoch_counts(stage_df):
+    """Per participant and stage, from tool 9's stage table (a row per stage, channel and band: the largest count over the
+    channels): (clean, every epoch of the stage = clean + rejected + out of scope), two participants x stages
+    DataFrames; the second None for a table written before its rejected / out-of-scope columns."""
+    sub = stage_df.drop_duplicates(['file_id', 'stage', 'channel'])
+    clean = sub.groupby(['file_id', 'stage'])['n_epochs'].max().unstack(fill_value=0)
+    if not {'n_epochs_rejected', 'n_epochs_out_of_scope'} <= set(sub.columns):
+        return clean, None
+    every = sub['n_epochs'] + sub['n_epochs_rejected'] + sub['n_epochs_out_of_scope']
+    total = sub.assign(n_all=every).groupby(['file_id', 'stage'])['n_all'].max().unstack(fill_value=0)
+    return clean, total.reindex(index=clean.index, columns=clean.columns, fill_value=0)
+
+
 def plot_group_counts(stage_df):
-    """Clean epochs per participant, split by stage - the sample size behind every value."""
+    """Clean epochs per participant, split by stage - the sample size behind every value - with the share of the
+    epochs kept above each bar (in the stages shown)."""
     if stage_df is None or len(stage_df) == 0:
         return None
     sub = stage_df[stage_df['stage'].isin(AASM_STAGES)]
     if len(sub) == 0:
         return None
-    counts = (sub.drop_duplicates(['file_id', 'stage', 'channel'])
-              .groupby(['file_id', 'stage'])['n_epochs'].max().unstack(fill_value=0))
+    counts, totals = clean_epoch_counts(sub)
     counts = counts.reindex(columns=[s for s in AASM_STAGES if s in counts.columns])
     fig, ax = plt.subplots(figsize=(max(6.0, 0.45 * len(counts) + 3), 4.0))
     bottom = np.zeros(len(counts))
@@ -1384,13 +1405,153 @@ def plot_group_counts(stage_df):
         ax.bar(range(len(counts)), vals, bottom=bottom,
                color=BASE_STAGE_COLORS.get(stage, '#888888'), label=stage)
         bottom += vals
+    if totals is not None:
+        every = totals.reindex(columns=counts.columns).sum(axis=1).values
+        for i, (kept, n) in enumerate(zip(bottom, every)):
+            if n:
+                ax.text(i, kept, f'{100.0 * kept / n:.0f} %', ha='center', va='bottom', fontsize=7,
+                        rotation=90 if len(counts) > 12 else 0)
+        ax.set_ylim(0, max(bottom.max(initial=0) * 1.15, 1))
     ax.set_xticks(range(len(counts)))
     ax.set_xticklabels(counts.index, rotation=90, fontsize=7)
     ax.set_ylabel('clean epochs')
-    ax.set_title('Clean epochs per participant and stage')
+    ax.set_title('Clean epochs per participant and stage' + (' (% = share of the epochs kept)' if totals is not None
+                                                            else ''))
     ax.legend(fontsize=8, ncol=5)
     fig.tight_layout()
     return fig
+
+
+def clean_epochs_html(stage_df, excluded_col='participant_excluded'):
+    """The table beside the figure of the database report: per participant, the epochs of the stages analysed, the clean
+    ones and their share, then per stage 'clean / every (share)'. Every participant of the tables, the excluded ones
+    said (they are left out of the figures, not of the tables)."""
+    if stage_df is None or len(stage_df) == 0:
+        return None
+    clean, totals = clean_epoch_counts(stage_df)
+    stages = [s for s in AASM_STAGES if s in clean.columns] + sorted(s for s in clean.columns if s not in AASM_STAGES)
+    excluded = (stage_df.groupby('file_id')[excluded_col].first().astype(bool)
+                if excluded_col in stage_df.columns else pd.Series(dtype=bool))
+    cell = 'padding:2px 10px; text-align:right; border-bottom:1px solid #eee;'
+    head = 'padding:3px 10px; text-align:right; border-bottom:1px solid #999; background:#f5f5f5;'
+    header = (f'<th style="{head} text-align:left;">participant</th>'
+              + (f'<th style="{head}">epochs</th>' if totals is not None else '')
+              + f'<th style="{head}">clean</th>' + (f'<th style="{head}">kept</th>' if totals is not None else '')
+              + ''.join(f'<th style="{head}">{s}</th>' for s in stages))
+    rows = []
+    for fid in clean.index:
+        kept = int(clean.loc[fid, stages].sum())
+        every = int(totals.loc[fid, stages].sum()) if totals is not None else None
+        per_stage = []
+        for s in stages:
+            c = int(clean.loc[fid, s])
+            n = int(totals.loc[fid, s]) if totals is not None else None
+            per_stage.append(f'{c} / {n} ({100.0 * c / n:.0f} %)' if n else (str(c) if n is None else '-'))
+        name = fid + (' <span style="color:#c62828;">(excluded)</span>' if bool(excluded.get(fid, False)) else '')
+        rows.append(f'<tr><td style="{cell} text-align:left;">{name}</td>'
+                    + (f'<td style="{cell}">{every}</td>' if totals is not None else '')
+                    + f'<td style="{cell}">{kept}</td>'
+                    + (f'<td style="{cell}">{100.0 * kept / every:.0f} %</td>' if totals is not None and every
+                       else ('<td></td>' if totals is not None else ''))
+                    + ''.join(f'<td style="{cell}">{v}</td>' for v in per_stage) + '</tr>')
+    note = ('<p><small>Epochs of the stages analysed. Clean = kept by the rejection decision of tool 8 / 8bis; the others '
+            'were rejected or out of scope.</small></p>')
+    return (f'<table style="border-collapse:collapse; font-size:90%;"><thead><tr>{header}</tr></thead>'
+            f'<tbody>{"".join(rows)}</tbody></table>' + note)
+
+
+# --- high-density montages: the PSD of every channel overlaid, the per-electrode panels in a section that opens ---
+def figure_details_html(fig, summary):
+    """A figure inside a section of the report that opens on a click (<details>; MNE's report cannot fold a figure), as
+    an embedded PNG. The figure is closed."""
+    buf = io.BytesIO()
+    fig.savefig(buf, format='png', dpi=100, bbox_inches='tight')
+    plt.close(fig)
+    data = base64.b64encode(buf.getvalue()).decode('ascii')
+    return (f'<details><summary style="cursor:pointer; font-weight:bold;">{summary} '
+            f'<span style="font-weight:normal; color:#666;">(click to open)</span></summary>'
+            f'<img src="data:image/png;base64,{data}" style="max-width:100%;"></details>')
+
+
+OVERLAY_CHANNEL_GREY = '0.8'     # one channel of an overlay: lighter than the grey of wake, whose mean is drawn on it
+
+
+def _overlay_axes(n_panels):
+    fig, axes = plt.subplots(1, n_panels, figsize=(min(4.2 * n_panels + 1.0, 20.0), 3.8), sharey=True, squeeze=False)
+    return fig, axes[0]
+
+
+def _finish_overlay(fig, axes, ylabel, title, n_ch):
+    axes[0].set_ylabel(ylabel)
+    axes[0].legend(handles=[matplotlib.lines.Line2D([], [], color=OVERLAY_CHANNEL_GREY, lw=0.8, label='one channel'),
+                            matplotlib.lines.Line2D([], [], color='#333333', lw=2.0,
+                                                    label=f'mean of the {n_ch} channels (stage colour)')], fontsize=8)
+    fig.suptitle(title)
+    fig.tight_layout()
+    return fig
+
+
+def plot_psd_overlay(freqs, masks, ch_names, custom_stages, min_epochs, title, ylabel,
+                     values_db=None, values_lin=None):
+    """The mean PSD per stage of every channel overlaid, one panel per stage: each channel in thin grey, their mean in
+    the stage's colour (the overview of a high-density montage; plot_psd_per_stage draws the panel of each electrode).
+    Averaged like plot_psd_per_stage's solid curve (log space when values_db is given)."""
+    _, colors, _, _ = stage_style(custom_stages)
+    values, curve = (values_db, _curve_from_log) if values_db is not None else (values_lin, _curve_from_lin)
+    stages = [s for s, m in masks.items() if int(m.sum()) >= max(1, min_epochs)]
+    if not stages:
+        return None
+    fig, axes = _overlay_axes(len(stages))
+    for ax, stage in zip(axes, stages):
+        mean, _, _, n = curve(values, masks[stage])           # (n_ch, n_freqs) in dB
+        for ci in range(len(ch_names)):
+            ax.plot(freqs, mean[ci], color=OVERLAY_CHANNEL_GREY, lw=0.5, alpha=0.7)
+        with np.errstate(invalid='ignore'):
+            ax.plot(freqs, np.nanmean(mean, axis=0), color=colors.get(stage, '#333333'), lw=2.0)
+        ax.set_title(f'{stage} (n={n} epochs)')
+        ax.set_xlabel('Frequency (Hz)')
+        ax.set_xlim(freqs[0], freqs[-1])
+        ax.grid(alpha=0.2)
+    return _finish_overlay(fig, axes, ylabel, f'{title}: every channel', len(ch_names))
+
+
+def plot_group_psd_overlay(psd_df, custom_stages, value_col=None, ylabel='PSD (dB/Hz)',
+                           title='Group mean PSD per stage'):
+    """plot_group_psd for a high-density montage: one panel per stage, the group mean of every channel in thin grey,
+    their mean in the stage's colour."""
+    if psd_df is None or len(psd_df) == 0:
+        return None
+    value_col = value_col or pick_psd_column(psd_df)
+    if value_col is None or value_col not in psd_df.columns:
+        return None
+    _, colors, _, _ = stage_style(custom_stages)
+    stages = [s for s in AASM_STAGES + list(custom_stages) if s in set(psd_df['stage'])]
+    if not stages:
+        return None
+    n_ch = psd_df['channel'].nunique()
+    fig, axes = _overlay_axes(len(stages))
+    for ax, stage in zip(axes, stages):
+        sub = psd_df[psd_df['stage'] == stage]
+        piv = sub.pivot_table(index='freq_hz', columns='channel', values=value_col, aggfunc='mean')
+        for ch in piv.columns:
+            ax.plot(piv.index.values, piv[ch].values, color=OVERLAY_CHANNEL_GREY, lw=0.5, alpha=0.7)
+        ax.plot(piv.index.values, piv.mean(axis=1).values, color=colors.get(stage, '#333333'), lw=2.0)
+        ax.set_title(f"{stage} (n={sub['file_id'].nunique()} participants)")
+        ax.set_xlabel('Frequency (Hz)')
+        ax.grid(alpha=0.2)
+    return _finish_overlay(fig, axes, ylabel, f'{title}: every channel', n_ch)
+
+
+def group_psd_items(psd_df, custom_stages, item_title, value_col=None, ylabel='PSD (dB/Hz)',
+                    title='Group mean PSD per stage'):
+    """The report items of a group PSD figure: the panels of every channel (plot_group_psd), or above
+    HD_CHANNEL_THRESHOLD channels their overlay, with the panels in a section that opens."""
+    panels = plot_group_psd(psd_df, custom_stages, value_col=value_col, ylabel=ylabel, title=title)
+    if panels is None or not _hd(psd_df['channel'].nunique()):
+        return [('fig', item_title, panels)]
+    return [('fig', item_title, plot_group_psd_overlay(psd_df, custom_stages, value_col=value_col, ylabel=ylabel,
+                                                       title=title)),
+            ('html', f'{item_title}, per electrode', figure_details_html(panels, 'Panels of each electrode'))]
 
 
 # ---------------------------------------------------------------------------------------------------------
@@ -1578,21 +1739,31 @@ def participant_report_items(p, cfg, source, custom, tables, meta, ch_names, fre
     items = []
     if p.get('excluded'):
         items.append(('html', 'Excluded participant', PSL.excluded_banner_html(p['exclude_reason'])))
-    items += [('fig', 'Clean epochs', plot_clean_hypnogram(meta_k, custom, fid, n_total=len(meta))),
-              ('fig', 'Mean PSD per stage',
-               plot_psd_per_stage(freqs, masks_k, ch_k, custom, cfg['min_epochs'],
-                                  'Mean PSD per stage', 'PSD (dB/Hz)',
-                                  values_db=psd_db if use_log else None,
-                                  values_lin=psd_lin if use_lin else None))]
+    stage_totals = meta['stage'].astype(str).value_counts().to_dict()        # every epoch of the recording
+    items += [('fig', 'Clean epochs', plot_clean_hypnogram(meta_k, custom, fid, n_total=len(meta),
+                                                           stage_totals=stage_totals))]
+
+    def psd_items(item_title, title, ylabel, values_db, values_lin):
+        """One PSD figure: the panels of every channel, or above HD_CHANNEL_THRESHOLD channels their overlay with
+        the panels in a section that opens."""
+        if not _hd(len(ch_k)):
+            return [('fig', item_title, plot_psd_per_stage(freqs, masks_k, ch_k, custom, cfg['min_epochs'], title,
+                                                           ylabel, values_db=values_db, values_lin=values_lin))]
+        overlay = plot_psd_overlay(freqs, masks_k, ch_k, custom, cfg['min_epochs'], title, ylabel,
+                                   values_db=values_db, values_lin=values_lin)
+        panels = plot_psd_per_stage(freqs, masks_k, ch_k, custom, cfg['min_epochs'], title, ylabel,
+                                    values_db=values_db, values_lin=values_lin)
+        return [('fig', item_title, overlay),
+                ('html', f'{item_title}, per electrode', figure_details_html(panels, 'Panels of each electrode'))]
+
+    items += psd_items('Mean PSD per stage', 'Mean PSD per stage', 'PSD (dB/Hz)',
+                       psd_db if use_log else None, psd_lin if use_lin else None)
     if ap_k is not None:
         # In linear space the "1/f removed" spectrum is the PSD / aperiodic-fit ratio, whose dB is
         # exactly the log-space difference averaged the other way round.
-        items.append(('fig', 'PSD after removing the aperiodic component',
-                      plot_psd_per_stage(freqs, masks_k, ch_k, custom, cfg['min_epochs'],
-                                         'Mean PSD per stage after removing the aperiodic component',
-                                         'Power above the 1/f fit (dB)',
-                                         values_db=(psd_db - 10.0 * ap_k) if use_log else None,
-                                         values_lin=(psd_lin / 10.0 ** ap_k) if use_lin else None)))
+        items += psd_items('PSD after removing the aperiodic component',
+                           'Mean PSD per stage after removing the aperiodic component', 'Power above the 1/f fit (dB)',
+                           (psd_db - 10.0 * ap_k) if use_log else None, (psd_lin / 10.0 ** ap_k) if use_lin else None)
         items.append(('fig', 'log-log PSD with the aperiodic fit',
                       plot_loglog_with_fit(freqs, psds_k, ap_k, masks_k, ch_k, custom,
                                            cfg['min_epochs'],

@@ -64,13 +64,31 @@ def test_buttons_follow_their_role(role):
 
 def test_progress_bar_text_follows_the_bar():
     bar, row = UI.progress_bar('Participants:')
-    assert row.children[0] is bar and row.children[1].value == ''
+    label, in_row, text = row.children
+    assert in_row is bar and 'Participants:' in label.value and text.value == ''
     bar.max, bar.value = 10, 3
-    assert row.children[1].value == '3 / 10'
+    assert text.value == '3 / 10'
     UI.finish_progress(bar)
     assert bar.bar_style == 'success'
     UI.finish_progress(bar, n_failed=1)
     assert bar.bar_style == 'warning'
+
+
+def test_a_pipeline_bar_lines_up_with_the_bar_above_it():
+    bar, row = UI.progress_bar('Participants:')
+    step, step_row, set_phases, step_text = UI.phase_bar('Pipeline:')
+    # the label column and the bar have the same widths in both rows, and the bars carry no label of their own
+    assert row.children[0].layout.width == step_row.children[0].layout.width == UI.LABEL_WIDTH
+    assert bar.layout.width == step.layout.width == UI.PROGRESS_TRACK and bar.description == step.description == ''
+    column = step_row.children[1]
+    legend = column.children[1]
+    assert column.children[0] is step and legend.layout.width == UI.PROGRESS_TRACK and legend.value == ''
+    set_phases([('Load', 10, 'Load'), ('Report', 30, 'Report building')])
+    assert 'width:25.0%' in legend.value and 'width:75.0%' in legend.value and 'title="Report building"' in legend.value
+    set_phases([])
+    assert legend.value == ''
+    step_text.value = 'x · loading…'
+    assert step_row.children[2] is step_text
 
 
 def test_suffix_menu_lists_the_suffixes_and_follows_its_field():
@@ -207,6 +225,8 @@ def test_page_follows_the_conventions(page):
     assert found[0][0] == 'markdown' and found[0][1].startswith('# Tool '), 'the page must open on its "# Tool N: ..." title'
     assert re.search(r'^\s*import ui_lib as UI\b', code, re.M), 'the page must import ui_lib as UI'
     assert not re.search(r"button_style\s*=\s*['\"]info['\"]", code), "no 'info' button style: use UI.button and a role"
+    if 'tools_curry' not in page.parts:      # the twins are frozen until their removal (plan_brainvision, phase 6)
+        assert 'IntProgress' not in code, 'a progress bar comes from UI.progress_bar / UI.phase_bar (they line up)'
     for kind, text in found:
         if kind == 'markdown':
             assert '<details>' not in text, 'a Details block opens with UI.details_open (it shows it can be opened)'

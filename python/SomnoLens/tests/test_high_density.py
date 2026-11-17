@@ -1,7 +1,9 @@
-"""High-density montages (phase 5 of tools/plan_brainvision.md): above HD_CHANNEL_THRESHOLD (12) channels the figures switch
-to their dense layout; at or below it they are drawn as before (that the test chain's outputs do not move is proven by
-tests/refactor_check.py). Quick: each figure changed, at 62 channels (a 64-electrode cap less Cz, the online reference,
-and one more), against the same figure at 4 channels. Standard: tool 6 on a 20-channel BrainVision study."""
+"""High-density montages (phases 5 and 5 bis of tools/plan_brainvision.md): above HD_CHANNEL_THRESHOLD (12) channels the
+figures switch to their dense layout; at or below it they are drawn as before (that the test chain's outputs do not move is
+proven by tests/refactor_check.py). Quick: each figure changed, at 62 channels (a 64-electrode cap less Cz, the online
+reference, and one more), against the same figure at 4 channels; phase 5 bis also checks what changed for every montage
+(tool 7's heatmap aligned on its epochs, the shares of clean epochs of tool 9). Standard: tool 6 on a 20-channel
+BrainVision study."""
 import json
 import sys
 from pathlib import Path
@@ -103,14 +105,15 @@ def test_the_topomaps_use_the_electrodes_that_have_a_position():
     """An eye electrode on an EEG input (IO, no position) no longer removes the topomaps of a BrainVision cap."""
     def topomap_titles(P):
         freqs, psds = L.compute_psds(P['epochs'], fmax=30.0)
-        fig = L.plot_epoch_detail(P, 0, freqs, psds, L.DEFAULT_THRESHOLDS, table_rows=L.DEFAULT_TABLE_ROWS)
-        titles = [ax.get_title() for ax in fig.axes if ax.get_title().startswith(('Peak-to-peak', '1/f MAE'))]
+        fig = L.plot_epoch_detail(P, 0, freqs, psds, L.DEFAULT_THRESHOLDS)
+        titles = [ax.get_title() for ax in fig.axes
+                  if ax.get_title().startswith(('Peak-to-peak', 'Gradient', '1/f MAE', '1/f R²'))]
         plt.close(fig)
         return titles
     cap = L.participant_from_epochs(make_epochs(EEG62 + ['IO']))
     assert len(L.positioned_channels(cap)) == 62
     titles = topomap_titles(cap)
-    assert len(titles) == 2 and all('no position: IO' in t for t in titles), titles
+    assert len(titles) == 4 and all('no position: IO' in t for t in titles), titles      # the four metrics of the table
     assert topomap_titles(L.participant_from_epochs(make_epochs(EEG62, montage=False))) == []   # an EDF: none
 
 
@@ -153,6 +156,135 @@ def test_tool6_scatter_by_electrode_on_a_dense_montage():
 
 
 # ---------------------------------------------------------------------------------------------------------
+# Phase 5 bis: the feedback of the visual inspection (quick)
+# ---------------------------------------------------------------------------------------------------------
+@pytest.mark.quick
+@pytest.mark.tool7
+@pytest.mark.tool0
+def test_tool7_heatmap_hypnogram_spans_the_epochs_of_the_matrix():
+    """The colour bar has its own column: the hypnogram and the matrix start and end on the same epochs, at any density.
+    Above 12 channels the figure is at most 14 inches wide."""
+    for n_ch in (4, 62):
+        combined = np.zeros((120, n_ch), dtype=int)
+        fig = PL.plot_rejection_heatmap(combined, names(n_ch), np.array(['W'] * 40 + ['N2'] * 80), 'x')
+        hyp, matrix = fig.axes[0].get_position(), fig.axes[2].get_position()
+        assert hyp.x0 == pytest.approx(matrix.x0) and hyp.width == pytest.approx(matrix.width), n_ch
+        assert fig.get_size_inches()[0] == (20.0 if n_ch == 4 else 14.0)
+        plt.close(fig)
+
+
+@pytest.mark.quick
+@pytest.mark.tool8bis
+@pytest.mark.tool0
+def test_tool8bis_decision_figure_is_smaller_on_a_dense_montage():
+    import autoreject_lib as AR
+
+    def size(n_ch):
+        epochs, chans = list(range(100)), names(n_ch)
+        dec = {'channels': chans, 'stage_by_epoch': {e: 'N2' for e in epochs},
+               'reject_epoch': {e: False for e in epochs}, 'rejected_channels': []}
+        fig = AR.plot_decision_heatmap(pd.DataFrame(0, index=epochs, columns=chans), dec, 'x', [])
+        inches = tuple(fig.get_size_inches())
+        plt.close(fig)
+        return inches
+    assert size(4) == pytest.approx((100 / 6, 1.0 + 0.4 + 0.88 + 0.7))          # as before
+    assert size(62) == pytest.approx((14.0, 1.0 + 0.4 + 0.14 * 62 + 0.7))       # was 16.7 x 14.1 inches
+
+
+@pytest.mark.quick
+@pytest.mark.tool8
+@pytest.mark.tool0
+def test_the_detail_table_lists_every_channel_and_scrolls():
+    P = L.participant_from_epochs(make_epochs(EEG62))
+    P['data_uV'][0, 5] *= 10                                       # F7, ten times the others: over the p-p threshold
+    freqs, psds = L.compute_psds(P['epochs'], fmax=30.0)
+    values = L.epoch_channel_values(P, 0, freqs, psds, L.DEFAULT_THRESHOLDS)
+    assert 'ptp' in values['breached'][5]
+    html = L.epoch_metric_table_html(P, 0, values)
+    assert all(f';">{ch}</td>' in html or f'left;">{ch}</td>' in html for ch in EEG62)   # every channel, in a row
+    assert 'overflow-y:auto' in html and 'position:sticky' in html                   # a box that scrolls, its header stays
+    assert 'color:#c0392b; font-weight:bold;">F7</td>' in html
+
+
+@pytest.mark.quick
+@pytest.mark.tool6
+@pytest.mark.tool0
+def test_tool6_flags_a_channel_far_from_the_others_above_12_channels():
+    thresholds = {'flat_pct': 3.5, 'bounds_pct': 1.0, 'n_peaks': 2, 'std_low': 5.0, 'hist_extreme_pct': 1.0}
+    assert QL.comparison_flag(100.0, 0.0, 62)[0].startswith('noisy_vs_median=100% of the epochs > 20%')
+    assert QL.comparison_flag(0.0, 50.0, 62)[0].startswith('flat_vs_median=50%')
+    assert QL.comparison_flag(100.0, 0.0, 12) == [] and QL.comparison_flag(np.nan, np.nan, 62) == []
+    for n_ch in (12, 20):
+        raw = make_raw(n_ch)
+        raw._data[0] *= 10                                             # Fp1, ten times the others
+        _, ch_flags, rows, _ = QL.compute_channel_metrics(raw, SFREQ, 'x', thresholds, None, [], {}, {})
+        assert rows[0]['comparison_alert'].startswith('noisy'), n_ch
+        if n_ch > 12:
+            assert rows[0]['exclude'] and QL.flag_criteria(ch_flags['Fp1']) == ['noisy_vs_median']
+            # a table made before (the alert apart): Skip asks
+            stored = pd.DataFrame(rows).assign(suspect_reason='', exclude=False)
+            assert ('flags of Fp1', 'none', 'noisy_vs_median') in QL.settings_differences(
+                stored, False, None, False, None, thresholds)
+        else:
+            assert not rows[0]['exclude'] and ch_flags['Fp1'] == []                 # a PSG: an alert apart, as before
+
+
+@pytest.mark.quick
+@pytest.mark.tool9
+@pytest.mark.tool0
+def test_tool9_says_the_share_of_clean_epochs():
+    meta = pd.DataFrame({'epoch_idx': range(3), 'stage': ['N2'] * 3})
+    fig = SL.plot_clean_hypnogram(meta, [], 'x', n_total=8, stage_totals={'N2': 6, 'W': 2})
+    assert [t.get_text() for t in fig.axes[1].texts] == ['3 (50 %)']
+    plt.close(fig)
+    rows = []
+    for fid, excluded in (('p1', False), ('p2', True)):
+        for ch in ('C3', 'C4'):
+            for band in ('delta', 'sigma'):
+                rows += [{'file_id': fid, 'stage': 'N2', 'channel': ch, 'band': band, 'n_epochs': 30,
+                          'n_epochs_rejected': 10, 'n_epochs_out_of_scope': 0, 'participant_excluded': excluded},
+                         {'file_id': fid, 'stage': 'W', 'channel': ch, 'band': band, 'n_epochs': 5,
+                          'n_epochs_rejected': 5, 'n_epochs_out_of_scope': 0, 'participant_excluded': excluded}]
+    stage_df = pd.DataFrame(rows)
+    html = SL.clean_epochs_html(stage_df)
+    assert '30 / 40 (75 %)' in html and '5 / 10 (50 %)' in html and '70 %' in html and '(excluded)' in html
+    fig = SL.plot_group_counts(stage_df[~stage_df['participant_excluded']])
+    assert [t.get_text() for t in fig.axes[0].texts] == ['70 %']                # (30 + 5) / (40 + 10)
+    plt.close(fig)
+
+
+@pytest.mark.quick
+@pytest.mark.tool9
+@pytest.mark.tool0
+def test_tool9_overlays_the_psd_of_a_dense_montage():
+    rng = np.random.default_rng(5)
+    freqs = np.arange(1.0, 31.0)
+    masks = {'N2': np.ones(20, dtype=bool), 'W': np.ones(20, dtype=bool)}
+    fig = SL.plot_psd_overlay(freqs, masks, names(62), [], 1, 'PSD', 'PSD (dB/Hz)',
+                              values_db=rng.normal(size=(20, 62, 30)))
+    panels = visible_axes(fig)
+    assert len(panels) == 2 and len(panels[0].lines) == 63                     # every channel and their mean
+    plt.close(fig)
+
+    def group_items(n_ch):
+        psd_df = pd.DataFrame([{'file_id': f, 'stage': 'N2', 'channel': ch, 'freq_hz': fr, 'psd_db_from_log': 1.0}
+                               for f in ('p1', 'p2') for ch in names(n_ch) for fr in freqs])
+        items = SL.group_psd_items(psd_df, [], 'Group mean PSD per stage')
+        SL.close_figs(items)
+        return items
+    items = group_items(62)
+    assert [kind for kind, _, _ in items] == ['fig', 'html']
+    assert items[1][2].startswith('<details>') and 'data:image/png;base64,' in items[1][2]
+    assert [kind for kind, _, _ in group_items(4)] == ['fig']                   # as before
+    # the log-log panels of a dense grid: 30 Hz left out, it overlapped 45 Hz
+    freqs = np.linspace(0.5, 45.0, 90)
+    psds = np.exp(rng.normal(size=(20, 62, 90)))
+    fig = SL.plot_loglog_with_fit(freqs, psds, np.zeros((20, 62, 90)), masks, names(62), [], 1, (2.0, 45.0))
+    assert 30 not in list(visible_axes(fig)[0].get_xticks())
+    plt.close(fig)
+
+
+# ---------------------------------------------------------------------------------------------------------
 # Tool 6 on a 20-channel BrainVision study (standard)
 # ---------------------------------------------------------------------------------------------------------
 def spherical(ch_names):
@@ -189,3 +321,17 @@ def test_tool6_reports_of_a_dense_cap(tmp_path):
     assert 'Per-channel detail below for' in report and 'C3: histogram' in report and 'Fz: histogram' not in report
     overview = (reports / 'dataset_overview.html').read_text(encoding='utf-8')
     assert 'Distributions by electrode (one figure per metric' in overview and 'Electrode: Fz' not in overview
+    # phase 5 bis: above 12 channels, the comparison with the median channel is a flag too (C3, nearly flat)
+    summary = pd.read_csv(reports / 'quality_summary.tsv', sep='\t')
+    c3 = summary[(summary['file_id'] == 'hd01') & (summary['channel'] == 'C3')].iloc[0]
+    assert c3['exclude'] and 'flat_vs_median' in c3['suspect_reason']
+    # and the page says what the reports of a dense montage detail, above Run
+    from nbdriver import NotebookSession
+    with NotebookSession(pipeline.T6) as nb:
+        nb.pick('fc_folder', data)
+        nb.pick('fc_config', data / 'config_param' / 'remap_reref_persubject.json')
+        info = nb.value('hd_info.value')
+        nb.set('cb_all_channels', True)
+        ticked = nb.value('hd_info.value')
+    assert 'High-density montage (20 channels)' in info and 'only the <b>flagged channels</b>' in info
+    assert 'every channel is detailed' in ticked

@@ -265,22 +265,26 @@ def plot_rejection_heatmap(combined_matrix, ch_names, hypno_epochs, file_id, cus
     # which over-counts). Matches the per-stage table denominator (n_epochs * n_channels).
     pct_rejected = 100.0 * (combined_matrix > 0).mean()
 
-    fig_w = max(8, min(n_epochs / 6, 20))
     if n_channels > HD_CHANNEL_THRESHOLD:
-        # High-density montage: the hypnogram strip keeps a fixed height (1 in, as in tool 8bis's heatmap) and
-        # each channel row 0.2 in, so the stage labels never overlap. At 12 channels or fewer, unchanged.
-        h_hyp, h_mat = 1.0, min(max(0.2 * n_channels, 0.8), 12.0)
+        # High-density montage: the hypnogram strip keeps a fixed height (1 in, as in tool 8bis's heatmap), each
+        # channel row 0.14 in and the width at most 14 in (the labels keep their size). At 12 channels or fewer, unchanged.
+        fig_w = max(8, min(n_epochs / 6, 14))
+        h_hyp, h_mat = 1.0, min(max(0.14 * n_channels, 0.8), 12.0)
         fig_h, height_ratios = h_hyp + h_mat + 0.8, [h_hyp, h_mat]
     else:
         # Fixed-ish height: rows get thinner as the montage grows. Unchanged for <=14 channels.
+        fig_w = max(8, min(n_epochs / 6, 20))
         fig_h, height_ratios = max(3, min(0.45 * n_channels + 2.0, 8.0)), [1.2, n_channels]
+    # The colour bar has its own column (as in tool 8's heatmap): taken from the matrix alone, it made the hypnogram wider
+    # than the epochs under it.
     fig, axes = plt.subplots(
-        2, 1, figsize=(fig_w, fig_h),
-        gridspec_kw={'height_ratios': height_ratios, 'hspace': 0.04}
+        2, 2, figsize=(fig_w, fig_h),
+        gridspec_kw={'height_ratios': height_ratios, 'width_ratios': [fig_w, 0.2], 'hspace': 0.04, 'wspace': 0.02}
     )
+    axes[0][1].set_axis_off()
 
     # --- Hypnogram strip ---
-    ax_hyp = axes[0]
+    ax_hyp = axes[0][0]
     x_step = np.arange(n_epochs + 1)
     y_step = np.append(hypno_y, hypno_y[-1])
 
@@ -305,7 +309,7 @@ def plot_rejection_heatmap(combined_matrix, ch_names, hypno_epochs, file_id, cus
         ax_hyp.spines[sp].set_visible(False)
 
     # --- Main heatmap ---
-    ax = axes[1]
+    ax = axes[1][0]
     im = ax.pcolormesh(
         np.arange(n_epochs + 1), np.arange(n_channels + 1),
         combined_matrix.T,  # (n_channels, n_epochs)
@@ -319,8 +323,7 @@ def plot_rejection_heatmap(combined_matrix, ch_names, hypno_epochs, file_id, cus
     for sp in ['top', 'right']:
         ax.spines[sp].set_visible(False)
 
-    cbar = fig.colorbar(im, ax=ax, orientation='vertical',
-                        fraction=0.02, pad=0.01, ticks=np.arange(len(LABELS)))
+    cbar = fig.colorbar(im, cax=axes[1][1], orientation='vertical', ticks=np.arange(len(LABELS)))
     cbar.ax.set_yticklabels(LABELS, fontsize=7)
 
     fig.suptitle(f'{file_id}: {pct_rejected:.0f}% of flagged epochs',

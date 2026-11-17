@@ -116,9 +116,10 @@ MONTAGE_ROW_IN       = 0.50     # inches per channel row (classic)
 MONTAGE_ROW_MIN_IN   = 0.16     # floor: thinner rows are unreadable anyway
 MONTAGE_MAX_H_IN     = 13.0     # cap on the montage figure height (inches)
 N_1F_SUBSAMPLE_HD    = 250      # default 1/f epoch subsample above the threshold (0 = fit every epoch)
-DEFAULT_TABLE_ROWS   = 8        # per-channel metric table: flagged channels + this many worst ones
-DETAIL_FIG_HEIGHT_IN = 3.3      # navigator detail panel (PSD + metric table): low enough that the montage,
-                                # the PSD and the table fit on one screen
+DEFAULT_TABLE_ROWS   = 8        # unused since the table scrolls (epoch_metric_table_html): kept for the frozen Curry twin
+DETAIL_FIG_HEIGHT_IN = 3.3      # navigator detail panel (PSD, the metric table beside it): low enough that the
+                                # montage, the PSD and the table fit on one screen
+DETAIL_TOPO_FIG_HEIGHT_IN = 4.4  # the same with the four topomaps in 2 x 2 (high-density montages with positions)
 
 AASM_STAGES = ['W', 'N1', 'N2', 'N3', 'R']
 
@@ -1381,19 +1382,82 @@ def _draw_channel_topomap(ax, P, values, title, cmap='viridis', mask=None):
             vals, info, axes=ax, show=False, cmap=cmap, sensors=True, contours=0, outlines='head',
             mask=None if mask is None else np.asarray(mask, dtype=bool),
             mask_params=dict(marker='o', markerfacecolor='none', markeredgecolor='#c0392b',
-                             linewidth=0, markersize=9, markeredgewidth=2.0))
+                             linewidth=0, markersize=6, markeredgewidth=1.5))
         cb = ax.figure.colorbar(im, ax=ax, fraction=0.046, pad=0.04)
         cb.ax.tick_params(labelsize=6)
-        ax.set_title(title, fontsize=8)
+        ax.set_title(title, fontsize=7)
     except Exception as e:
         ax.set_axis_off()
         ax.text(0.5, 0.5, f'topomap n/a\n({e})', ha='center', va='center', fontsize=7, color='0.4')
 
 
+def epoch_channel_values(P, ei, freqs, psds_uV2, thresholds, fmin=2.0):
+    """The metrics of every channel of epoch `ei` that the detail panel shows, against the thresholds of its stage:
+    'ptp', 'grad', 'mae', 'r2' (one value per channel, tool 7's formulas), 'fits' (fit_1f of each channel), 'thr'
+    {'amp', 'flat', 'grad', 'mae', 'r2'} and 'breached' {channel index: the metrics over their threshold}. Computed once
+    for the figure (plot_epoch_detail) and the table (epoch_metric_table_html)."""
+    n_ch = len(P['ch_names'])
+    stg = P['stages'][ei]
+    fits = [fit_1f(freqs, psds_uV2[ei, c], fmin=fmin) for c in range(n_ch)]
+    thr = {'amp': thresholds['amplitude_ptp_uV'].get(stg, 250.0), 'flat': thresholds['flat_ptp_uV'],
+           'grad': thresholds['gradient_uV_per_sample'], 'mae': thresholds['1f_mae_max'], 'r2': thresholds['1f_r2_min']}
+    cur = P['data_uV'][ei]
+    values = {'ptp': np.ptp(cur, axis=-1), 'grad': np.max(np.abs(np.diff(cur, axis=-1)), axis=-1),
+              'mae': np.array([f[0] for f in fits], dtype=float), 'r2': np.array([f[1] for f in fits], dtype=float)}
+    breached = {}
+    for c in range(n_ch):
+        over = []
+        if values['ptp'][c] > thr['amp'] or values['ptp'][c] < thr['flat']:     # amplitude OR flat: both on the p-p
+            over.append('ptp')
+        if values['grad'][c] > thr['grad']:
+            over.append('grad')
+        if not np.isnan(values['mae'][c]) and values['mae'][c] > thr['mae']:
+            over.append('mae')
+        if not np.isnan(values['r2'][c]) and values['r2'][c] < thr['r2']:
+            over.append('r2')
+        if over:
+            breached[c] = over
+    return {**values, 'fits': fits, 'thr': thr, 'breached': breached}
+
+
+DETAIL_TABLE_HEIGHT_PX = 340      # the metric table scrolls past this height (about the detail figure's)
+
+
+def epoch_metric_table_html(P, ei, values, max_height_px=DETAIL_TABLE_HEIGHT_PX):
+    """The per-channel metric table of the detail panel, as HTML in a box that scrolls past `max_height_px` (every
+    channel of a 64-channel cap stays reachable, the page does not grow): every channel in file order, one value per
+    metric, a value over its threshold in red bold and its channel name too. `values` = epoch_channel_values."""
+    thr = values['thr']
+    columns = [('ptp', 'p-p (µV)', '{:.0f}', f"&gt; {thr['amp']:g} or &lt; {thr['flat']:g}"),
+               ('grad', 'gradient (µV)', '{:.0f}', f"&gt; {thr['grad']:g}"),
+               ('mae', '1/f MAE', '{:.3f}', f"&gt; {thr['mae']:g}"),
+               ('r2', '1/f R²', '{:.3f}', f"&lt; {thr['r2']:g}")]
+    cell = 'padding:2px 8px; text-align:right; border-bottom:1px solid #eee;'
+    head = 'padding:3px 8px; text-align:right; position:sticky; top:0; background:#f5f5f5; border-bottom:1px solid #bbb;'
+    red = ' color:#c0392b; font-weight:bold;'
+    header = (f'<th style="{head} text-align:left;">channel</th>'
+              + ''.join(f'<th style="{head}">{name}<br><span style="font-weight:normal; color:#666;">{rule}</span></th>'
+                        for _, name, _, rule in columns))
+    rows = []
+    for c, name in enumerate(P['ch_names']):
+        over = values['breached'].get(c, [])
+        rows.append(f'<tr><td style="{cell} text-align:left;{red if over else ""}">{name}</td>'
+                    + ''.join(f'<td style="{cell}{red if key in over else ""}">{fmt.format(values[key][c])}</td>'
+                              for key, _, fmt, _ in columns) + '</tr>')
+    n_over = len(values['breached'])
+    title = (f'<div style="font-size:12px; margin-bottom:4px;"><b>Per-channel metrics</b> (stage {P["stages"][ei]}): '
+             f'{n_over} of {len(P["ch_names"])} channel(s) over a threshold, in red</div>')
+    return (title + f'<div style="max-height:{max_height_px}px; overflow-y:auto; border:1px solid #ddd;">'
+            f'<table style="border-collapse:collapse; font-size:12px; width:100%;"><thead><tr>{header}</tr></thead>'
+            f'<tbody>{"".join(rows)}</tbody></table></div>')
+
+
 def plot_epoch_detail(P, ei, freqs, psds_uV2, thresholds, spectro_ch_idx=0, fmin=2.0,
-                      clean_mask=None, table_rows=None, topomap=None):
-    """Detail panel for epoch `ei`: per-channel PSD (left) with the per-channel metric table right beside
-    it (right), plus the two topomaps on a high-density montage.
+                      clean_mask=None, table_rows=None, topomap=None, values=None):
+    """Detail panel for epoch `ei`: the per-channel PSD, plus four small topomaps on a high-density montage. The
+    per-channel metric table is HTML beside it (epoch_metric_table_html, a box that scrolls): drawn in the figure, a
+    64-channel table had to be cut to a few rows. `values` = epoch_channel_values (computed here when None).
+    `table_rows` is ignored: kept for the frozen Curry twin of tool 8 until its removal (plan_brainvision, phase 6).
 
     The former bottom row — mean band power + 50 Hz ratio, and the epoch spectrogram — is COMMENTED OUT:
     neither helped decide on a single epoch (the band bars only restate what the PSD already shows, and the
@@ -1408,15 +1472,11 @@ def plot_epoch_detail(P, ei, freqs, psds_uV2, thresholds, spectro_ch_idx=0, fmin
       * each channel whose 1/f fit is flagged (MAE > threshold or R² < threshold) is drawn in its METHOD
         colour and gets its aperiodic fit dashed; unflagged channels stay grey (no 'worst channel'
         emphasis anymore — what matters is which channels actually breach a threshold).
-    Table: value (threshold) per metric, the value shown in RED when it breaches its threshold.
 
     `clean_mask` (optional (n_ep,) bool): epochs to use as the clean reference; default = not rejected
     according to the tool-7 metadata.
-    `table_rows` (optional int): HIGH-DENSITY lever — keep every channel that breaches a threshold plus
-        this many worst-by-p-p ones in the metric table, instead of one row per channel (illegible past
-        ~15 rows). None (default) = every channel, i.e. the classic behaviour.
-    `topomap` (optional bool): draw the spatial panels (peak-to-peak + 1/f MAE). None (default) = auto:
-        on when the montage is dense AND more than HD_CHANNEL_THRESHOLD of its channels carry an electrode
+    `topomap` (optional bool): draw the spatial panels (peak-to-peak, gradient, 1/f MAE, 1/f R²). None (default) =
+        auto: on when the montage is dense AND more than HD_CHANNEL_THRESHOLD of its channels carry an electrode
         position (drawn on those: a BrainVision eye electrode on an EEG input has none). Curry keeps a real
         DigMontage through tool 7; position-less EDF simply never gets the panel."""
     from scipy.signal import welch as _welch   # only used by the commented-out 50 Hz-ratio block
@@ -1425,12 +1485,10 @@ def plot_epoch_detail(P, ei, freqs, psds_uV2, thresholds, spectro_ch_idx=0, fmin
     n_ch = len(ch)
     if topomap is None:
         topomap = (n_ch > HD_CHANNEL_THRESHOLD) and len(positioned_channels(P)) > HD_CHANNEL_THRESHOLD
-    fits = [fit_1f(freqs, psds_uV2[ei, c], fmin=fmin) for c in range(n_ch)]
-    mae_thr = thresholds['1f_mae_max']
-    r2_thr = thresholds['1f_r2_min']
-    amp_thr = thresholds['amplitude_ptp_uV'].get(stg, 250.0)
-    grad_thr = thresholds['gradient_uV_per_sample']
-    flat_thr = thresholds['flat_ptp_uV']
+    if values is None:
+        values = epoch_channel_values(P, ei, freqs, psds_uV2, thresholds, fmin=fmin)
+    fits = values['fits']
+    mae_thr, r2_thr = values['thr']['mae'], values['thr']['r2']
 
     # which 1/f method (if any) flags each channel -> trace colour
     def _fit_flag(c):
@@ -1441,22 +1499,20 @@ def plot_epoch_detail(P, ei, freqs, psds_uV2, thresholds, spectro_ch_idx=0, fmin
             return '1f_error'
         return None
 
-    # Layout: ONE row - PSD (left) + the metric table beside it (right); the extra columns carry the two
-    # topomaps when positions are available (high-density montages). The former bottom row (mean band
-    # power + epoch spectrogram) is commented out - see the docstring. To restore it: go back to a 2-row
-    # gridspec (height_ratios=[1.15, 1.0], hspace=0.35, figsize height 8), uncomment ax_band/ax_spec here
-    # and blocks (c)/(d) below, and put the topomaps back on gs[0, 2] / gs[1, 2].
+    # Layout: the PSD alone, or the PSD and the four small topomaps in 2 x 2 beside it (high-density montages with
+    # positions, a taller figure for their two rows). The metric table is HTML, beside the figure in the tool. The former
+    # bottom row (mean band power + epoch spectrogram) is commented out - see the docstring. To restore it: a 2-row
+    # gridspec (height_ratios=[1.15, 1.0], hspace=0.35, figsize height 8) and uncomment ax_band/ax_spec and blocks (c)/(d).
     if topomap:
-        fig = plt.figure(figsize=(18, DETAIL_FIG_HEIGHT_IN))
-        gs = fig.add_gridspec(1, 4, width_ratios=[1.35, 1.0, 0.62, 0.62], wspace=0.25)
-        ax_topo_ptp = fig.add_subplot(gs[0, 2])
-        ax_topo_mae = fig.add_subplot(gs[0, 3])
+        fig = plt.figure(figsize=(11, DETAIL_TOPO_FIG_HEIGHT_IN))
+        gs = fig.add_gridspec(1, 2, width_ratios=[1.6, 1.0], wspace=0.12)
+        topo = gs[0, 1].subgridspec(2, 2, hspace=0.5, wspace=0.45)
+        topo_axes = [fig.add_subplot(topo[i, j]) for i in range(2) for j in range(2)]
     else:
-        fig = plt.figure(figsize=(13, DETAIL_FIG_HEIGHT_IN))
-        gs = fig.add_gridspec(1, 2, width_ratios=[1.35, 1.0], wspace=0.2)
-        ax_topo_ptp = ax_topo_mae = None
+        fig = plt.figure(figsize=(8.5, DETAIL_FIG_HEIGHT_IN))
+        gs = fig.add_gridspec(1, 1)
+        topo_axes = []
     ax_psd = fig.add_subplot(gs[0, 0])
-    ax_table = fig.add_subplot(gs[0, 1])
     # ax_band = fig.add_subplot(gs[1, 0])   # mean band power   - commented out (see the docstring)
     # ax_spec = fig.add_subplot(gs[1, 1])   # epoch spectrogram - commented out (see the docstring)
 
@@ -1515,62 +1571,7 @@ def plot_epoch_detail(P, ei, freqs, psds_uV2, thresholds, spectro_ch_idx=0, fmin
                  f'(dashed = aperiodic fit)', fontsize=9)
     ax.legend(fontsize=6, ncol=3 if hd else 2, loc='upper right')
 
-    # (b) per-channel metric table, right beside the PSD (red = breaches its threshold)
-    ax = ax_table
-    ax.set_axis_off()
-    cur = data[ei]
-    # Vectorised per-channel values (identical to the former per-channel float() calls) — also feed
-    # the topomaps below.
-    ptp_all = np.ptp(cur, axis=-1)
-    grad_all = np.max(np.abs(np.diff(cur, axis=-1)), axis=-1)
-    mae_all = np.array([fits[c][0] for c in range(n_ch)], dtype=float)
-    r2_all = np.array([fits[c][1] for c in range(n_ch)], dtype=float)
-    breached = {c for c in range(n_ch)
-                if (ptp_all[c] > amp_thr or ptp_all[c] < flat_thr or grad_all[c] > grad_thr
-                    or (not np.isnan(mae_all[c]) and mae_all[c] > mae_thr)
-                    or (not np.isnan(r2_all[c]) and r2_all[c] < r2_thr))}
-    # Which channels get a row: all of them (classic), or — on a dense montage — every breaching
-    # channel plus the `table_rows` worst by peak-to-peak, kept in file order.
-    if table_rows is None:
-        show_rows = list(range(n_ch))
-    else:
-        worst = np.argsort(ptp_all)[::-1][:max(0, int(table_rows))]
-        show_rows = sorted(breached | {int(w) for w in worst})
-    header = ['ch', 'p-p (thr)', 'grad (thr)', 'MAE (thr)', 'R² (thr)']
-    table = [header]
-    bad_cells = []                                       # (row, col) to paint red
-    for row, c in enumerate(show_rows, start=1):
-        ptp, grad = float(ptp_all[c]), float(grad_all[c])
-        mae_c, r2_c = fits[c][0], fits[c][1]
-        table.append([ch[c],
-                      f'{ptp:.0f} ({amp_thr:.0f})',
-                      f'{grad:.0f} ({grad_thr:.0f})',
-                      f'{mae_c:.3f} ({mae_thr:.2f})',
-                      f'{r2_c:.3f} ({r2_thr:.2f})'])
-        if ptp > amp_thr or ptp < flat_thr:              # amplitude OR flat both breach the p-p cell
-            bad_cells.append((row, 1))
-        if grad > grad_thr:
-            bad_cells.append((row, 2))
-        if not np.isnan(mae_c) and mae_c > mae_thr:
-            bad_cells.append((row, 3))
-        if not np.isnan(r2_c) and r2_c < r2_thr:
-            bad_cells.append((row, 4))
-    # top-anchored (aligns with the PSD); the channel column is narrower so the value columns breathe
-    tb = ax.table(cellText=table, loc='upper center', cellLoc='center',
-                  colWidths=[0.15, 0.2125, 0.2125, 0.2125, 0.2125])
-    tb.auto_set_font_size(False)
-    tb.set_fontsize(8 if len(show_rows) <= 15 else 7)
-    tb.scale(1, 1.4 if len(show_rows) <= 15 else 1.05)   # tighter rows once the table gets long
-    for col in range(len(header)):                       # header in bold
-        tb[(0, col)].get_text().set_fontweight('bold')
-    for (r, cc) in bad_cells:                            # breached values in red bold
-        cell = tb[(r, cc)]
-        cell.get_text().set_color('#c0392b')
-        cell.get_text().set_fontweight('bold')
-    # Subset note on a SECOND line: appended horizontally it would collide with the PSD title.
-    subset_txt = ('' if len(show_rows) == n_ch
-                  else f'\n{len(show_rows)}/{n_ch} channels shown ({len(breached)} flagged)')
-    ax.set_title(f'Per-channel metrics (stage {stg}) — red = over threshold{subset_txt}', fontsize=9)
+    # (b) the per-channel metric table is HTML, beside the figure in the tool (epoch_metric_table_html)
 
     # --- COMMENTED OUT: the two bottom panels of the old 2x2 detail figure ---------------------
     # Neither helped decide on ONE epoch: the band bars restate what the PSD above already shows,
@@ -1615,11 +1616,13 @@ def plot_epoch_detail(P, ei, freqs, psds_uV2, thresholds, spectro_ch_idx=0, fmin
 
     # (e) spatial view — only a high-density montage with real electrode positions can show this, and
     #     it answers the question that dominates at 32-64 channels: ONE bad electrode (a hot spot) or
-    #     a whole-head artefact (a global shift)? Red rings = channels breaching any threshold.
-    if topomap:
-        mask = np.array([c in breached for c in range(n_ch)], dtype=bool)
-        _draw_channel_topomap(ax_topo_ptp, P, ptp_all, 'Peak-to-peak (µV)', cmap='viridis', mask=mask)
-        _draw_channel_topomap(ax_topo_mae, P, mae_all, '1/f MAE', cmap='magma', mask=mask)
+    #     a whole-head artefact (a global shift)? One map per metric of the table, red rings = the channels over that
+    #     metric's threshold. 1/f R² is bad when LOW: its colour scale is reversed, so a bad electrode is bright on all four.
+    maps = [('ptp', 'Peak-to-peak (µV)', 'viridis'), ('grad', 'Gradient (µV)', 'viridis'),
+            ('mae', '1/f MAE', 'magma'), ('r2', '1/f R²', 'magma_r')]
+    for ax, (key, title, cmap) in zip(topo_axes, maps):
+        mask = np.array([key in values['breached'].get(c, []) for c in range(n_ch)], dtype=bool)
+        _draw_channel_topomap(ax, P, values[key], title, cmap=cmap, mask=mask)
     return fig
 
 
