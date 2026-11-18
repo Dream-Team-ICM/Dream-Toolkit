@@ -389,6 +389,58 @@ def test_tool9_says_how_many_participants_reach_the_minimum_of_epochs():
 
 
 @pytest.mark.quick
+@pytest.mark.tool8
+@pytest.mark.tool0
+def test_tool0_keeps_its_signal_in_float32_and_tool8_in_float64():
+    """Tool 0's explorer reads its signal 50 epochs at a time into float32 (the float64 values rounded once); tool 8 keeps
+    float64."""
+    n_ep = 120
+    data = np.random.default_rng(2).normal(0, 20e-6, (n_ep, 4, 30 * SFREQ))
+
+    def epochs():
+        ep = mne.EpochsArray(data, mne.create_info(names(4), SFREQ, 'eeg'), verbose=False)
+        ep.metadata = pd.DataFrame({'stage': ['N2'] * n_ep, 'reject_flag': [False] * n_ep, 'reject_method': ['none'] * n_ep})
+        return ep
+    P64, P32 = L.participant_from_epochs(epochs()), L.participant_from_epochs(epochs(), dtype=np.float32)
+    assert P64['data_uV'].dtype == np.float64 and P32['data_uV'].dtype == np.float32
+    assert np.array_equal(P32['data_uV'], P64['data_uV'].astype(np.float32))
+
+
+@pytest.mark.quick
+@pytest.mark.tool8
+@pytest.mark.tool0
+def test_the_psd_of_a_few_epochs_is_the_psd_of_every_epoch():
+    """What lets tool 0 compute the detail panel's PSD on demand: each spectrum depends on its epoch only (Welch, then tool
+    7's smoothing spectrum by spectrum)."""
+    ep = make_epochs(EEG62[:4])
+    smoothing = {'enabled': True, 'method': 'median+lowess', 'median_span_hz': 3.0, 'lowess_span_hz': 2.0}
+    for kw in ({}, {'smoothing': smoothing}):
+        _, every = L.compute_psds(ep, fmax=30.0, **kw)
+        _, some = L.compute_psds(ep[[0, 2]], fmax=30.0, **kw)
+        assert np.allclose(some, every[[0, 2]], rtol=1e-12, atol=0), kw
+
+
+@pytest.mark.quick
+@pytest.mark.tool8
+@pytest.mark.tool0
+def test_tool0_detail_reference_is_a_sample_of_the_stage_on_a_dense_montage():
+    """Tool 0 computes the PSD of the clean reference when a stage is first shown: every clean epoch of the stage on a PSG,
+    48 spread over the night on a 62-channel cap; the legend says how many of the stage's clean epochs it shows."""
+    stages = np.array(['W'] * 100 + ['N2'] * 400)
+    reject = np.zeros(500, dtype=bool)
+    reject[[150, 151]] = True
+    for n_ch, n_ref in ((6, 398), (62, 48)):
+        idx, n_clean = L.detail_reference_epochs({'stages': stages, 'reject_flag': reject, 'ch_names': names(n_ch)}, 120)
+        assert n_clean == 398 and len(idx) == n_ref, n_ch
+        assert set(stages[idx]) == {'N2'} and not reject[idx].any() and (idx[0], idx[-1]) == (100, 499), n_ch
+    P = L.participant_from_epochs(make_epochs(EEG62[:4]))
+    freqs, psds = L.compute_psds(P['epochs'], fmax=30.0)
+    fig = L.plot_epoch_detail(P, 0, freqs, psds, L.DEFAULT_THRESHOLDS, n_clean=10)
+    assert 'clean N2 median (n=3 of 10 epochs)' in [line.get_label() for line in fig.axes[0].get_lines()]
+    plt.close(fig)
+
+
+@pytest.mark.quick
 @pytest.mark.tool6
 @pytest.mark.tool0
 def test_tool6_overlays_say_why_a_channel_is_flagged():

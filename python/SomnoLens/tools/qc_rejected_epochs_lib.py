@@ -257,15 +257,24 @@ def load_participant(fif_path):
     return participant_from_epochs(epochs)
 
 
-def participant_from_epochs(epochs):
+def participant_from_epochs(epochs, dtype=None):
     """The dict of load_participant, built from an Epochs object already in memory: tool 0 epochs the
     recording itself (like tool 7) and feeds it to the same display code as tool 8. The metadata must
-    carry 'stage' and 'reject_flag'. The bad channels are dropped from `epochs` in place, as above."""
+    carry 'stage' and 'reject_flag'. The bad channels are dropped from `epochs` in place, as above.
+
+    `dtype` (optional, np.float32 in tool 0's explorer): the signal kept at that precision, read 50 epochs at a time so
+    that no float64 copy of the whole night exists (half the memory of a 64-channel night, for the eyes only). None =
+    float64, as tool 8 reads it."""
     bad_channels = list(epochs.info['bads'])
     if bad_channels:
         epochs.drop_channels(bad_channels)
     meta = epochs.metadata.reset_index(drop=True).copy()
-    data_uV = epochs.get_data() * 1e6                       # (n_ep, n_ch, n_t), µV
+    if dtype is None:
+        data_uV = epochs.get_data() * 1e6                   # (n_ep, n_ch, n_t), µV
+    else:
+        data_uV = np.empty((len(epochs), len(epochs.ch_names), len(epochs.times)), dtype=dtype)
+        for start in range(0, len(epochs), 50):
+            data_uV[start:start + 50] = epochs.get_data(item=slice(start, start + 50)) * 1e6
     stages = meta['stage'].astype(str).values
     reject_flag = meta['reject_flag'].astype(bool).values
     methods_present = [m for m in METHOD_ORDER
@@ -1444,6 +1453,24 @@ def epoch_channel_values(P, ei, freqs, psds_uV2, thresholds, fmin=2.0):
     return {**values, 'fits': fits, 'thr': thr, 'breached': breached}
 
 
+DETAIL_REF_MAX_SPECTRA = 3000     # the clean reference of tool 0's detail panel: at most this many spectra (epochs x channels)
+
+
+def detail_reference_epochs(P, ei, clean_mask=None, max_spectra=DETAIL_REF_MAX_SPECTRA):
+    """The epochs of the clean reference of epoch `ei`'s detail panel, the ones plot_epoch_detail takes (the clean epochs
+    of its stage), for tool 0, which computes their PSD only when a stage is first shown. At most `max_spectra` spectra:
+    every epoch of a stage of a 6-channel PSG up to 500, 48 epochs of a 62-channel cap (about 2 s, 6 s with tool 7's
+    smoothing), spread evenly over the night. Returns (indices, n_clean): the epochs chosen, and how many clean epochs
+    the stage has (plot_epoch_detail's `n_clean`, for its legend)."""
+    clean = np.asarray(clean_mask, dtype=bool) if clean_mask is not None else ~P['reject_flag']
+    idx = np.flatnonzero((np.asarray(P['stages']) == P['stages'][ei]) & clean)
+    n_max = max(3, max_spectra // max(1, len(P['ch_names'])))
+    n_clean = len(idx)
+    if n_clean > n_max:
+        idx = idx[np.unique(np.linspace(0, n_clean - 1, n_max).round().astype(int))]
+    return idx, n_clean
+
+
 DETAIL_TABLE_HEIGHT_PX = 340      # the metric table scrolls past this height (about the detail figure's)
 
 
@@ -1477,7 +1504,7 @@ def epoch_metric_table_html(P, ei, values, max_height_px=DETAIL_TABLE_HEIGHT_PX)
 
 
 def plot_epoch_detail(P, ei, freqs, psds_uV2, thresholds, spectro_ch_idx=0, fmin=2.0,
-                      clean_mask=None, table_rows=None, topomap=None, values=None):
+                      clean_mask=None, table_rows=None, topomap=None, values=None, n_clean=None):
     """Detail panel for epoch `ei`: the per-channel PSD, plus four small topomaps on a high-density montage. The
     per-channel metric table is HTML beside it (epoch_metric_table_html, a box that scrolls): drawn in the figure, a
     64-channel table had to be cut to a few rows. `values` = epoch_channel_values (computed here when None).
@@ -1499,6 +1526,8 @@ def plot_epoch_detail(P, ei, freqs, psds_uV2, thresholds, spectro_ch_idx=0, fmin
 
     `clean_mask` (optional (n_ep,) bool): epochs to use as the clean reference; default = not rejected
     according to the tool-7 metadata.
+    `n_clean` (optional int): how many clean epochs the stage has when `clean_mask` keeps a sample of them (tool 0,
+    detail_reference_epochs): the legend then says 'n=48 of 412 epochs'.
     `topomap` (optional bool): draw the spatial panels (peak-to-peak, gradient, 1/f MAE, 1/f R²). None (default) =
         auto: on when the montage is dense AND more than HD_CHANNEL_THRESHOLD of its channels carry an electrode
         position (drawn on those: a BrainVision eye electrode on an EEG input has none). Curry keeps a real
@@ -1549,7 +1578,8 @@ def plot_epoch_detail(P, ei, freqs, psds_uV2, thresholds, spectro_ch_idx=0, fmin
         ref_ep = ref.mean(axis=1)                       # (n_clean_ep, n_freqs), mean across channels
         med = np.median(ref_ep, axis=0)
         q1, q3 = np.percentile(ref_ep, [25, 75], axis=0)
-        ax.semilogy(freqs, med, color='black', lw=1.8, zorder=8, label=f'clean {stg} median (n={ref_ep.shape[0]} epochs)')
+        n_ref = f'{ref_ep.shape[0]} of {n_clean}' if n_clean and n_clean > ref_ep.shape[0] else f'{ref_ep.shape[0]}'
+        ax.semilogy(freqs, med, color='black', lw=1.8, zorder=8, label=f'clean {stg} median (n={n_ref} epochs)')
         ax.semilogy(freqs, q1, color='black', lw=0.9, ls=':', zorder=8, label=f'clean {stg} IQR')
         ax.semilogy(freqs, q3, color='black', lw=0.9, ls=':', zorder=8)
     n_flagged = 0

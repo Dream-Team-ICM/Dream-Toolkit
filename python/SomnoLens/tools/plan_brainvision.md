@@ -763,6 +763,29 @@ Le panneau de détail des outils 8 et 0 est seulement à l'écran. Puis ton insp
   float64 (l'enregistrement pour les étapes 5 et 6, sa copie par époque pour l'explorateur), 1,4 Go chacun ici, 2,5 Go pour le
   kernel. Sur une nuit de 8 h, ce serait environ 95 s et 14 Go : la mémoire d'un PC de 16 Go déborde sur le disque, et tout ralentit.
 
+**Correction retenue (A + B, confirmée le 2026-11-18)**, affichage seulement (les étapes 2 à 8 lisent l'enregistrement comme avant) :
+- **A, la PSD du panneau de détail à la demande** : l'étape 1 n'en calcule plus. La PSD d'une époque se calcule quand elle s'affiche,
+  la référence propre de son stade la première fois que ce stade s'affiche, puis elles restent jusqu'au prochain changement de
+  signal. La référence prend au plus 3000 spectres (époques × canaux), ses époques réparties sur la nuit : toutes celles d'un stade
+  d'un PSG de 6 canaux jusqu'à 500, 48 sur un casque de 62 canaux. Sa légende dit `n=48 of 412 epochs`. Chaque spectre ne dépend
+  que de son époque : les valeurs sont celles d'une PSD de toute la nuit (vérifié, identiques en brut, à 1e-15 près avec le lissage).
+- **B, le signal de l'explorateur en float32**, lu 50 époques à la fois (aucune copie float64 de la nuit). L'outil 8 reste en
+  float64. L'affichage prétraité ne recopie plus les époques de l'étape 6 quand aucun canal n'est décoché.
+
+Mesuré après (même enregistrement de 90 min, PC en usage pendant la mesure : les durées sont relatives) :
+
+| | Avant | Après |
+|---|---|---|
+| PSD de chaque époque × canal (étape 1) | 8 à 10 s | aucune |
+| Référence d'un stade, à sa première apparition | — | environ 2 s (6 s avec le lissage de l'outil 7) |
+| Redessin d'une époque, référence déjà calculée | environ 2,6 s | inchangé (62 ajustements 1/f, le montage) |
+| Mémoire après la copie d'affichage | 2,9 Go | 2,2 Go |
+| Pic de mémoire du chargement | 6,0 Go | 3,0 Go |
+
+Sur une nuit de 8 h, la référence reste à 2 s par stade (48 époques quelle que soit la durée), au lieu d'environ 50 s de PSD au
+chargement, et le pic de mémoire passe d'environ 32 Go à environ 16 Go (la lecture de l'enregistrement en float64 reste le plus gros
+poste).
+
 ### Phase 6 : suppression des jumeaux Curry
 
 **Faisable, et je le recommande.** D'après le SPEC, ce que font les jumeaux tient en peu de choses :

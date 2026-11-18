@@ -1365,7 +1365,19 @@ the flagged channels (*High-density montage support*). **Phase 5 bis (2026-11-13
 - **Step 5's overlays** say why each coloured channel is flagged (*High-density montage support*), and every step line
   turns while its step works (*Voila page conventions → Progress*).
 - **Measured before any change of the loading** (the user found it slow on a 62-channel cap): see
-  `tools/plan_brainvision.md`, phase 5 ter.
+  `tools/plan_brainvision.md`, phase 5 ter. The steps were not slower than the batch tools; step 1 computed the PSD of every
+  epoch × channel for the detail panel and held the signal twice in float64. Two changes, display only (steps 2-8 read the
+  recording as before):
+  - **The detail panel's PSD on demand** (`ensure_psds`): `build_display` computes none, it keeps the settings (`psd_cfg`:
+    `fmax`, and tool 7's smoothing in the preprocessed display). The PSD of an epoch is computed when it is shown, the clean
+    reference of its stage when the stage is first shown (`qc_rejected_epochs_lib.detail_reference_epochs`: at most
+    `DETAIL_REF_MAX_SPECTRA` = 3000 spectra, every clean epoch of a PSG stage up to 500, 48 spread over the night on a
+    62-channel cap, the legend saying `n=48 of 412 epochs` through `plot_epoch_detail(n_clean=)`), kept until the signal
+    changes. A turning sign says it while it works. Each spectrum depends on its epoch only (Welch, then the smoothing spectrum
+    by spectrum), so the values are those of a PSD of every epoch.
+  - **The explorer's signal in float32** (`participant_from_epochs(epochs, dtype=np.float32)`, read 50 epochs at a time: no
+    float64 copy of the night); tool 8 keeps float64 (`dtype=None`). The preprocessed display copies step 6's epochs only when
+    channels are unticked (`participant_from_epochs` drops them in place).
 
 **Core rule: never re-implement a computation.** Each step calls the very functions of the batch tool it
 mirrors, which live in the shared libraries (see *Cross-cutting → Shared computation libraries*), so the numbers
@@ -1421,7 +1433,7 @@ warned (run tool 3). Events: `edf_io_lib.load_events` (TXT → CSV → XML), lab
 `L.load_manual_events`. Epochs: `make_fixed_length_epochs(duration=30)` from t = 0 then `drop_bad()` (an epoch
 over a BAD EDF annotation is dropped as in tool 7, with a ⚠), as many as the hypnogram, so **epoch indices
 are tool 7's**; built lazily and handed to `qc_rejected_epochs_lib.participant_from_epochs` (the
-`load_participant` split), with `compute_psds` for the detail panel.
+`load_participant` split) in float32, the detail panel's `compute_psds` run on demand (*Phase 5 ter* above).
 
 **Epoch explorer** (an Accordion under the tabs, not a step: it serves both the scoring review upstream of
 steps 4-8 and the look at flagged / rejected epochs downstream of steps 6-7, and gains layers as steps run).

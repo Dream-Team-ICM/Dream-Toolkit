@@ -366,6 +366,16 @@ def test_tool0_explorer_and_step_6_on_a_nap_without_n3(tmp_path):
         assert nb.value("STATUS['6']") == 'up_to_date', nb.widget_text()[-3000:]
         assert nb.value("STATE['preproc']['bad_names']") == ['O2']
         assert 'Step 6 has not run' not in nb.value('html_explorer_info.value')
+        # the preprocessed signal in float32, O2 left out of the display but not of step 6's epochs; the detail panel's PSD
+        # computed for the epoch shown and its reference only, equal to a PSD of every epoch with tool 7's smoothing
+        nb.set('dd_signal', 'preproc')
+        nb.run('goto_epoch(3)')
+        assert 'Detail error' not in str(nb.value('[str(o) for o in out_detail.outputs]'))
+        assert 'O2' in nb.value("STATE['preproc']['epochs'].ch_names") and 'O2' not in nb.value("STATE['P']['ch_names']")
+        assert nb.value("STATE['P']['data_uV'].dtype.name") == 'float32'
+        nb.run("_d = STATE['psd_done']; _f, _all = L.compute_psds(STATE['P']['epochs'], **STATE['psd_cfg'])")
+        assert nb.value("int(_d.sum())") >= 1 and nb.value("STATE['psd_cfg']['smoothing']['enabled']")
+        assert nb.value("bool(np.allclose(_all[_d], STATE['psds'][_d], rtol=1e-12, atol=0))")
 
 
 @pytest.mark.tool4

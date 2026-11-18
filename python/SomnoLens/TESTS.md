@@ -317,6 +317,12 @@ is flagged; `test_autoscoring_menus.py`, tool 3bis's menus (only the EOG tool 2 
 recording lacking a channel gets, the channels SleepFM reads). In standard: `test_autoscoring_formats.py`, the EOG menus of tool
 3bis on BrainVision recordings with a single right EOG; `test_brainvision_chain.py`, tool 0 on a nap without N3 (the orange box
 before step 6, another hypnogram shown read only, *Tick all* / *Untick all*, step 6 with a channel unticked).
+Tool 0's loading after its measurements: in quick, `test_high_density.py` checks the explorer's signal in float32 (equal to the
+float64 values rounded once, tool 8 still float64), the PSD of a few epochs equal to the PSD of every epoch (raw and with tool 7's
+smoothing), and the clean reference of the detail panel (every clean epoch of the stage on a PSG, 48 spread over the night at 62
+channels, the legend saying `n=48 of 412`). In standard, `test_tool0.py` checks after step 1 that only the epoch shown and its
+reference have a PSD, and `test_brainvision_chain.py` the preprocessed display with a channel unticked (left out of the display,
+kept in step 6's epochs, the PSD computed on demand equal to a PSD of every epoch).
 
 `test_context_gain.py` checks the **Divide by** of tool 2 (an ECG and a chin EMG recorded through an adapter that amplifies them
 100 times, which the file does not say):
