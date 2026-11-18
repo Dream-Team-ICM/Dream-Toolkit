@@ -26,6 +26,7 @@ import mne
 import participant_selection_lib as PSL     # the excluded-participant banner of the report (same folder)
 from edf_io_lib import (   # one copy, in edf_io_lib (same folder)
     BASE_STAGE_COLORS, CUSTOM_STAGE_PALETTE, load_custom_stages, parse_custom_field, HD_CHANNEL_THRESHOLD,
+    draw_hypnogram,
 )
 
 # numpy 2 renamed trapz -> trapezoid; keep both working
@@ -916,22 +917,21 @@ def plot_clean_hypnogram(meta, custom_stages, file_id, n_total=None, stage_total
     """Stage of every surviving epoch against its ORIGINAL epoch index, so the epochs removed
     by tools 7/8/8bis show up as gaps, plus the clean-epoch count per stage. `stage_totals` {stage: epochs of
     that stage in the recording} adds the share kept beside each count, '123 (85 %)'."""
-    stage_y, colors, ytick_pos, ytick_lab = stage_style(custom_stages)
-    epoch_idx = meta['epoch_idx'].values
+    _, colors, _, _ = stage_style(custom_stages)
+    epoch_idx = meta['epoch_idx'].values.astype(int)
     stages = meta['stage'].astype(str).values
     fig, axes = plt.subplots(1, 2, figsize=(15, 3.2), gridspec_kw={'width_ratios': [3, 1]})
 
     ax = axes[0]
-    y = np.array([stage_y.get(s, np.nan) for s in stages], dtype=float)
-    ax.scatter(epoch_idx, y, s=6, c=[colors.get(s, '#888888') for s in stages])
-    ax.set_yticks(ytick_pos)
-    ax.set_yticklabels(ytick_lab)
-    ax.set_xlabel('Epoch index in the recording')
     kept = len(stages)
     total = n_total if n_total else (int(epoch_idx.max()) + 1 if len(epoch_idx) else 0)
+    # the toolkit's hypnogram over the whole night, a gap where an epoch was removed
+    night = np.full(max(total, int(epoch_idx.max()) + 1 if len(epoch_idx) else 0), '', dtype=object)
+    night[epoch_idx] = stages
+    draw_hypnogram(ax, np.arange(len(night) + 1), night, custom_stages, fontsize=9)
+    ax.set_xlabel('Epoch index in the recording')
     ax.set_title(f'{file_id} - clean epochs: {kept} kept out of {total} '
                  f'({100.0 * kept / max(total, 1):.0f} %); gaps = removed epochs')
-    ax.grid(alpha=0.2)
 
     ax = axes[1]
     order = [s for s in AASM_STAGES + list(custom_stages) if s in set(stages)]
@@ -1075,7 +1075,7 @@ def plot_aperiodic_over_night(meta, res, ch_names, custom_stages):
             vals = res[key][:, ci]
             for stage in dict.fromkeys(stages):
                 m = stages == stage
-                ax.scatter(epoch_idx[m], vals[m], s=5, alpha=0.6,
+                ax.scatter(epoch_idx[m], vals[m], s=14, alpha=0.9, linewidths=0,      # filled points, clear colours
                            color=colors.get(stage, '#888888'),
                            label=stage if (ci == 0 and row == 0) else None)
             ax.grid(alpha=0.2)
@@ -1088,7 +1088,7 @@ def plot_aperiodic_over_night(meta, res, ch_names, custom_stages):
         axes[0][ci].set_ylim(*np.nanpercentile(res['exponent'], [0.5, 99.5])
                              if np.isfinite(res['exponent']).any() else (0, 1))
     if n_ch:
-        axes[0][0].legend(fontsize=8, markerscale=2)
+        axes[0][0].legend(fontsize=8, markerscale=1.5)
     _finish_grid(axes[0], n_ch, 'Exponent')
     _finish_grid(axes[1], n_ch, 'Offset')
     fig.suptitle('Aperiodic parameters across the night (one point per epoch)')
@@ -1323,8 +1323,21 @@ def plot_group_psd(psd_df, custom_stages, value_col=None,
     return fig
 
 
+POINT_SIZE = 18        # a participant on the database figures: a filled point
+POINT_ALPHA = 0.9
+
+
+def _participant_points(ax, values, x, colour, half_width, rng):
+    """One filled point per participant at `x`, spread over ±`half_width` so that equal values stay apart, and their
+    median as a black line (pale boxes said less than the points themselves on a few participants)."""
+    ax.scatter(x + rng.uniform(-half_width, half_width, len(values)), values, s=POINT_SIZE, color=colour,
+               alpha=POINT_ALPHA, edgecolors='white', linewidths=0.4, zorder=3)
+    ax.plot([x - 1.4 * half_width, x + 1.4 * half_width], [np.median(values)] * 2, color='black', lw=1.2, zorder=4)
+
+
 def plot_group_band(stage_df, column, label, custom_stages):
-    """Distribution across participants of one aggregated band measure, per stage and band."""
+    """Distribution across participants of one aggregated band measure, per stage and band: a filled point per
+    participant and the median as a line."""
     if stage_df is None or len(stage_df) == 0 or column not in stage_df.columns:
         return None
     _, colors, _, _ = stage_style(custom_stages)
@@ -1333,33 +1346,25 @@ def plot_group_band(stage_df, column, label, custom_stages):
     stages = [s for s in AASM_STAGES + list(custom_stages) if s in set(stage_df['stage'])]
     fig, axes = _axes_row(len(ch_names), height=4.6)
     width = 0.8 / max(len(stages), 1)
+    rng = np.random.default_rng(0)          # the same spread at every run: the report does not change by itself
     for ci, ch in enumerate(ch_names):
         ax = axes[ci]
         sub_ch = stage_df[stage_df['channel'] == ch]
         for si, stage in enumerate(stages):
-            data, pos = [], []
             for bi, band in enumerate(bands):
                 v = sub_ch[(sub_ch['stage'] == stage) & (sub_ch['band'] == band)][column].values
                 v = v[np.isfinite(v)]
                 if len(v) == 0:
                     continue
-                data.append(v)
-                pos.append(bi + (si - (len(stages) - 1) / 2) * width)
-            if not data:
-                continue
-            bp = ax.boxplot(data, positions=pos, widths=width * 0.85, patch_artist=True,
-                            showfliers=False, medianprops=dict(color='black', lw=0.8))
-            for patch in bp['boxes']:
-                patch.set_facecolor(colors.get(stage, '#888888'))
-                patch.set_alpha(0.75)
-                patch.set_linewidth(0.5)
+                _participant_points(ax, v, bi + (si - (len(stages) - 1) / 2) * width,
+                                    colors.get(stage, '#888888'), width * 0.3, rng)
         ax.set_xticks(range(len(bands)))
         ax.set_xticklabels(bands, rotation=30, ha='right')
         ax.set_title(ch)
         ax.grid(alpha=0.2, axis='y')
         if ci == 0:
             ax.set_ylabel(label)
-    handles = [matplotlib.patches.Patch(facecolor=colors.get(s, '#888888'), alpha=0.75, label=s)
+    handles = [matplotlib.patches.Patch(facecolor=colors.get(s, '#888888'), alpha=POINT_ALPHA, label=s)
                for s in stages]
     if len(axes):
         axes[0].legend(handles=handles, fontsize=8, ncol=2)
@@ -1370,7 +1375,7 @@ def plot_group_band(stage_df, column, label, custom_stages):
 
 
 def plot_group_aperiodic(ap_df, custom_stages):
-    """Exponent and offset per stage across participants (one point per participant)."""
+    """Exponent and offset per stage across participants: a filled point per participant and the median as a line."""
     if ap_df is None or len(ap_df) == 0:
         return None
     _, colors, _, _ = stage_style(custom_stages)
@@ -1382,25 +1387,22 @@ def plot_group_aperiodic(ap_df, custom_stages):
     else:
         fig, axes = plt.subplots(2, max(len(ch_names), 1), figsize=(_fig_width(len(ch_names)), 6.4),
                                  squeeze=False)
+    rng = np.random.default_rng(0)          # the same spread at every run: the report does not change by itself
     for ci, ch in enumerate(ch_names):
         sub_ch = ap_df[ap_df['channel'] == ch]
         for row, col_name, lab in [(0, 'exponent_mean', 'Exponent'), (1, 'offset_mean', 'Offset')]:
             ax = axes[row][ci]
-            data, keep = [], []
+            keep = []
             for stage in stages:
                 v = sub_ch[sub_ch['stage'] == stage][col_name].values
                 v = v[np.isfinite(v)]
                 if len(v):
-                    data.append(v)
                     keep.append(stage)
-            if data:
-                bp = ax.boxplot(data, patch_artist=True, showfliers=False,
-                                medianprops=dict(color='black', lw=0.8))
-                for patch, stage in zip(bp['boxes'], keep):
-                    patch.set_facecolor(colors.get(stage, '#888888'))
-                    patch.set_alpha(0.75)
+                    _participant_points(ax, v, len(keep), colors.get(stage, '#888888'), 0.15, rng)
+            if keep:
                 ax.set_xticks(range(1, len(keep) + 1))
                 ax.set_xticklabels(keep)
+                ax.set_xlim(0.4, len(keep) + 0.6)
             ax.grid(alpha=0.2, axis='y')
             if ci == 0:
                 ax.set_ylabel(lab)

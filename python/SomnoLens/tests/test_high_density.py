@@ -453,6 +453,147 @@ def test_tool6_overlays_say_why_a_channel_is_flagged():
 
 
 # ---------------------------------------------------------------------------------------------------------
+# Phase 5 quater: the third visual inspection (quick)
+# ---------------------------------------------------------------------------------------------------------
+def flagged_cap(n_ep=8):
+    """A 62-channel N2 night where each epoch has one channel flagged (amplitude): tool 7's 'any' rule rejects them all."""
+    info = mne.create_info(EEG62, SFREQ, 'eeg')
+    data = np.random.default_rng(2).normal(0, 20e-6, (n_ep, 62, 30 * SFREQ))
+    epochs = mne.EpochsArray(data, info, verbose=False)
+    epochs.metadata = pd.DataFrame({'stage': ['N2'] * n_ep, 'reject_flag': [True] * n_ep,
+                                    'reject_method': ['amplitude'] * n_ep, 'flag_amplitude': [True] * n_ep})
+    flags = np.zeros((n_ep, 62), dtype=bool)
+    flags[np.arange(n_ep), np.arange(n_ep) % 62] = True
+    return L.participant_from_epochs(epochs), {'amplitude': flags}
+
+
+@pytest.mark.quick
+@pytest.mark.tool8
+@pytest.mark.tool0
+def test_a_dense_cap_takes_its_clean_reference_from_the_clean_channels():
+    """Every epoch has a flagged channel: no epoch is clean, the clean channels of each epoch make the reference."""
+    n_ep = 8
+    P, pair_flags = flagged_cap(n_ep)
+    freqs, psds = L.compute_psds(P['epochs'], fmax=30.0)
+    pairs = L.clean_pairs(P['meta'], ['amplitude'], [], pair_flags, P['ch_names'])
+    assert (pairs.sum(axis=1) == 61).all()
+
+    def psd_axis(fig):
+        return next(a for a in fig.axes if a.get_title().startswith('PSD vs clean'))
+    fig = L.plot_epoch_detail(P, 0, freqs, psds, L.DEFAULT_THRESHOLDS, topomap=False)      # the epochs with no flag
+    ax = psd_axis(fig)
+    assert not any(line.get_label().startswith('clean N2 median') for line in ax.get_lines())
+    assert any('No clean N2 reference: 0 epochs with no flagged channel' in t.get_text() for t in ax.texts)
+    plt.close(fig)
+    fig = L.plot_epoch_detail(P, 0, freqs, psds, L.DEFAULT_THRESHOLDS, topomap=False, clean_pairs=pairs)
+    ax = psd_axis(fig)
+    median = next(line for line in ax.get_lines() if line.get_label().startswith('clean N2 median'))
+    assert median.get_label() == f'clean N2 median (clean channels of {n_ep} epochs)'
+    expected = np.median([psds[e][pairs[e]].mean(axis=0) for e in range(n_ep)], axis=0)
+    assert np.allclose(median.get_ydata(), expected, rtol=1e-12)
+    fig.canvas.draw()                                     # the legend under the plot
+    assert ax.get_legend().get_window_extent().y1 < ax.get_window_extent().y0
+    plt.close(fig)
+    # tool 8's Section 2 and tool 0's sample of the reference follow the same rule
+    fig = L.plot_psd_overlays_grid(freqs, psds, P['stages'], P['reject_flag'], P['meta']['reject_method'].values,
+                                   ['N2'], clean_pairs=pairs)
+    assert f'clean median (clean channels of {n_ep} epochs)' in [line.get_label() for line in fig.axes[0].get_lines()]
+    plt.close(fig)
+    assert L.detail_reference_epochs(P, 0)[1] == 0
+    half = pairs.copy()
+    half[0, :40] = False                                  # epoch 0: 21 clean channels of 62, under half
+    idx, n_clean = L.detail_reference_epochs(P, 0, clean_pairs=half)
+    assert list(idx) == list(range(1, n_ep)) and n_clean == n_ep - 1
+
+
+@pytest.mark.quick
+@pytest.mark.tool8
+@pytest.mark.tool0
+def test_clean_pairs_follow_the_channel_layer_of_tool8():
+    """A method without a per-channel column (event, 1/f of recomputed flags) flags the whole epoch; a dropped channel
+    is never clean."""
+    meta = pd.DataFrame({'stage': ['N2'] * 3, 'flag_amplitude': [True, False, False], 'flag_event': [False, True, False],
+                         'flag_1f_r2': [False, False, True]})
+    pair_flags = {'amplitude': np.array([[1, 0, 0], [0, 0, 0], [0, 0, 0]], dtype=bool)}
+    pairs = L.clean_pairs(meta, ['amplitude', 'event', '1f_r2'], [], pair_flags, ['A', 'B', 'C'], dropped_channels=['C'])
+    assert pairs.tolist() == [[False, True, False], [False, False, False], [False, False, False]]
+
+
+@pytest.mark.quick
+@pytest.mark.tool3bis
+@pytest.mark.tool5
+@pytest.mark.tool6
+@pytest.mark.tool7
+@pytest.mark.tool8
+@pytest.mark.tool8bis
+@pytest.mark.tool9
+@pytest.mark.tool0
+def test_every_hypnogram_is_drawn_the_same_way():
+    """One look (edf_io_lib.draw_hypnogram): grey line, REM red at the same width, no frame at the top and on the right."""
+    import autoreject_lib as AR
+    import autoscoring_compare_lib as AC
+    import autoscoring_lib as AL
+    import edf_io_lib as EIO
+    import macrostructure_lib as ML
+    stages = np.array(['W'] * 4 + ['N1'] * 2 + ['N2'] * 6 + ['N3'] * 4 + ['R'] * 4)
+    n = len(stages)
+
+    def check(ax, where):
+        line = ax.get_lines()[0]                          # the step line, drawn first
+        assert (line.get_color(), line.get_linewidth()) == (EIO.HYPNO_LINE_COLOR, EIO.HYPNO_LINE_WIDTH), where
+        rem = [x for x in ax.get_lines() if x.get_color() == EIO.HYPNO_REM_COLOR]
+        assert rem and all(x.get_linewidth() == EIO.HYPNO_LINE_WIDTH for x in rem), where
+        assert not ax.spines['top'].get_visible() and not ax.spines['right'].get_visible(), where
+        assert [t.get_text() for t in ax.get_yticklabels()] == ['N3', 'N2', 'N1', 'REM', 'W'], where
+
+    combined = np.zeros((n, 4), dtype=int)
+    fig = PL.plot_rejection_heatmap(combined, names(4), stages, 'x')
+    check(fig.axes[0], 'tool 7')
+    assert fig._suptitle is None and fig.axes[0].get_title().startswith('x: ')     # the title on the hypnogram
+    piv = pd.DataFrame(combined, columns=names(4), index=pd.Index(range(n), name='epoch_idx'))
+    dec = AR.auto_reject_decision(piv, pd.Series(stages, index=piv.index), ['N2'], 20, 20)
+    figs = {'tool 8bis': AR.plot_decision_heatmap(piv, dec, 'x', []),
+            'tool 8 heatmap': L.plot_channel_flag_heatmap({'ch_names': names(4), 'stages': stages},
+                                                          {'amplitude': combined.astype(bool)}, ['amplitude'],
+                                                          np.ones(n, dtype=bool)),
+            'tool 8 review strip': L.plot_review_strip({'stages': stages}, np.zeros(n, dtype=bool), set()),
+            'tools 6 and 0': QL.render_hypnospectrogram(np.arange(1.0, 5.0), np.arange(n) * 30 / 3600 + 1 / 240,
+                                                         np.random.default_rng(0).normal(size=(4, n)), stages, []),
+            'tool 5': ML.plot_night_overview(stages, []),
+            'tool 3bis': AL.plot_hypnograms(stages, stages, 'x'),
+            'tool 9': SL.plot_clean_hypnogram(pd.DataFrame({'epoch_idx': range(n), 'stage': stages}), [], 'x')}
+    figs['tool 7'] = fig
+    for where, f in figs.items():
+        check(f.axes[0], where)
+    fig, ax = plt.subplots()
+    AC._manual_hypnogram(ax, np.arange(n) * 0.5, [{'W': 'Wake', 'R': 'REM'}.get(s, s) for s in stages])
+    check(ax, 'tool 3bis, comparison with the expert')
+    plt.close('all')
+
+
+@pytest.mark.quick
+@pytest.mark.tool9
+@pytest.mark.tool0
+def test_tool9_aperiodic_and_band_figures_draw_filled_points():
+    rng = np.random.default_rng(4)
+    rows = pd.DataFrame([{'file_id': f'p{p}', 'stage': st, 'channel': 'C3', 'band': b, 'exponent_mean': rng.normal(),
+                          'offset_mean': rng.normal(), 'power': rng.normal()}
+                         for p in range(5) for st in ('W', 'N2', 'R') for b in ('delta', 'alpha')])
+    for fig in (SL.plot_group_aperiodic(rows.drop_duplicates(['file_id', 'stage']), []),
+                SL.plot_group_band(rows, 'power', 'Power', [])):
+        ax = fig.axes[0]
+        assert not ax.patches                             # no box any more
+        assert ax.collections and all(c.get_alpha() == SL.POINT_ALPHA for c in ax.collections)
+        assert sum(len(c.get_offsets()) for c in ax.collections) == len(ax.collections) * 5    # a point per participant
+        plt.close(fig)
+    meta = pd.DataFrame({'epoch_idx': range(6), 'stage': ['N2'] * 6})
+    fig = SL.plot_aperiodic_over_night(meta, {'exponent': rng.normal(size=(6, 1)), 'offset': rng.normal(size=(6, 1))},
+                                       ['C3'], [])
+    assert all(c.get_alpha() == 0.9 for c in fig.axes[0].collections)
+    plt.close(fig)
+
+
+# ---------------------------------------------------------------------------------------------------------
 # Tool 6 on a 20-channel BrainVision study (standard)
 # ---------------------------------------------------------------------------------------------------------
 def spherical(ch_names):

@@ -350,9 +350,7 @@ def plot_decision_heatmap(piv, dec, fid, custom_stages):
     n_ep, n_ch = len(epochs), len(channels)
     M = piv[channels].values.T.astype(float)                     # (n_ch, n_ep) 0/1
 
-    stage_y, _sc, ytick_pos, ytick_labels = L.custom_stage_style(list(custom_stages))
     sbe = dec['stage_by_epoch']
-    hyp = np.array([stage_y.get(str(sbe[e]), np.nan) for e in epochs], dtype=float)
 
     rej = dec['reject_epoch']
     strip = np.zeros(n_ep)
@@ -372,12 +370,9 @@ def plot_decision_heatmap(piv, dec, fid, custom_stages):
         3, 1, figsize=(fig_w, h_hyp + h_strip + h_mat + 0.7), sharex=True, layout='constrained',
         gridspec_kw={'height_ratios': [h_hyp, h_strip, h_mat]})
 
-    ax_h.step(range(n_ep), hyp, where='mid', color='#333333', lw=0.8)
-    for i, e in enumerate(epochs):          # REM in red at the line's width (the toolkit's discreet convention)
-        if str(sbe[e]) == 'R':
-            ax_h.plot([i - 0.5, i + 0.5], [stage_y['R']] * 2, color='#c0392b', lw=0.8, solid_capstyle='butt')
-    ax_h.set_yticks(ytick_pos); ax_h.set_yticklabels(ytick_labels, fontsize=7)
-    ax_h.set_ylabel('stage', fontsize=8)
+    # the toolkit's hypnogram, in tool 7's style (edges at ±0.5: the cells of the matrix below are centred on the epochs)
+    L.draw_hypnogram(ax_h, np.arange(n_ep + 1) - 0.5, [sbe[e] for e in epochs], custom_stages, x_axis=False,
+                     fontsize=7)
     ax_h.set_title(f'{fid} - flagged (epoch x channel); red = dropped channel / rejected epoch', fontsize=10)
 
     ax_s.imshow(strip[np.newaxis, :], aspect='auto', vmin=0, vmax=2,

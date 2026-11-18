@@ -67,7 +67,7 @@ def test_progress_bar_text_follows_the_bar():
     label, in_row, text = row.children
     assert in_row is bar and 'Participants:' in label.value and text.value == ''
     bar.max, bar.value = 10, 3
-    assert text.value == '3 / 10'
+    assert '3 / 10' in text.value and text.value.startswith(UI._BAR_TEXT_BLOCK)
     UI.finish_progress(bar)
     assert bar.bar_style == 'success'
     UI.finish_progress(bar, n_failed=1)
@@ -78,17 +78,41 @@ def test_a_pipeline_bar_lines_up_with_the_bar_above_it():
     bar, row = UI.progress_bar('Participants:')
     step, step_row, set_phases, step_text = UI.phase_bar('Pipeline:')
     # the label column and the bar have the same widths in both rows, and the bars carry no label of their own
-    assert row.children[0].layout.width == step_row.children[0].layout.width == UI.LABEL_WIDTH
-    assert bar.layout.width == step.layout.width == UI.PROGRESS_TRACK and bar.description == step.description == ''
     column = step_row.children[1]
-    legend = column.children[1]
-    assert column.children[0] is step and legend.layout.width == UI.PROGRESS_TRACK and legend.value == ''
+    shown, legend = column.children
+    assert row.children[0].layout.width == step_row.children[0].layout.width == UI.LABEL_WIDTH
+    assert bar.layout.width == shown.layout.width == UI.PROGRESS_TRACK and bar.description == shown.description == ''
+    assert step.layout.display == 'none' and legend.layout.width == UI.PROGRESS_TRACK and legend.value == ''
     set_phases([('Load', 10, 'Load'), ('Report', 30, 'Report building')])
     assert 'width:25.0%' in legend.value and 'width:75.0%' in legend.value and 'title="Report building"' in legend.value
+    step.max, step.value = 40, 10                         # the end of the first step: the end of its segment
+    assert shown.value == UI.SHOWN_STEPS // 4
+    UI.finish_progress(step)
+    assert shown.bar_style == 'success'
     set_phases([])
     assert legend.value == ''
     step_text.value = 'x · loading…'
     assert step_row.children[2] is step_text
+
+
+def test_a_short_step_keeps_its_name_and_the_bar_follows_its_segment():
+    """Tool 8's report bar: 'Figures' and 'HTML' cost 6 % and 4 % of the time, too narrow for their names ('Figur', 'HTM')."""
+    step, step_row, set_phases, _ = UI.phase_bar('Report:')
+    shown, legend = step_row.children[1].children
+    phases = [('PSD', 45, 'PSD'), ('Metrics + 1/f', 45, 'Metrics'), ('Figures', 6, 'Figures'), ('HTML', 4, 'HTML')]
+    set_phases(phases)
+    widths = UI._legend_widths(phases)
+    track = int(UI.PROGRESS_TRACK[:-2])
+    for (name, _, _), width in zip(phases, widths):
+        assert width * track >= UI.LEGEND_CHAR_PX * len(name) + 8 - 1e-9, name
+        assert f'width:{100 * width:.1f}%' in legend.value
+    assert abs(sum(widths) - 1) < 1e-9 and widths[0] == widths[1]          # the long steps share the rest by cost
+    step.max = 100
+    for done, edge in ((45, widths[0]), (90, widths[0] + widths[1]), (96, sum(widths[:3])), (100, 1.0)):
+        step.value = done                                 # the end of each step: the end of its segment
+        assert abs(shown.value - UI.SHOWN_STEPS * edge) <= 1, done
+    step.value = 93                                       # half of 'Figures': half of its segment
+    assert abs(shown.value - UI.SHOWN_STEPS * (widths[0] + widths[1] + widths[2] / 2)) <= 1
 
 
 def test_a_narrow_page_puts_the_text_under_the_bar_instead_of_cutting_it():
@@ -104,6 +128,8 @@ def test_the_step_at_work_shows_a_turning_sign_until_the_run_ends():
     _, _, _, step_text = UI.phase_bar('Pipeline:')
     step_text.value = '<small>p1: computing the PSD</small>'
     assert UI.SPINNER in step_text.value and 'p1: computing the PSD' in step_text.value and 'line-height:1.4' in step_text.value
+    # the same size as the text of the participants' bar above it, whatever the tool writes
+    assert '<small>' not in step_text.value and step_text.value.startswith(UI._BAR_TEXT_BLOCK)
     step_text.value = 'p1 · done ✅'                     # a step done: no sign
     assert UI.SPINNER not in step_text.value and 'p1 · done ✅' in step_text.value
     step_text.value = 'p2 · loading'

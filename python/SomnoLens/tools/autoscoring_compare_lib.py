@@ -28,6 +28,8 @@ from scipy.optimize import minimize
 from scipy.special import softmax
 from sklearn.metrics import cohen_kappa_score, f1_score
 
+from edf_io_lib import draw_hypnogram     # the toolkit's hypnogram, one look everywhere (same folder)
+
 # Score_EDF's stage names, kept in the output tables (one definition, plan 2.4)
 PROBABILITY_COLUMNS = ['Wake', 'N1', 'N2', 'N3', 'REM']
 STAGE_NAMES = dict(enumerate(PROBABILITY_COLUMNS))
@@ -41,9 +43,6 @@ NATIVE_30S = {'YASA', 'GSSC'}                                                   
 STAGE_COLORS = {'Wake': '#969696', 'N1': '#9e9ac8', 'N2': '#807dba', 'N3': '#6a51a3', 'REM': '#c994c7'}
 STAGER_COLORS = {'SleepFM': '#2a78d6', 'SleepFM recal A': '#008300', 'SleepFM recal B': '#7b3fb0',
                  'GSSC': '#eb6834', 'YASA': '#1baf7a'}
-HYPNO_Y = {'Wake': 0, 'REM': 1, 'N1': 2, 'N2': 3, 'N3': 4}     # clinical layout: W on top, N3 at the bottom
-HYPNO_LINE_COLOR = '#555555'
-HYPNO_REM_COLOR = '#c0392b'
 
 
 # ---------------------------------------------------------------------------------------------------------
@@ -425,18 +424,13 @@ def compute_agreement(scored_df, stagers, subjects):
 
 
 def _manual_hypnogram(ax, minutes, stage_names):
-    """Expert hypnogram, toolkit layout: grey step line, W on top, N3 at the bottom, REM in red at the line's
-    width."""
-    y = np.array([HYPNO_Y.get(s, np.nan) for s in stage_names], dtype=float)
+    """Expert hypnogram: the toolkit's hypnogram (edf_io_lib.draw_hypnogram), Score_EDF's 'Wake' / 'REM' read as W / R.
+    `minutes` = the start of each epoch."""
     x = np.asarray(minutes, float)
-    ax.step(x, y, where='post', color=HYPNO_LINE_COLOR, lw=1.2)
     step = np.median(np.diff(x)) if len(x) > 1 else 0.5
-    for i in np.flatnonzero(y == HYPNO_Y['REM']):
-        x1 = x[i + 1] if i + 1 < len(x) else x[i] + step
-        ax.plot([x[i], x1], [y[i], y[i]], color=HYPNO_REM_COLOR, lw=1.2, solid_capstyle='butt')
-    ax.set_yticks(list(HYPNO_Y.values()))
-    ax.set_yticklabels(list(HYPNO_Y.keys()), fontsize=8)
-    ax.set_ylim(max(HYPNO_Y.values()) + 0.5, -0.5)
+    edges = np.append(x, x[-1] + step) if len(x) else np.array([0.0])
+    labels = [{'Wake': 'W', 'REM': 'R'}.get(str(s), str(s)) for s in stage_names]
+    draw_hypnogram(ax, edges, labels, fontsize=8)
 
 
 def plot_hypnodensities(epochs_df, stagers, subject):

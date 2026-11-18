@@ -22,6 +22,7 @@ from scipy.stats import kurtosis as scipy_kurtosis, skew as scipy_skew
 
 import channel_check_lib as CC
 from edf_io_lib import HD_CHANNEL_THRESHOLD   # the dense layout of the figures above 12 channels (same folder)
+from edf_io_lib import draw_hypnogram         # the toolkit's hypnogram, one look everywhere
 
 
 # ---------------------------------------------------------------------------------------------------------
@@ -543,7 +544,6 @@ def render_hypnospectrogram(f, t, Sxx, hypno_labels, custom_stages, trimperc=2.5
     same rendering (colour scaling, dead-epoch greying) as the per-channel figures.
     Returns a Figure."""
     hypno_labels = np.asarray(hypno_labels)
-    stage_y, stage_colors, ytick_pos, ytick_labels = custom_stage_style(custom_stages)
     Sxx, norm, spec_cmap = spectrogram_colour_scale(Sxx, trimperc)
 
     # Two rows (hypnogram strip, spectrogram) and a thin right column for the colour scale, used only beside
@@ -554,25 +554,12 @@ def render_hypnospectrogram(f, t, Sxx, hypno_labels, custom_stages, trimperc=2.5
     ax1 = fig.add_subplot(grid[1, 0])
     cax = fig.add_subplot(grid[1, 1])
 
-    # Hypnogram strip: one y per 30s epoch; black line, REM red, each custom stage in its colour, all at the
-    # line's own width (discreet).
+    # Hypnogram strip, one y per 30 s epoch: the toolkit's hypnogram (edf_io_lib.draw_hypnogram).
     n_ep = len(hypno_labels)
     ep_hours = np.arange(n_ep + 1) * 30 / 3600
-    y = np.array([stage_y.get(s, np.nan) for s in hypno_labels], dtype=float)
-    y_step = np.append(y, y[-1] if n_ep else np.nan)
-    ax0.step(ep_hours, y_step, where='post', color='k', lw=1.0)
-    for s in (['R'] + list(custom_stages)):
-        col = REM_COLOR if s == 'R' else stage_colors.get(s)
-        for ei in np.where(hypno_labels == s)[0]:
-            ax0.plot([ep_hours[ei], ep_hours[ei + 1]], [stage_y[s], stage_y[s]],
-                     color=col, lw=1.0, solid_capstyle='butt')
-    ax0.set_yticks(ytick_pos)
-    ax0.set_yticklabels(ytick_labels, fontsize=8)
-    ax0.set_ylim(min(ytick_pos) - 0.8, max(ytick_pos) + 0.8)
-    ax0.set_xlim(0, ep_hours[-1] if n_ep else 1)
-    ax0.xaxis.set_visible(False)
-    for sp in ['top', 'right', 'bottom']:
-        ax0.spines[sp].set_visible(False)
+    draw_hypnogram(ax0, ep_hours, hypno_labels, custom_stages, x_axis=False, fontsize=8)
+    if not n_ep:
+        ax0.set_xlim(0, 1)
 
     # Spectrogram.
     im = ax1.pcolormesh(t, f, Sxx, norm=norm, cmap=spec_cmap, antialiased=True, shading='auto')

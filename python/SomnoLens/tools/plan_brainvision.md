@@ -1,7 +1,7 @@
 # Plan : format BrainVision (.vhdr, .vmrk, .eeg) et une seule version de chaque outil
 
 **Statut** : version 3 du 2026-11-06, confirmée. Phases 1 à 5, 4 ter, 5 bis et 5 ter faites et commitées (5 ter avec la
-correction A + B de l'outil 0). Phase 5 quater (troisième inspection visuelle) écrite le 2026-11-18, à confirmer. Restent ensuite la
+correction A + B de l'outil 0). Phase 5 quater (troisième inspection visuelle) confirmée et codée le 2026-11-18. Restent ensuite la
 phase 6 (jumeaux Curry), les phases 6 bis (bouton Stop) et 6 ter (numérotation des dossiers de rapports), puis la phase 7.
 Chaque phase est validée avant la suivante.
 **Objectif immédiat** : pouvoir inspecter ces données et faire l'autoscoring (phases 1 à 3). Le reste de la chaîne suit
@@ -786,7 +786,7 @@ Sur une nuit de 8 h, la référence reste à 2 s par stade (48 époques quelle q
 chargement, et le pic de mémoire passe d'environ 32 Go à environ 16 Go (la lecture de l'enregistrement en float64 reste le plus gros
 poste).
 
-### Phase 5 quater : troisième inspection visuelle (2026-11-18, à confirmer)
+### Phase 5 quater : troisième inspection visuelle (2026-11-18, confirmée, codée)
 
 Des maquettes sur données synthétiques (62 et 4 canaux) montrent chaque proposition à côté de la figure actuelle. Elles sont dans le
 scratchpad de la session, pas dans le dépôt.
@@ -874,6 +874,21 @@ droit de la carte (ligne A). Trois propositions, sur deux époques synthétiques
   `test_settings_skip.py` lit l'étiquette *Done.* de l'outil 6 : il est adapté.
 - `refactor_check.py` : toutes les tables identiques. Seuls les rapports des outils touchés changent.
 - Puis ton inspection visuelle.
+
+**Confirmé le 2026-11-18** : points 1, 2, 4, 5 tels quels, **topographies inchangées** (ton choix après les figures A à D).
+
+**Précisions apportées en faisant** (2026-11-18) :
+- les textes des deux barres : 12 px, la première ligne centrée sur la barre. Vérifié sur une capture de la page Voila (Edge sans
+  fenêtre, page locale, serveur arrêté et dossier supprimé ensuite) ;
+- l'outil 8 écrit *Done ✅* (plus *Done.*), les outils 6 et 7 finissent sur *Done ✅* / *Done in … ✅* dans le texte d'étape ;
+- un hypnogramme sans stade pour une époque (époque retirée, étiquette inconnue) laisse un trou. Les outils 7 et 8 la mettaient
+  sous N3, sans nom ;
+- l'outil 3bis écrit *REM* au lieu de *R* sur ses hypnogrammes et n'a plus de grille, comme les autres ;
+- deux superpositions gardent leur couleur de contraste : la ligne blanche du navigateur de l'outil 0 sur le spectrogramme, la
+  ligne noire de l'expert sur l'hypnodensité de l'outil 3bis ;
+- l'hypnogramme des époques propres de l'outil 9 devient la ligne de la boîte à outils avec des trous (plus de points colorés) ;
+- sous 3 époques de référence, la ligne qui le dit vaut aussi pour les PSD par stade de la section 2 de l'outil 8, à tout
+  montage.
 
 ### Phase 6 : suppression des jumeaux Curry
 

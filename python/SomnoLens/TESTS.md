@@ -324,6 +324,18 @@ channels, the legend saying `n=48 of 412`). In standard, `test_tool0.py` checks 
 reference have a PSD, and `test_brainvision_chain.py` the preprocessed display with a channel unticked (kept aside by step 6 and
 left out of the display, step 6's epochs shown without a copy, the PSD computed on demand equal to a PSD of every epoch).
 
+The third visual inspection (phase 5 quater), in quick:
+- `test_ui_lib.py`: a short step of a pipeline bar keeps its whole name in the legend (tool 8's *Figures* and *HTML*), the bar
+  shown reaches the end of each segment when the tool ends that step, and the texts beside both bars take the same block.
+- `test_high_density.py`: on a 62-channel night where every epoch has one flagged channel, the PSD of the shown epoch says why it
+  has no clean reference with the epochs rule, and with the clean channels of each epoch draws the median of their means (the
+  value checked), the legend under the plot; tool 8's Section 2 and tool 0's sample follow the same rule; the clean pairs flag
+  the whole epoch for an event and never keep a dropped channel; every hypnogram of tools 3bis, 5, 6 / 0, 7, 8, 8bis and 9 is
+  drawn the same way (grey line, REM red at the same width, no frame at the top and on the right, tool 7's title on its
+  hypnogram); tool 9's aperiodic and band figures draw a filled point per participant, no box.
+In standard, `test_exclusion_tools.py` builds tool 8's report and checks it ends on `Done ✅` without the turning sign, and
+`test_settings_skip.py` reads tool 6's end in its step text (the extra participant label is gone).
+
 `test_context_gain.py` checks the **Divide by** of tool 2 (an ECG and a chin EMG recorded through an adapter that amplifies them
 100 times, which the file does not say):
 

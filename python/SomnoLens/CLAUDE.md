@@ -181,7 +181,9 @@ The "what to do / what not to break" reminders, grouped by theme. Each points to
 - **Display conventions = one style everywhere** (2026-10-13): REM in red **at the hypnogram line's own
   width** (never bold; custom stages too) on every hypnogram (tools 0, 3bis, 5, 6, 7, 8, 8bis + twins); every
   hypnospectrogram in `viridis` with a colour scale `dB (µV²/Hz)`; scored events coloured by family
-  (`macrostructure_lib.EVENT_COLORS`). A new figure follows them. → SPEC *Cross-cutting → Display conventions*.
+  (`macrostructure_lib.EVENT_COLORS`). **Every hypnogram is drawn by `edf_io_lib.draw_hypnogram`** (2026-11-18; only
+  an overlay on a coloured image keeps its contrasting colour). A new figure follows them. → SPEC *Cross-cutting →
+  Display conventions*.
 - **Time-series display cap for DC-coupled data**: DC sources (Curry `.cdt`, any DC export with no
   clipping) → cap the shared amplitude limit at `y_lim = min(max_p999, 500.0)` (`DISPLAY_YLIM_UV = 500.0`),
   never a fixed window. Currently **Curry-only**. EDF tools keep the uncapped autoscale on purpose (full
@@ -205,7 +207,8 @@ The "what to do / what not to break" reminders, grouped by theme. Each points to
   (`run` / `save` green, `read` blue = **Scan** as the entry button, `caution`, `helper`), widths, **every progress bar**
   (`progress_bar`, and `phase_bar` for a pipeline bar with its legend of steps: never an `IntProgress` in a page). **A bar
   never stays still while a step works**: a loop reports through an optional `progress(done, total)` of the library, a step
-  that cannot gets the turning sign (`working_text` / `working`, stopped by `finish_progress` / `stop_working`). A log
+  that cannot gets the turning sign (`working_text` / `working`, stopped by `finish_progress` / `stop_working`: write a
+  bar's last text **before** `finish_progress`). A log
   line with a symbol goes through `UI.log` (coloured), `picker_title`
   / `help_html` / `text_block` (a long widget text needs one: a widget HTML spaces wrapped lines by 28 px),
   progress bars, suffix menus (`suffix_menu`: the field stays what the tool reads), the **Inputs found** list

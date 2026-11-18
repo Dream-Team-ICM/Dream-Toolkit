@@ -35,7 +35,7 @@ import mne
 from sklearn.metrics import accuracy_score, cohen_kappa_score, f1_score, confusion_matrix
 from edf_io_lib import (   # one copy, in edf_io_lib (same folder)
     CUSTOM_STAGE_PALETTE, load_custom_stages, drop_suffix_duplicates, adapt_remap_dict_to_suffixes, load_json_lenient,
-    context_divisors, context_gain,
+    context_divisors, context_gain, draw_hypnogram,
 )
 import recording_lib as RL
 import channel_check_lib as CC
@@ -79,12 +79,9 @@ except Exception as e:
 EPOCH_SEC = 30
 STAGES = ['W', 'N1', 'N2', 'N3', 'R']
 GSSC_STAGE = {0: 'W', 1: 'N1', 2: 'N2', 3: 'N3', 4: 'R'}       # GSSC's integer coding
-# Clinical hypnogram layout: W on top, then R, then NREM getting deeper downwards.
-HYPNO_Y = {'W': 0, 'R': 1, 'N1': 2, 'N2': 3, 'N3': 4}
 # Stage colours of the rest of the toolkit (BASE_STAGE_COLORS of tools 0/6/7/9 and qc_rejected_epochs_lib).
 STAGE_COLORS = {'W': '#969696', 'N1': '#9e9ac8', 'N2': '#807dba', 'N3': '#6a51a3', 'R': '#c994c7'}
-# Hypnogram drawing of tools 6/7: grey step line, REM highlighted in red.
-HYPNO_LINE_COLOR = '#555555'
+# REM of the expert line drawn over a hypnodensity (the hypnograms themselves: edf_io_lib.draw_hypnogram)
 HYPNO_REM_COLOR = '#c0392b'
 
 
@@ -467,35 +464,12 @@ def add_clock_axis(ax, start_dt, x_max_h):
     sec.set_xlabel(f'Clock time (recording start {start_dt:%H:%M}, EDF header)', fontsize=8)
 
 
-def _hypno_rows(extra):
-    """Stage -> row (0 = W at the top ... 4 = N3), then the extra non-AASM labels below N3."""
-    rows = dict(HYPNO_Y)
-    for i, s in enumerate(extra):
-        rows[s] = 5 + i
-    return rows
-
-
 def _step_hypno(ax, labels, title, extra=(), custom_stages=()):
-    """Hypnogram as in tools 6/7 (grey line, REM red); `extra` = non-AASM labels drawn as their own rows
-    below N3, each highlighted in its custom-stage colour. REM and the extra rows at the line's own width
-    (the toolkit's discreet convention)."""
-    rows = _hypno_rows(extra)
-    y = np.array([rows.get(s, np.nan) for s in labels], dtype=float)
-    ax.step(_hours(len(y)), np.append(y, y[-1] if len(y) else np.nan), where='post',
-            color=HYPNO_LINE_COLOR, lw=1.2)
-    rem = y == HYPNO_Y['R']
-    for i in np.where(rem)[0]:
-        ax.plot(_hours(len(y))[i:i + 2], [y[i], y[i]], color=HYPNO_REM_COLOR, lw=1.2,
-                solid_capstyle='butt')
-    for s in extra:
-        for i in np.where(y == rows[s])[0]:
-            ax.plot(_hours(len(y))[i:i + 2], [y[i], y[i]], lw=1.2, solid_capstyle='butt',
-                    color=non_aasm_color(s, list(custom_stages)))
-    ax.set_yticks(list(rows.values()))
-    ax.set_yticklabels(list(rows.keys()))
-    ax.set_ylim(max(rows.values()) + 0.5, -0.5)
+    """The toolkit's hypnogram (edf_io_lib.draw_hypnogram); `extra` = the non-AASM labels drawn as their own rows below
+    N3, each in its custom-stage colour (MT and other grey)."""
+    draw_hypnogram(ax, _hours(len(labels)), labels, custom_stages=list(extra),
+                   colors={s: non_aasm_color(s, list(custom_stages)) for s in extra}, fontsize=9)
     ax.set_title(title, loc='left', fontsize=10)
-    ax.grid(axis='y', alpha=0.3)
 
 
 def plot_hypnograms(gssc, expert, file_id, custom_stages=(), start_dt=None, algo='GSSC'):

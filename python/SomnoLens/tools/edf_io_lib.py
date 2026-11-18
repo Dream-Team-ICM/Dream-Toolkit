@@ -782,6 +782,48 @@ def custom_stage_style(custom_stages):
 
 
 # ---------------------------------------------------------------------------------------------------------
+# The hypnogram: one look for every hypnogram of the toolkit (SPEC *Cross-cutting -> Display conventions*). Tools 3bis,
+# 5, 6, 7, 8, 8bis, 9 and 0 draw it with draw_hypnogram; an overlay on a coloured image (tool 0's navigator, tool 3bis's
+# hypnodensity) keeps the contrasting colour it needs there.
+# ---------------------------------------------------------------------------------------------------------
+HYPNO_LINE_COLOR = '#555555'
+HYPNO_LINE_WIDTH = 1.2
+HYPNO_REM_COLOR = '#c0392b'
+
+
+def draw_hypnogram(ax, x_edges, stages, custom_stages=(), colors=None, x_axis=True, fontsize=8):
+    """Draws `stages` (one label per epoch) as the toolkit's hypnogram in `ax`: a grey step line, REM in red and each
+    custom stage in its colour at the line's own width (never bold), the stage names on the left axis (W at the top,
+    N3 at the bottom, the custom stages below it, custom_stage_style), no frame at the top and on the right.
+    `x_edges` = len(stages) + 1 edges in the figure's unit (epoch index, hours, minutes). A label that is no stage (an
+    epoch left out, an unknown label) leaves a gap. `colors` = {custom stage: colour} replacing the default ones (tool
+    3bis's MT and other, grey). `x_axis=False`: no bottom frame and no x ticks, for a strip above a panel that carries
+    the time axis (with shared axes the panel below keeps its ticks)."""
+    stage_y, stage_colors, ytick_pos, ytick_labels = custom_stage_style(list(custom_stages))
+    stage_colors.update(colors or {})
+    labels = np.array([str(s) for s in stages], dtype=object)
+    y = np.array([stage_y.get(s, np.nan) for s in labels], dtype=float)
+    x = np.asarray(x_edges, dtype=float)
+    ax.step(x, np.append(y, y[-1] if len(y) else np.nan), where='post', color=HYPNO_LINE_COLOR,
+            lw=HYPNO_LINE_WIDTH, zorder=2)
+    for stage in ['R'] + list(custom_stages):
+        colour = HYPNO_REM_COLOR if stage == 'R' else stage_colors.get(stage)
+        for i in np.flatnonzero(labels == stage):
+            ax.plot(x[i:i + 2], [stage_y[stage]] * 2, color=colour, lw=HYPNO_LINE_WIDTH, solid_capstyle='butt',
+                    zorder=3)
+    ax.set_yticks(ytick_pos)
+    ax.set_yticklabels(ytick_labels, fontsize=fontsize)
+    ax.set_ylim(min(ytick_pos) - 0.6, max(ytick_pos) + 0.6)
+    if len(x):
+        ax.set_xlim(x[0], x[-1])
+    ax.spines['top'].set_visible(False)
+    ax.spines['right'].set_visible(False)
+    if not x_axis:
+        ax.spines['bottom'].set_visible(False)
+        ax.tick_params(axis='x', which='both', bottom=False, labelbottom=False)
+
+
+# ---------------------------------------------------------------------------------------------------------
 # High-density montages: one threshold for every display library (qc_rejected_epochs_lib, preprocessing_lib,
 # spectral_lib, quality_lib). Above it the figures switch to their dense layout; at or below it they are drawn
 # as before, so a 3-6 channel PSG study is unchanged. Here because every library already imports this module.

@@ -114,11 +114,11 @@ def test_tool6_the_page_around_the_question_tells_where_the_run_stands(t6_data):
     with NotebookSession(pipeline.T6) as nb:
         open_tool6(nb, t6_data)
         nb.click('btn_run')
-        assert nb.value('progress_label.value') == 'Done.'
+        assert 'Done ✅' in nb.value('progress_ch_label.value')
         nb.set('hp_check', True)
         nb.click('btn_run')                               # the question: nothing says the previous run is done
         assert QUESTION in nb.widget_text()
-        assert nb.value('progress_label.value') == ''
+        assert nb.value('progress_ch_label.value') == ''
         assert nb.value('progress_ch.value') == 0
         nb.set('hp_check', False)
         nb.click('btn_run')                               # no difference any more: the note goes with the question

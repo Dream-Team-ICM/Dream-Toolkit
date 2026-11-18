@@ -215,6 +215,8 @@ PROGRESS_WIDTH = WIDE_WIDTH                                                     
 PROGRESS_TRACK = f'{int(PROGRESS_WIDTH[:-2]) - int(LABEL_WIDTH[:-2])}px'        # the bar itself
 PROGRESS_TEXT_MIN = '180px'     # narrower than this beside the bar, the text goes under it (and wraps) instead of being cut
 PHASE_COLORS = ['#e7ecff', '#eef7e7', '#fff4dc', '#ffeaea', '#f1e8fb', '#e6f4f6']   # the steps of a pipeline bar, in turn
+LEGEND_CHAR_PX = 5.5            # width of a letter of the legend under a pipeline bar (9 px font), to keep each name whole
+SHOWN_STEPS = 1000              # the resolution of the bar shown under a pipeline bar's legend
 
 # A bar never stays still while a step works (SPEC *Voila page conventions -> Progress*): a step that loops moves its bar
 # at each item, and the step being done shows this small turning sign beside its name. The browser animates it itself
@@ -225,6 +227,9 @@ SPINNER = ('<svg width="12" height="12" viewBox="0 0 12 12" style="vertical-alig
            '<animateTransform attributeName="transform" type="rotate" from="0 6 6" to="360 6 6" dur="0.9s" '
            'repeatCount="indefinite"/></path></svg>')
 _STEP_BLOCK = '<div class="dtk-step" style="line-height:1.4;">'
+# The text beside a bar: one size whatever the tool writes (a <small> in it is dropped), its first line centred on the bar
+# (28 px high), so that the texts of two bars one under the other line up.
+_BAR_TEXT_BLOCK = '<div class="dtk-step" style="line-height:1.4; padding-top:5px; font-size:12px;">'
 _STEP_TEXTS = []                # the step texts of the page's phase bars: finish_progress stops their sign
 
 
@@ -251,7 +256,7 @@ def progress_bar(description='Participants:', width=None):
     label, bar, text = _progress_parts(description)
 
     def _update_text(_=None):
-        text.value = f'{bar.value} / {bar.max}' if bar.value else ''
+        text.value = f'{_BAR_TEXT_BLOCK}{bar.value} / {bar.max}</div>' if bar.value else ''
 
     bar.observe(_update_text, names=['value', 'max'])
     return bar, _progress_row([label, bar, text])
@@ -270,47 +275,101 @@ def working(text):
     return f'{_STEP_BLOCK}{SPINNER}<i>{text}</i></div>'
 
 
-def working_text(widget):
+def working_text(widget, block=_STEP_BLOCK):
     """Makes `widget` (a widget HTML saying what a step is doing) put the turning sign before any text written in it, as
     a block that wraps; a text ending with ✅ (done) gets no sign, '' empties it, finish_progress / stop_working stop it.
-    Returns the widget."""
+    `block` = the opening tag of that block (phase_bar gives _BAR_TEXT_BLOCK, whose text drops its <small>). Returns the
+    widget."""
     _STEP_TEXTS.append(widget)
 
     def _on_step(change):
         new = change['new']
-        if not new or new.startswith(_STEP_BLOCK):
+        if not new or new.startswith(block):
             return
+        if block == _BAR_TEXT_BLOCK:
+            new = new.replace('<small>', '').replace('</small>', '')
         done = new.rstrip().removesuffix('</small>').removesuffix('</i>').rstrip().endswith('✅')
-        widget.value = f'{_STEP_BLOCK}{"" if done else SPINNER}{new}</div>'
+        widget.value = f'{block}{"" if done else SPINNER}{new}</div>'
 
     widget.observe(_on_step, names='value')
     return widget
 
 
+def _legend_widths(phases):
+    """The share of a pipeline bar's legend each step takes: its cost, but at least the width of its name (short last
+    steps lost theirs: 'Figur', 'HTM'). Fractions that sum to 1."""
+    track_px = int(PROGRESS_TRACK[:-2])
+    need = [(LEGEND_CHAR_PX * len(name) + 8) / track_px for name, _, _ in phases]
+    costs = [max(float(cost), 0.0) for _, cost, _ in phases]
+    fixed = {}                     # the steps given the width of their name
+    while len(fixed) < len(phases):
+        free = 1.0 - sum(fixed.values())
+        cost_free = sum(c for k, c in enumerate(costs) if k not in fixed)
+        narrow = {k: need[k] for k, c in enumerate(costs)
+                  if k not in fixed and (cost_free <= 0 or free * c / cost_free < need[k])}
+        if not narrow:
+            break
+        fixed.update(narrow)
+    free = 1.0 - sum(fixed.values())
+    cost_free = sum(c for k, c in enumerate(costs) if k not in fixed)
+    widths = [fixed[k] if k in fixed else (free * c / cost_free if cost_free > 0 else 0.0) for k, c in enumerate(costs)]
+    total = sum(widths)
+    return [w / total for w in widths] if total > 0 else widths
+
+
 def phase_bar(description='Pipeline:'):
     """The second bar of a run, under the progress_bar of the participants: one participant's steps, in units of time
-    cost, with the legend of its steps glued under the bar (a segment per step, its width following its cost).
-    Returns (bar, row, set_phases, step_text): set bar.max and bar.value as usual, call set_phases([(label, cost,
-    tooltip), ...]) when the steps are known ([] hides the legend), and write the current step into step_text.value
-    (HTML, on the right of the bar). The text written there gets the turning sign of a step at work (SPINNER) and wraps
-    as a block; a text ending with ✅ (done) gets no sign, '' empties it, and finish_progress / stop_working stop it."""
-    label, bar, step_text = _progress_parts(description)
+    cost, with the legend of its steps glued under the bar (a segment per step, its width following its cost, at least
+    the width of its name). Returns (bar, row, set_phases, step_text): set bar.max and bar.value as usual, call
+    set_phases([(label, cost, tooltip), ...]) when the steps are known ([] hides the legend), and write the current step
+    into step_text.value (HTML, on the right of the bar). The text written there gets the turning sign of a step at work
+    (SPINNER) and wraps as a block; a text ending with ✅ (done) gets no sign, '' empties it, and finish_progress /
+    stop_working stop it.
+
+    `bar` counts in the tool's units and is not shown: the bar shown follows it on the widths of the legend, so that it
+    reaches the end of a step's segment when the tool reaches the end of that step, even for a step widened to its name.
+    Its bar_style follows too."""
+    label, shown, step_text = _progress_parts(description)
+    shown.max = SHOWN_STEPS
+    bar = widgets.IntProgress(value=0, min=0, max=1, bar_style='info', layout=widgets.Layout(display='none'))
     legend = widgets.HTML('', layout=widgets.Layout(width=PROGRESS_TRACK, margin='0'))
-    working_text(step_text)
+    working_text(step_text, block=_BAR_TEXT_BLOCK)
+    edges = {'cost': [0.0, 1.0], 'shown': [0.0, 1.0]}      # where each step starts and ends, in cost and on the legend
+
+    def _follow(_=None):
+        done = min(max(bar.value / bar.max, 0.0), 1.0) if bar.max else 0.0
+        position = 1.0
+        for k in range(1, len(edges['cost'])):
+            if done <= edges['cost'][k]:
+                c0, c1 = edges['cost'][k - 1], edges['cost'][k]
+                s0, s1 = edges['shown'][k - 1], edges['shown'][k]
+                position = s0 + (s1 - s0) * ((done - c0) / (c1 - c0) if c1 > c0 else 1.0)
+                break
+        shown.value = int(round(SHOWN_STEPS * position))
+        shown.bar_style = bar.bar_style
+
+    bar.observe(_follow, names=['value', 'max', 'bar_style'])
 
     def set_phases(phases):
-        total = max(1, sum(cost for _, cost, _ in phases))
+        total = sum(max(float(cost), 0.0) for _, cost, _ in phases)
+        widths = _legend_widths(phases) if phases and total > 0 else []
+        cost_edges, shown_edges = [0.0], [0.0]
+        for (_, cost, _), width in zip(phases, widths):
+            cost_edges.append(cost_edges[-1] + max(float(cost), 0.0) / total)
+            shown_edges.append(shown_edges[-1] + width)
+        edges['cost'], edges['shown'] = (cost_edges, shown_edges) if widths else ([0.0, 1.0], [0.0, 1.0])
         segments = []
-        for k, (name, cost, tip) in enumerate(phases):
+        for k, ((name, _, tip), width) in enumerate(zip(phases, widths)):
             border = '' if k == len(phases) - 1 else 'border-right:1px solid #bbb;'
-            segments.append(f'<div title="{tip}" style="width:{100 * cost / total:.1f}%;{border}text-align:center;'
+            segments.append(f'<div title="{tip}" style="width:{100 * width:.1f}%;{border}text-align:center;'
                             f'background:{PHASE_COLORS[k % len(PHASE_COLORS)]};overflow:hidden;white-space:nowrap;">'
                             f'{name}</div>')
         legend.value = ('<div style="display:flex;width:100%;box-sizing:border-box;height:14px;font-size:9px;'
                         'line-height:14px;color:#444;border:1px solid #bbb;border-top:none;border-radius:0 0 3px 3px;'
-                        'overflow:hidden;">' + ''.join(segments) + '</div>') if phases else ''
+                        'overflow:hidden;">' + ''.join(segments) + '</div>') if segments else ''
+        _follow()
 
-    row = _progress_row([label, widgets.VBox([bar, legend], layout=widgets.Layout(margin='0')), step_text])
+    row = _progress_row([label, widgets.VBox([shown, legend], layout=widgets.Layout(margin='0')), step_text])
     return bar, row, set_phases, step_text
 
 

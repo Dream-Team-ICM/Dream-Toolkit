@@ -565,6 +565,15 @@ instead of restating them. Only tool-specific deltas are kept inline.
     ...])` sizes a segment per step (colours `PHASE_COLORS` in turn), `[]` hides it. Tools 5, 6, 7, 9 (participants +
     pipeline), 8 (its report bar) and 3bis (its SleepFM download) use them; `test_ui_lib.py` refuses an `IntProgress`
     built in a page. `progress_bar`'s `width` is ignored, kept for the frozen Curry twins until their removal.
+    **Since 2026-11-18** (phase 5 quater, the user saw *Figur* and *HTM*): a segment is at least as wide as its name
+    (`LEGEND_CHAR_PX` = 5.5 px a letter + 8 px, `_legend_widths`), the others share the rest by cost. The `bar` a tool sets
+    counts in its own units and is not shown: the bar shown (`SHOWN_STEPS` = 1000) follows it on the legend's widths, so it
+    reaches the end of a step's segment when the tool ends that step (its `bar_style` follows too). Nothing changes in the
+    tools. The texts beside both bars take one block (`_BAR_TEXT_BLOCK`: 12 px, a `<small>` written by a tool dropped, the
+    first line centred on the 28-px bar), so the `i / N` of the participants and the step below line up (checked on a Voila
+    screenshot); tools 6 and 7 no longer add a `Participant X (i/N)` label after the bar (the step text names the
+    participant, their end says `Done ✅` / `Done in … ✅` there). A tool writes its last step text **before**
+    `finish_progress`: written after, it got the turning sign again (tool 8's report said *Done.* with a turning sign).
     **A bar never stays still while a step works (rule, 2026-11-17, phase 5 ter: the user thought tool 9 and 3bis had
     hung).** A step that loops (channels, epochs, chunks, combinations, figures) moves its bar at each item: the library
     function takes an optional `progress(done, total)` callback (none = the former behaviour, the same numbers), called
@@ -1071,6 +1080,21 @@ instead of restating them. Only tool-specific deltas are kept inline.
     flat_pct=5.0%`); a list of names keeps the former legend. **Tool 9's figure titles** wrap to the figure's width
     (`_wrap_suptitle` in `_tight`, a quarter of an inch more on top per added line): the overlay of a single stage cut
     *after removing the aperiodic component*. Reports change (tools 6, 9), no table.
+  - **Phase 5 quater (2026-11-18, third visual inspection) — the clean reference of the PSD figures.** On a 62-channel
+    nap tool 8's PSD showed no clean median: an epoch counted as clean only with no flagged channel (tool 7's `any` rule),
+    and nearly no wake epoch of a cap passes; under 3 such epochs the figure drew nothing and said nothing. **Above
+    `HD_CHANNEL_THRESHOLD` channels the reference is made of the clean channels of each epoch**: `clean_pairs(meta,
+    methods_sel, event_types_sel, pair_flags, ch_names, dropped_channels)` gives the (epoch, channel) pairs no selected
+    method flags (a method with no per-channel column, always `event`, flags every channel of its epochs, as in
+    `recompute_reject`; a dropped channel is never clean); `reference_epochs` keeps the epochs of the stage with at least
+    `REF_MIN_CLEAN_SHARE` (half) of their channels clean, and `reference_spectra` gives each the mean of its clean channels.
+    The median and IQR are taken over those epochs, the legend says `clean W median (clean channels of 47 of 320
+    epochs)`. Tool 8 computes `S['clean_pairs']` with its decision (`_recompute_reject`) for `plot_epoch_detail` and the
+    Section-2 overlays (`build_participant_report_figs(clean_pairs=)` → `plot_psd_overlays_grid` → `_draw_psd_overlay`,
+    the report too); tool 0 from step 6's flags (§0). At 12 channels or fewer nothing changes. **Every montage**: under 3
+    reference epochs a line in the plot says so (`No clean N2 reference: 2 epochs with no flagged channel, 3 needed`), and
+    the detail panel's legend is under the plot (inside, a 12-channel legend hid the spectra). The topomaps stay as they
+    are (the user's choice after comparing them with discs per electrode and other colour scales).
   - **Channel triage** (`load_channel_flags` / `recompute_channel_flags` / `channel_badness` /
     `channels_over_threshold` + `recompute_reject`'s new optional arguments): per-(epoch, channel) flags,
     per-channel badness (% of **in-scope** epochs flagged, the same definition as 8bis, so both tools rank
@@ -1242,6 +1266,21 @@ instead of restating them. Only tool-specific deltas are kept inline.
     (`render_hypnospectrogram`), 7 (preprocessing report), 8 (`qc_rejected_epochs_lib`: flag heatmap and
     review strip), 8bis (decision figure) and their Curry twins. One constant: `quality_lib.REM_COLOR`
     (the notebooks and `autoscoring_lib` write the same value).
+  - **One hypnogram, drawn by one function** (2026-11-18, phase 5 quater of `tools/plan_brainvision.md`: the user found
+    tool 8bis's framed hypnogram heavy beside tool 7's): `edf_io_lib.draw_hypnogram(ax, x_edges, stages, custom_stages,
+    colors=None, x_axis=True, fontsize=8)` draws every hypnogram of the toolkit, whatever its time unit (epoch index, hours,
+    minutes): a grey step line (`HYPNO_LINE_COLOR` `#555555`, `HYPNO_LINE_WIDTH` 1.2), REM (`HYPNO_REM_COLOR`) and each
+    custom stage in its colour at that width, the stage names on the left axis (`custom_stage_style`: W at the top, N3 at the
+    bottom, the custom stages below), no frame at the top and on the right, a gap for a label that is no stage (an epoch
+    left out, an unknown label). `x_axis=False` for a strip above a panel that carries the time axis (no bottom frame, no x
+    ticks, without touching a shared axis). Users: tool 7's heatmap (its title now on the hypnogram, as in tool 8: a figure
+    title floated an inch above a dense figure), tool 8's flag heatmap and review strip, tool 8bis's decision figure (edges at
+    ±0.5 under its centred cells, no more frame nor `stage` label), tools 6 and 0's hypnospectrogram, tool 5's night figure,
+    tool 3bis's hypnograms (`colors` gives MT and other their grey; tick `REM` instead of `R`, no grid) and its comparison
+    with the expert (Score_EDF's `Wake` / `REM` read as W / R), tool 9's hypnogram of the clean epochs (a line with gaps, no
+    longer coloured dots). A new hypnogram uses it. Two overlays on a coloured image keep the contrasting colour they need
+    there: tool 0's navigator line (white, outlined, over the spectrogram) and tool 3bis's expert line over the hypnodensity
+    (black).
   - **One hypnospectrogram palette, `viridis`** (`quality_lib.SPECTROGRAM_CMAP`, tool 0's former choice; tool
     6 had `RdBu_r`), dead columns grey (`DEAD_EPOCH_COLOR`), the colour rule above, and **a colour scale on
     each** labelled `dB (µV²/Hz)` (tool 6's per-channel / median figures, tool 0's navigator).
@@ -1376,8 +1415,12 @@ the flagged channels (*High-density montage support*). **Phase 5 bis (2026-11-13
     changes. A turning sign says it while it works. Each spectrum depends on its epoch only (Welch, then the smoothing spectrum
     by spectrum), so the values are those of a PSD of every epoch.
   - **The explorer's signal in float32** (`participant_from_epochs(epochs, dtype=np.float32)`, read 50 epochs at a time: no
-    float64 copy of the night); tool 8 keeps float64 (`dtype=None`). The preprocessed display copies step 6's epochs only when
-    channels are unticked (`participant_from_epochs` drops them in place).
+    float64 copy of the night); tool 8 keeps float64 (`dtype=None`). The preprocessed display shows step 6's epochs without a
+    copy: step 6 has already set its unticked channels aside (`bad_epochs`), so `participant_from_epochs` drops nothing.
+- **The clean reference of the detail PSD above 12 channels** (phase 5 quater): in the preprocessed display, the clean
+  channels of each epoch (`STATE['clean_pairs']` = step 6's `combined == 0`, passed to `detail_reference_epochs` and
+  `plot_epoch_detail`), as in tool 8 (§8 *The clean reference of the PSD figures*). The raw and band-passed displays flag
+  nothing: every epoch of the stage.
 
 **Core rule: never re-implement a computation.** Each step calls the very functions of the batch tool it
 mirrors, which live in the shared libraries (see *Cross-cutting → Shared computation libraries*), so the numbers
@@ -3403,6 +3446,13 @@ rejected + out of scope, in the stages shown, `clean_epoch_counts` from the stag
 (`clean_epochs_html`: epochs of the stages analysed, clean, the share, then `clean / every (share)` per stage, the excluded
 participants said). Above 12 channels, the two PSD figures of both reports are an overlay with the panels in a section that
 opens (*Cross-cutting → High-density montage support*). Reports only: every table is unchanged.
+
+**Filled points (2026-11-18, phase 5 quater, the user found the stage colours blurred)**: the aperiodic parameters across the
+night are filled points (size 14, alpha 0.9, no edge; they were small at alpha 0.6), and the two database figures by stage
+(`plot_group_aperiodic`, `plot_group_band`) draw a filled point per participant (`_participant_points`: `POINT_SIZE` 18,
+`POINT_ALPHA` 0.9, spread sideways by a fixed-seed generator so the report does not change by itself) and their median as a
+black line, instead of pale boxes. The hypnogram of the clean epochs is the toolkit's line with gaps for the removed epochs
+(*Display conventions*). Reports only.
 
 **Validated** on `tools/test_data/test_spectral` (a tool-8bis-like fixture built from the tool-7 outputs of
 8_N1, 73 and 100 by `make_test_spectral.py`, 702 / 625 / 359 clean epochs and 3 / 2 / 4 channels, to

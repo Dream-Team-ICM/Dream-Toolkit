@@ -31,6 +31,7 @@ from edf_io_lib import (read_edf_start_datetime, event_companion_paths, _events_
                         _events_df_from_xml, _events_df_from_manual, augment_remap_for_manual, load_events,
                         load_event_remap)
 from edf_io_lib import (load_custom_stages, parse_custom_field)   # one copy, in edf_io_lib (same folder)
+from edf_io_lib import draw_hypnogram                               # the toolkit's hypnogram, one look everywhere
 import recording_lib as RL   # one way to read a recording (EDF, BrainVision)
 
 try:
@@ -1584,7 +1585,6 @@ def plot_night_overview(stages, custom_stages, events=None, manual=None, lights=
     `events`: events_for_display's table. `manual`: manual annotations (onset_s), drawn as triangles on their
     own row. `lights` / `extras` (compute_recording): the time in bed shaded (lights-off to lights-on, the
     window the event indices count over), sleep onset and the end of the sleep period."""
-    from quality_lib import custom_stage_style, REM_COLOR      # the toolkit's hypnogram conventions
     stages = np.asarray(stages)
     n = len(stages)
     rows = []                                                      # (label, colour, events of the row)
@@ -1598,26 +1598,18 @@ def plot_night_overview(stages, custom_stages, events=None, manual=None, lights=
     n_rows = max(1, len(rows) + (1 if has_manual else 0))
     fig, (ax0, ax1) = plt.subplots(2, 1, figsize=(13, 2.4 + 0.3 * n_rows), sharex=True,
                                    gridspec_kw={'height_ratios': [2.2, max(0.9, 0.3 * n_rows)], 'hspace': 0.08})
-    stage_y, colors, ytp, ytl = custom_stage_style(custom_stages)
     hours = np.arange(n + 1) * epoch_s / 3600
     if lights is not None:
         for ax in (ax0, ax1):
             ax.axvspan(lights['off_idx'] * epoch_s / 3600, lights['on_idx'] * epoch_s / 3600, color='#fff3cd', zorder=0,
                        label=f"in bed (lights-off / on from: {lights['source']})" if ax is ax0 else None)
-    y = np.array([stage_y.get(s, np.nan) for s in stages], dtype=float)
-    ax0.step(hours, np.append(y, y[-1] if n else np.nan), where='post', color='#555555', lw=1.1, zorder=2)
-    for st in ['R'] + list(custom_stages):
-        for i in np.where(stages == st)[0]:
-            ax0.plot(hours[i:i + 2], [stage_y[st]] * 2, color=REM_COLOR if st == 'R' else colors[st], lw=1.1,
-                     solid_capstyle='butt', zorder=3)
+    # the toolkit's hypnogram; the event rows below carry the time axis
+    draw_hypnogram(ax0, hours, stages, custom_stages, x_axis=False, fontsize=8)
     if extras and extras.get('onset_idx_abs') is not None:
         ax0.axvline(extras['onset_idx_abs'] * epoch_s / 3600, color='#2e7d32', lw=1.5, label='sleep onset')
     if extras and extras.get('last_sleep_idx_abs') is not None:
         ax0.axvline((extras['last_sleep_idx_abs'] + 1) * epoch_s / 3600, color='#6a1b9a', lw=1.5, ls='--',
                     label='end of the sleep period')
-    ax0.set_yticks(ytp)
-    ax0.set_yticklabels(ytl, fontsize=8)
-    ax0.set_ylim(min(ytp) - 0.6, max(ytp) + 0.6)
     if title:
         ax0.set_title(title, loc='left', fontsize=10)
     if lights is not None or extras:

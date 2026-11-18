@@ -22,7 +22,7 @@ from specparam import SpectralModel
 from statsmodels.nonparametric.smoothers_lowess import lowess
 from edf_io_lib import (   # one copy, in edf_io_lib (same folder)
     BASE_STAGE_COLORS, CUSTOM_STAGE_PALETTE, load_custom_stages, parse_custom_field, custom_stage_style,
-    HD_CHANNEL_THRESHOLD,
+    HD_CHANNEL_THRESHOLD, draw_hypnogram,
 )
 
 
@@ -254,11 +254,6 @@ def plot_rejection_heatmap(combined_matrix, ch_names, hypno_epochs, file_id, cus
     bounds = np.arange(-0.5, 8.5, 1)
     norm   = mcolors.BoundaryNorm(bounds, cmap.N)
 
-    # Hypnogram heights: W at top (4), N3 at bottom (0); custom stages stacked below N3.
-    STAGE_H, _stage_colors, _ytick_pos, _ytick_labels = custom_stage_style(custom_stages)
-    _floor = min(_ytick_pos) - 1
-    hypno_y = np.array([STAGE_H.get(s, _floor) for s in hypno_epochs])
-
     n_channels   = len(ch_names)
     n_epochs     = combined_matrix.shape[0]
     # Pair-based: fraction of (epoch x channel) cells flagged (not '>=1 bad channel per epoch',
@@ -283,30 +278,10 @@ def plot_rejection_heatmap(combined_matrix, ch_names, hypno_epochs, file_id, cus
     )
     axes[0][1].set_axis_off()
 
-    # --- Hypnogram strip ---
+    # --- Hypnogram strip (the toolkit's hypnogram, edf_io_lib.draw_hypnogram), with the title above it ---
     ax_hyp = axes[0][0]
-    x_step = np.arange(n_epochs + 1)
-    y_step = np.append(hypno_y, hypno_y[-1])
-
-    # Full step line in gray
-    ax_hyp.step(x_step, y_step, where='post', color='#555555', linewidth=1.2)
-
-    # REM in red; each custom stage highlighted in its own colour (at the line's width: the toolkit's
-    # discreet convention).
-    for _s in (['R'] + list(custom_stages)):
-        _col = '#c0392b' if _s == 'R' else _stage_colors.get(_s)
-        for ei in range(n_epochs):
-            if hypno_epochs[ei] == _s:
-                ax_hyp.plot([ei, ei + 1], [STAGE_H[_s], STAGE_H[_s]],
-                            color=_col, linewidth=1.2, solid_capstyle='butt')
-
-    ax_hyp.set_yticks(_ytick_pos)
-    ax_hyp.set_yticklabels(_ytick_labels, fontsize=7)
-    ax_hyp.set_ylim(min(_ytick_pos) - 0.8, max(_ytick_pos) + 0.8)
-    ax_hyp.set_xlim(0, n_epochs)
-    ax_hyp.set_xticks([])
-    for sp in ['top', 'right', 'bottom']:
-        ax_hyp.spines[sp].set_visible(False)
+    draw_hypnogram(ax_hyp, np.arange(n_epochs + 1), hypno_epochs, custom_stages, x_axis=False, fontsize=7)
+    ax_hyp.set_title(f'{file_id}: {pct_rejected:.0f}% of flagged epochs', fontsize=11, pad=6)
 
     # --- Main heatmap ---
     ax = axes[1][0]
@@ -326,8 +301,7 @@ def plot_rejection_heatmap(combined_matrix, ch_names, hypno_epochs, file_id, cus
     cbar = fig.colorbar(im, cax=axes[1][1], orientation='vertical', ticks=np.arange(len(LABELS)))
     cbar.ax.set_yticklabels(LABELS, fontsize=7)
 
-    fig.suptitle(f'{file_id}: {pct_rejected:.0f}% of flagged epochs',
-                 fontsize=11, y=1.01)
+    # The title sits on the hypnogram (as in tool 8's heatmap): a figure title floated an inch above a tall dense figure.
     fig.tight_layout()
     return fig
 
