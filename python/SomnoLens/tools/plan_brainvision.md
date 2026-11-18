@@ -904,23 +904,82 @@ droit de la carte (ligne A). Trois propositions, sur deux époques synthétiques
 | 7 | lecture Curry, heure du `.dpo` | par le lecteur |
 | 8, 8bis | titre et chemin d'import seulement | jumeaux supprimés, rien à porter |
 
-**Ce qui en découle**
+**Plan détaillé (2026-11-18, à confirmer)**
 
-- `curry_header.py` et `curry_io.py` deviennent `tools/curry_lib.py`, branché dans `recording_lib.py`.
-- Les outils 0, 3bis, 5 fonctionnent aussi sur Curry. Deux TODO se referment : *A Curry twin of tool 0* et *EDF reading of tools 2, 4, 6, 7
-  through `edf_io_lib`*. Plus aucun générateur ne réécrit ces blocs : les copies peuvent disparaître et `test_edf_io_sync.py` se réduit.
-- **Supprimés** : 8 notebooks, 7 générateurs, `test_curry_twins.py`. `test_notebooks_execute.py` et `test_ui_lib.py` sont adaptés.
-- `tools_curry/inspect_curry.py` n'est pas versionné : je te le demande avant d'y toucher.
+**1. Le lecteur Curry, sur le modèle de BrainVision.**
+- `curry_header.py` et `curry_io.py` deviennent `tools/curry_lib.py`. Le `.dpo` reste lu par le parseur maison : MNE lit tout le
+  signal pour donner un en-tête (environ 15 s pour 7 Go, mesuré quand le jumeau a été écrit).
+- `curry_lib.read_cdt_header(path)` rend le même dictionnaire que `read_vhdr_header` :
+  - `label` : les canaux des deux groupes du `.dpo`, dans l'ordre du fichier ;
+  - `transducer_type` : `EEG` pour le groupe EEG du `.dpo` (ce que faisaient les jumeaux), sinon le type déduit du nom (EOG, EMG,
+    ECG, la même règle que BrainVision), sinon vide ;
+  - pas de bornes physiques, donc pas de `bounds_pct` et le plafond de ±500 µV à l'affichage (les règles de la phase 2) ;
+  - les impédances en kΩ (le fichier les donne en Ohm), la dernière mesure de chaque canal comme dans le jumeau, *not measured* pour
+    `-1`, *disabled* pour `-2`, au format de BrainVision : le contrôle des impédances de l'outil 1 marche sans changement ;
+  - les filtres : le parseur actuel n'en lit aucun (question 2).
+- `recording_lib` reconnaît `.cdt` : `read_header`, `read_start_datetime` (le `.dpo`), `read_raw` (`mne.io.read_raw_curry`, puis les
+  canaux demandés), `online_reference` → aucun, comme un EDF (le `.dpo` ne dit pas contre quoi les canaux sont enregistrés).
+- `study_files_lib.RECORDING_SUFFIXES` gagne `.cdt`. Un `.cdt` du même nom qu'un `.edf` ou un `.vhdr` : le même avertissement.
+- `curryreader` reste dans `environment.yml` : MNE en a besoin pour lire le signal.
 
-**Validation** : c'est la seule phase où l'on peut perdre quelque chose, mais les 2 enregistrements de `tools/test_data_curry/` (7 Go
-chacun) permettent de la vérifier.
+**2. Les outils.**
+- **Outil 1** : le contrôle des impédances de la phase 2 vaut pour Curry. Les sorties vont dans `reports_inspection/`, sous les noms
+  des autres formats (plus de `reports_inspection_curry/` ni de suffixe `_curry`). Rien n'est renommé dans une étude existante : seules
+  les données de test ont ces anciens noms.
+- **Outil 2** : le masque EEG vient de `transducer_type`.
+- **Outils 0, 3, 3bis, 4, 5** : rien de propre à Curry. L'heure de début qui convertit l'export texte des événements vient du `.dpo`.
+- **Outil 6** : pas de bornes, donc les règles de la phase 2. Le high-pass par défaut : question 2.
+- **Outil 7** : lecture et heure de début par le lecteur.
+- **Outils 8, 8bis** : ils ne dépendent déjà pas du format.
+- **Les copies de lecture** que les outils 2, 4, 6 et 7 gardaient pour les générateurs deviennent des imports d'`edf_io_lib`, et
+  `quality_lib` importe ses fonctions de stades. Les sorties ne changent pas (prouvé par `refactor_check` sur la chaîne synthétique).
+  `test_edf_io_sync.py` ne garde que la copie de l'outil 1bis. Deux TODO du SPEC se ferment : *A Curry twin of tool 0* et *EDF
+  reading of tools 2, 4, 6, 7 through `edf_io_lib`*.
 
-1. Faire tourner les jumeaux actuels et sauvegarder toutes les sorties, avant toute suppression.
-2. Faire tourner les outils uniques sur les mêmes données.
-3. Comparer tous les fichiers (`tests/refactor_check.py`) : identiques, sauf différences listées et justifiées. Run long, avec keep-awake.
-4. Tu vérifies dans Voila sur Curry, comme le SPEC le demandait déjà.
+**3. Ce qui disparaît.**
+- Dans `tools_curry/` : les 8 notebooks, les 7 générateurs, `curry_header.py` et `curry_io.py` (déplacés), `test_mne_curry_header.py`
+  (une mesure ponctuelle sur données réelles, sa conclusion est déjà dans le SPEC). `tools_curry/inspect_curry.py` n'est pas versionné :
+  question 3.
+- `tests/test_curry_twins.py`. `test_notebooks_execute.py` et `test_ui_lib.py` ne regardent plus `tools_curry/`.
+- **Documentation** : la section *Curry 9 support* du SPEC est réécrite (Curry devient un format du lecteur, comme BrainVision, avec ses
+  particularités). Dans CLAUDE.md, le bloc *Curry twins* et les « re-run the generator » disparaissent.
 
-- **Tests proposés** : full, plus cette comparaison.
+**4. Tests.**
+- **Un enregistrement Curry synthétique**, écrit par les tests (`tests/curry_files.py`, comme `brainvision_files.py`) : un `.cdt` en
+  float32 et un `.dpo` minimal. Je vérifie d'abord que MNE l'ouvre. Sinon, Curry n'est testé que sur les vraies données (point 5).
+- **Quick** : `test_curry_lib.py` (en-tête, impédances en kΩ, heure de début, signal relu égal au signal écrit, `recording_lib` sur un
+  `.cdt`).
+- **Standard** : les outils 1, 2, 6, 7 et 0 sur une petite étude Curry synthétique, comme `test_brainvision_chain.py`. `refactor_check`
+  sur la chaîne EDF synthétique : tout identique.
+- Puis **full**.
+
+**5. Validation sur les deux enregistrements Curry réels** (`tools/test_data_curry`, 2 × 7 Go). C'est la seule phase où l'on peut perdre
+quelque chose.
+- **Avant toute modification** : une copie dans `%TEMP%\dtk_curry` (environ 14 Go, plus 25 Go de sorties, 174 Go libres). Les jumeaux
+  actuels tournent dessus (outils 1, 2, 6, 7, 8bis, avec la configuration de l'outil 2 trouvée dans la copie, ou refaite), et leurs
+  sorties sont gardées.
+- **Après** : les outils uniques sur une copie neuve, avec les mêmes réglages, puis `refactor_check` sur toutes les sorties.
+- **Différences attendues** : les jumeaux sont gelés depuis la phase 2, donc tout ce qui est venu ensuite apparaît (outil 1 : autres noms
+  et colonnes ; outil 6 : colonnes de comparaison au canal médian, signalement au-dessus de 12 canaux, raisons dans les légendes ; les
+  figures des rapports). Les tables des outils 7 et 8bis devraient être identiques. Toute autre différence est expliquée avant de
+  continuer.
+- **Ce que je vois** : des noms de fichiers et de canaux, et les différences entre tables (des valeurs de mesures). Jamais le signal.
+- Run long (quelques heures), avec keep-awake. Puis ta vérification dans Voila sur Curry, comme le SPEC le demandait déjà.
+
+**Ordre** : la sauvegarde des sorties des jumeaux d'abord (point 5), puis le lecteur et ses tests synthétiques, les outils et les
+imports, la comparaison sur Curry, les suppressions et la documentation, les tests full, ta vérification.
+
+**Questions**
+1. **La validation sur les données Curry réelles** : je la lance (chaque commande sur ces dossiers te demande ton accord), ou je te
+   prépare un script que tu lances, et tu me rapportes le résumé ?
+2. **Le high-pass de l'outil 6 sur Curry** : le jumeau le coche (amplificateur souvent DC), mais le `.dpo` ne dit rien des filtres
+   d'après le parseur. Je propose d'appliquer la règle des données : décoché, avec une ligne qui dit que l'enregistrement ne déclare
+   pas ses filtres (comme un BrainVision sans `[Comment]`). C'est alors une différence voulue avec le jumeau. Autre solution : le cocher
+   pour tout Curry.
+3. **`tools_curry/inspect_curry.py`** (non versionné) importe `curry_header` : il ne marchera plus. Je le laisse tel quel, je l'adapte à
+   `curry_lib`, ou je le supprime ?
+
+- **Tests proposés** : quick et standard à chaque étape, full à la fin, plus la comparaison sur Curry.
 
 ### Phase 6 bis : bouton Stop (demandé le 2026-11-17, à détailler)
 
