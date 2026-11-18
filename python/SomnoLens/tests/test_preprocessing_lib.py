@@ -162,3 +162,22 @@ def test_the_recorded_settings_leave_out_what_belongs_to_the_participant():
 def test_the_recorded_settings_of_an_older_sidecar_hold_what_it_has():
     old = {'file_id': 'p', 'methods_run': ['amplitude'], 'filter': SIDECAR['filter']}
     assert PL.recorded_settings(old, 'p') == {'filter': SIDECAR['filter'], 'methods': ['amplitude']}
+
+
+def test_a_deselected_channel_in_a_recording_without_one_stage():
+    # A nap without N3 and a channel unticked: the epochs of the deselected channel used to be refused by MNE
+    # ('No matching events found for N3'), in tool 7 and in tool 0's step 6.
+    import mne
+    import numpy as np
+    sf, n_epochs = 100.0, 6
+    info = mne.create_info(['C3', 'C4', 'O1'], sf, 'eeg')
+    raw = mne.io.RawArray(np.random.default_rng(0).normal(0, 1e-5, (3, int(n_epochs * 30 * sf))), info, verbose=False)
+    raw.info['bads'] = ['O1']
+    hypno = np.array(['W', 'W', 'N1', 'N2', 'N2', 'R'])
+    hypno_sub, stage_mapping, hypno_vec = PL.hypnogram_epochs(hypno, raw, sf, 1, [], 'nap')
+    assert 'N3' in stage_mapping and 'N3' not in set(hypno_sub)
+    epochs, n = PL.make_epochs(raw, 30, hypno_sub, hypno_vec, stage_mapping, 'nap')
+    bad_names, bad_epochs, order = PL.set_bads_aside(epochs)
+    assert bad_names == ['O1'] and epochs.ch_names == ['C3', 'C4'] and n == n_epochs
+    PL.put_bads_back(epochs, bad_epochs, bad_names, order)
+    assert epochs.ch_names == ['C3', 'C4', 'O1'] and epochs.info['bads'] == ['O1'] and len(epochs) == n_epochs

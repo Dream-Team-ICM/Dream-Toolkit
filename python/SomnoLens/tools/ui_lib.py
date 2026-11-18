@@ -47,6 +47,34 @@ def msg(kind, text, symbol=True):
     return f'<span style="color:{color}">{prefix}{text}</span>'
 
 
+# A line of a run log (print) in the colour of its symbol: ANSI codes, which Voila shows in colour. No tool writes its log
+# to a file, so the codes never reach an output.
+LOG_SYMBOLS = [('❌', 'error'), ('⚠', 'warn'), ('✅', 'ok')]     # the first one found in the line decides
+
+
+def log(text, kind=None):
+    """print(text) in the colour of `kind` (ok / warn / error), by default the kind of the first symbol of the line:
+    ❌ red, ⚠ orange, ✅ green, anything else as print. The text itself is not changed."""
+    text = str(text)
+    if kind is None:
+        found = [(text.find(sym), k) for sym, k in LOG_SYMBOLS if sym in text]
+        kind = min(found)[1] if found else None
+    if kind not in ('ok', 'warn', 'error'):
+        print(text)
+        return
+    color = MESSAGE_STYLES[kind][0].lstrip('#')
+    r, g, b = (int(color[i:i + 2], 16) for i in (0, 2, 4))
+    print(f'\x1b[38;2;{r};{g};{b}m{text}\x1b[0m')
+
+
+def log_html(html):
+    """The same for a run log written as HTML lines (tools 5 and 9): the line in the colour of its first symbol."""
+    found = [(html.find(sym), k) for sym, k in LOG_SYMBOLS if sym in html]
+    if not found:
+        return html
+    return f'<span style="color:{MESSAGE_STYLES[min(found)[1]][0]}">{html}</span>'
+
+
 def box_style(kind):
     """The CSS of a boxed message, for a <div> built by hand (a box holding a table...)."""
     color, background, _ = MESSAGE_STYLES[kind]
@@ -185,7 +213,19 @@ def log_output(max_height='400px'):
 # ---------------------------------------------------------------------------
 PROGRESS_WIDTH = WIDE_WIDTH                                                     # label included
 PROGRESS_TRACK = f'{int(PROGRESS_WIDTH[:-2]) - int(LABEL_WIDTH[:-2])}px'        # the bar itself
+PROGRESS_TEXT_MIN = '180px'     # narrower than this beside the bar, the text goes under it (and wraps) instead of being cut
 PHASE_COLORS = ['#e7ecff', '#eef7e7', '#fff4dc', '#ffeaea', '#f1e8fb', '#e6f4f6']   # the steps of a pipeline bar, in turn
+
+# A bar never stays still while a step works (SPEC *Voila page conventions -> Progress*): a step that loops moves its bar
+# at each item, and the step being done shows this small turning sign beside its name. The browser animates it itself
+# (SVG), so it keeps turning while Python is busy in one long call (an MNE read, a model's prediction).
+SPINNER = ('<svg width="12" height="12" viewBox="0 0 12 12" style="vertical-align:-1px; margin-right:5px;">'
+           '<circle cx="6" cy="6" r="4.5" fill="none" stroke="#c5cae9" stroke-width="2"/>'
+           f'<path d="M6 1.5 A4.5 4.5 0 0 1 10.5 6" fill="none" stroke="{INFO_COLOR}" stroke-width="2">'
+           '<animateTransform attributeName="transform" type="rotate" from="0 6 6" to="360 6 6" dur="0.9s" '
+           'repeatCount="indefinite"/></path></svg>')
+_STEP_BLOCK = '<div class="dtk-step" style="line-height:1.4;">'
+_STEP_TEXTS = []                # the step texts of the page's phase bars: finish_progress stops their sign
 
 
 def _progress_parts(description):
@@ -194,8 +234,14 @@ def _progress_parts(description):
                          layout=widgets.Layout(width=LABEL_WIDTH, min_width=LABEL_WIDTH, margin='0'))
     bar = widgets.IntProgress(value=0, min=0, max=1, bar_style='info',
                               layout=widgets.Layout(width=PROGRESS_TRACK, margin='0'))
-    text = widgets.HTML('', layout=widgets.Layout(margin='0 0 0 8px'))
+    text = widgets.HTML('', layout=widgets.Layout(margin='0 0 0 8px', flex=f'1 1 {PROGRESS_TEXT_MIN}',
+                                                  min_width=PROGRESS_TEXT_MIN))
     return label, bar, text
+
+
+def _progress_row(children):
+    """The row of a bar: when the page is too narrow for the text beside the bar, the text goes under it."""
+    return widgets.HBox(children, layout=widgets.Layout(align_items='flex-start', flex_flow='row wrap'))
 
 
 def progress_bar(description='Participants:', width=None):
@@ -208,7 +254,37 @@ def progress_bar(description='Participants:', width=None):
         text.value = f'{bar.value} / {bar.max}' if bar.value else ''
 
     bar.observe(_update_text, names=['value', 'max'])
-    return bar, widgets.HBox([label, bar, text], layout=widgets.Layout(align_items='flex-start'))
+    return bar, _progress_row([label, bar, text])
+
+
+def stop_working():
+    """Stops the turning sign of every step text (the run is over, or failed): the text stays."""
+    for step_text in _STEP_TEXTS:
+        if SPINNER in step_text.value:
+            step_text.value = step_text.value.replace(SPINNER, '')
+
+
+def working(text):
+    """The HTML of a step at work, for a line replaced or cleared when the step ends: the turning sign, then `text`
+    (HTML) in italics."""
+    return f'{_STEP_BLOCK}{SPINNER}<i>{text}</i></div>'
+
+
+def working_text(widget):
+    """Makes `widget` (a widget HTML saying what a step is doing) put the turning sign before any text written in it, as
+    a block that wraps; a text ending with ✅ (done) gets no sign, '' empties it, finish_progress / stop_working stop it.
+    Returns the widget."""
+    _STEP_TEXTS.append(widget)
+
+    def _on_step(change):
+        new = change['new']
+        if not new or new.startswith(_STEP_BLOCK):
+            return
+        done = new.rstrip().removesuffix('</small>').removesuffix('</i>').rstrip().endswith('✅')
+        widget.value = f'{_STEP_BLOCK}{"" if done else SPINNER}{new}</div>'
+
+    widget.observe(_on_step, names='value')
+    return widget
 
 
 def phase_bar(description='Pipeline:'):
@@ -216,9 +292,11 @@ def phase_bar(description='Pipeline:'):
     cost, with the legend of its steps glued under the bar (a segment per step, its width following its cost).
     Returns (bar, row, set_phases, step_text): set bar.max and bar.value as usual, call set_phases([(label, cost,
     tooltip), ...]) when the steps are known ([] hides the legend), and write the current step into step_text.value
-    (HTML, on the right of the bar)."""
+    (HTML, on the right of the bar). The text written there gets the turning sign of a step at work (SPINNER) and wraps
+    as a block; a text ending with ✅ (done) gets no sign, '' empties it, and finish_progress / stop_working stop it."""
     label, bar, step_text = _progress_parts(description)
     legend = widgets.HTML('', layout=widgets.Layout(width=PROGRESS_TRACK, margin='0'))
+    working_text(step_text)
 
     def set_phases(phases):
         total = max(1, sum(cost for _, cost, _ in phases))
@@ -232,14 +310,14 @@ def phase_bar(description='Pipeline:'):
                         'line-height:14px;color:#444;border:1px solid #bbb;border-top:none;border-radius:0 0 3px 3px;'
                         'overflow:hidden;">' + ''.join(segments) + '</div>') if phases else ''
 
-    row = widgets.HBox([label, widgets.VBox([bar, legend], layout=widgets.Layout(margin='0')), step_text],
-                       layout=widgets.Layout(align_items='flex-start'))
+    row = _progress_row([label, widgets.VBox([bar, legend], layout=widgets.Layout(margin='0')), step_text])
     return bar, row, set_phases, step_text
 
 
 def finish_progress(bar, n_failed=0):
-    """Colour of a finished bar: green, or orange when some items failed."""
+    """Colour of a finished bar: green, or orange when some items failed. The turning signs of the page stop."""
     bar.bar_style = 'warning' if n_failed else 'success'
+    stop_working()
 
 
 # ---------------------------------------------------------------------------

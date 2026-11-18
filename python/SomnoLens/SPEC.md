@@ -504,6 +504,11 @@ instead of restating them. Only tool-specific deltas are kept inline.
   - **Messages**: `UI.msg(kind, text)` / `UI.box(kind, html)`, `kind` = ok / warn / error / info / muted
     (`#2e7d32`, `#e65100`, `#c62828`, `#1565c0`, `#666`), symbols ✅ ⚠️ ❌ ℹ️. The error red stays distinct from
     the REM red of the figures. A log written to a file and the HTML reports keep their own text (an output).
+    **The run logs too (2026-11-17, phase 5 ter of `tools/plan_brainvision.md`)**: a `print` line of a page holding a
+    symbol is written by `UI.log(text, kind=None)`, in the colour of its first symbol (❌ red, ⚠ orange, ✅ green, the
+    text unchanged) with the ANSI codes Voila shows in colour; a log written as HTML lines (tools 5 and 9) goes through
+    `UI.log_html`. No tool writes its log to a file, so no output changes. The `print` of an import error stays (before
+    `ui_lib` is imported).
   - **Buttons by role**: `UI.button(label, role)`: `run` (green, play: computes and writes the tool's outputs,
     e.g. *Run inspection*), `save` (green: records a choice or a file), `read` (blue, search: reads or lists,
     writes nothing; the entry button is **Scan** in tools 2, 3, 3bis, 4, 5, 5bis, 7, 8bis, 9), `caution` (orange:
@@ -560,6 +565,22 @@ instead of restating them. Only tool-specific deltas are kept inline.
     ...])` sizes a segment per step (colours `PHASE_COLORS` in turn), `[]` hides it. Tools 5, 6, 7, 9 (participants +
     pipeline), 8 (its report bar) and 3bis (its SleepFM download) use them; `test_ui_lib.py` refuses an `IntProgress`
     built in a page. `progress_bar`'s `width` is ignored, kept for the frozen Curry twins until their removal.
+    **A bar never stays still while a step works (rule, 2026-11-17, phase 5 ter: the user thought tool 9 and 3bis had
+    hung).** A step that loops (channels, epochs, chunks, combinations, figures) moves its bar at each item: the library
+    function takes an optional `progress(done, total)` callback (none = the former behaviour, the same numbers), called
+    at most every half second when the items are fast. A step that cannot report (one MNE read, YASA's prediction, the
+    writing of a report) relies on the **turning sign** (`UI.SPINNER`, an SVG the browser animates itself, so it turns while
+    Python is busy): the step text of a `phase_bar` gets it before any text written there (`UI.working_text`, a text ending
+    with ✅ gets none, `''` empties it), and `finish_progress` / `UI.stop_working()` stop it (the Run callbacks call the
+    latter when they fail). A status line replaced when its step ends shows `UI.working(text)` (tool 0's steps, whose lines
+    are `UI.working_text` too). A new step follows this rule. Where: tool 3bis (a *Models* bar under *Participants*, a
+    segment per model, GSSC's signal combinations and SleepFM's 5-min chunks move it: `score_night_gssc` / `run_gssc` /
+    `gssc_combination_logits` and `score_night_sleepfm` / `sleepfm_lib.score_signals` / `score_montage` / `run_pass` take
+    `progress`), tool 9 (the smoothing then the fit of the 1/f step, by blocks of `SMOOTH_BLOCK` epochs and per chunk of
+    the parallel fit: `smooth_for_fit`, `fit_spectra`, `fit_aperiodic`; the report figure by figure:
+    `participant_report_items(progress=)`), tool 0 (the turning sign on every step line, GSSC's combinations in step 3).
+    **The text of a bar is never cut** on a narrow page: its row wraps (`flex_flow='row wrap'`), the text goes under the
+    bar below `PROGRESS_TEXT_MIN` (180 px) and wraps as a block.
   - **Details blocks** (2026-11-04): a `<details>` of a Markdown cell opens with the line `UI.details_open(title, hint)`
     returns (a box with a bold title and *(click to open)*, otherwise nothing shows that the small arrow can be clicked),
     written out since a Markdown cell cannot call Python, then a blank line. Guarded by `tests/test_ui_lib.py`. The HTML
@@ -1030,6 +1051,26 @@ instead of restating them. Only tool-specific deltas are kept inline.
     gives its colour bar a column of its own (`plot_rejection_heatmap`, a 2 x 2 grid as tool 8's heatmap), so the
     hypnogram spans exactly the epochs of the matrix (taken from the matrix alone, the colour bar made the hypnogram
     wider: the figure of every tool-7 report, EDF included, changed).
+  - **After the second visual inspection (2026-11-17, `tools/plan_brainvision.md` phase 5 ter)**. Above 12 channels:
+    **tool 8bis's decision figure** keeps a hypnogram of 0.6 in and a decision strip of 0.2 in (1.0 and 0.4 before), so
+    that it holds on one page; **tool 9's other per-channel figures** (log-log with the fit, aperiodic parameters across
+    the night, band power per stage; band power and aperiodic parameters across participants) are drawn once on the
+    mean of the kept channels (each epoch's mean, NaN left out: `loglog_items`, `aperiodic_night_items`,
+    `band_power_items`; each participant's mean: `group_band_items`, `group_aperiodic_items`), the panels of each
+    electrode in a section that opens (`hd_items`, as the PSD of phase 5 bis); at 12 channels or fewer each returns the
+    former figure alone. For every montage: **the detail panel of tools 8 and 0** (`plot_epoch_detail`) draws the clean
+    stage reference over the channels (black median, its IQR in two dotted black lines, no grey fill: at 62 channels the
+    channels hid it, and its grey band was taken for the epoch's), and its four topomaps take a **colour scale centred on
+    the threshold** (p-p, gradient, MAE: 0 to twice the threshold; R²: `2·thr − 1` to 1; a value beyond takes the colour
+    of the end, drawn as an arrow; the threshold marked on the colour bar): scaled from the epoch's min to its max, one
+    very bad electrode squeezed every other one into one colour and a ringed electrode looked like its neighbours. The
+    p-p map rings in red the electrodes over the amplitude threshold and in cyan (`TOPO_FLAT_COLOR`) those under the flat
+    threshold (their position from MNE's own `_find_topomap_coords`, private: on failure a red ring, as before); each
+    title says its rule (`red > 250, cyan < 1`). **Tool 6's overlays** (and step 5 of tool 0) say why each coloured channel
+    is flagged when they receive the reasons (`flagged={channel: reasons}`, `quality_lib.flag_legend`: `C3:
+    flat_pct=5.0%`); a list of names keeps the former legend. **Tool 9's figure titles** wrap to the figure's width
+    (`_wrap_suptitle` in `_tight`, a quarter of an inch more on top per added line): the overlay of a single stage cut
+    *after removing the aperiodic component*. Reports change (tools 6, 9), no table.
   - **Channel triage** (`load_channel_flags` / `recompute_channel_flags` / `channel_badness` /
     `channels_over_threshold` + `recompute_reject`'s new optional arguments): per-(epoch, channel) flags,
     per-channel badness (% of **in-scope** epochs flagged, the same definition as 8bis, so both tools rank
@@ -1308,6 +1349,23 @@ the flagged channels (*High-density montage support*). **Phase 5 bis (2026-11-13
   redraws when a box of step 6 changes.
 - The detail panel's table scrolls beside the figure (every channel, no 8-row limit), its four topomaps (*High-density
   montage support*).
+
+**Phase 5 ter (2026-11-17, the second inspection)**:
+- **The explorer's *Hypnogram* menu** (`dd_hyp_shown`, display settings): *in use (can be rescored)*, the default, or
+  another hypnogram of the recording (step 1's list, the events files left out) or step 3's GSSC scoring, **read only**:
+  the navigator draws it (`shown_labels`, cut or padded with `?` to the explorer's epochs), the status line gives its stage
+  beside the one in use, and the stage buttons and keys are off until *in use* is chosen again (only the hypnogram in use
+  is rescored and saved).
+- **Until step 6 has run**, an orange box above the explorer says the montage is shown as recorded and how to read it
+  (untick the bad channels and choose *Channels: ticked in step 6*, or run step 6 and choose *Signal: preprocessed*).
+- **Step 6**: *Tick all* and *Untick all* (`btn_ch6_all`, `btn_ch6_none`) beside *Untick step 5's flagged channels*. A
+  channel unticked on a recording without one of the stages (a nap without N3) failed (`No matching events found for N3`):
+  `preprocessing_lib.set_bads_aside` recreated the epochs of the deselected channels with every stage code, and MNE refuses
+  a code without an epoch; it now passes `on_missing='ignore'` (tool 7 had the same failure; every other case unchanged).
+- **Step 5's overlays** say why each coloured channel is flagged (*High-density montage support*), and every step line
+  turns while its step works (*Voila page conventions → Progress*).
+- **Measured before any change of the loading** (the user found it slow on a 62-channel cap): see
+  `tools/plan_brainvision.md`, phase 5 ter.
 
 **Core rule: never re-implement a computation.** Each step calls the very functions of the batch tool it
 mirrors, which live in the shared libraries (see *Cross-cutting → Shared computation libraries*), so the numbers
@@ -1683,6 +1741,22 @@ outputs), `cb_yasa`, `cb_sleepfm` (disabled when the model's packages are missin
   YASA and SleepFM read their channels in **one** MNE read (`read_signals`, `include=` the channels needed): the
   same values as Score_EDF's all-channel read when the fastest of them is the file's fastest rate, at a fraction
   of its memory (Score_EDF read the 58 channels of a night at 512 Hz three times: 16-17 GB peak, `MemoryError`).
+  **No channel choice for SleepFM, on purpose**: it takes every modality at once and pools the channels of a modality
+  (its names must be in its `channel_groups.json`); trained on clinical PSG with a few EEG, 64 electrodes would bring it no
+  spatial information and leave its training. The run log names what it reads, one line per set of channels
+  (`sleepfm_channels_text`).
+
+**The menus offer only what tool 2 declares (2026-11-17, phase 5 ter of `tools/plan_brainvision.md`)**: the EOG menus
+(GSSC's modes, YASA's side) list only the choices the context channels allow (`eog_counts` with `GSSC_EOG_ROLES` /
+`YASA_EOG_ROLES`, `menu_options`): a study whose single EOG is declared on the right gets *Right only* / *None* and *Right* /
+*None*, where *L − R bipolar* and *Left* were the defaults. A choice that not every recording allows is marked `(n/N)`; so are
+the EEG electrodes (`eeg_counts`) and YASA's chin EMG (the declared one, and each channel of the files). After a scan a menu
+keeps its choice when every recording allows it, else takes the first that every recording allows (GSSC: L − R bipolar,
+left, right; YASA: left, right), else the one most recordings allow (`menu_default`). A line under the models
+(`channels_info`, `missing_channel_lines`, also written in the run log) names the recordings lacking a chosen channel and
+what they get, by the rules the models already follow (one-electrode GSSC and YASA's electrode: not scored; GSSC consensus:
+without it; an EOG side missing: with the EOG declared, or EEG only; YASA's EOG or EMG missing: without it). A study without
+an EOG declared now records `eog_mode` *None* (the same signals as before, when the bipolar default found no EOG).
 
 **EEG reference given to the models** (`dd_ref`, user decision 2026-10-27: tool 2's reference serves the other
 tools and is not imposed on the models): **`Contralateral mastoid (as the models were trained)`** (default,
@@ -2543,7 +2617,9 @@ became callbacks (`status`, `step_done`), whose run-log prints a `warn` callback
 **`StepFailed(reason, message)`** (the notebook prints `message` and writes `reason` to `preprocessing_failed.tsv`,
 exactly the former strings): `preprocess_raw` ([C] resampling, [D] re-reference, [D2] notch, [E] band-pass),
 `prepare_hypnogram` (read) → `hypnogram_epochs` (length rule, sub-epochs, stage codes), `make_epochs` ([F]),
-`set_bads_aside` ([F2]), `epoch_psd_for_1f` (Welch + smoothing), `event_flags` (masks, counts, onsets),
+`set_bads_aside` ([F2]; with `on_missing='ignore'` since 2026-11-17: the stage codes list W to R even when a stage has
+no epoch, and a deselected channel on a nap without N3 failed with MNE's `No matching events found for N3`),
+`epoch_psd_for_1f` (Welch + smoothing), `event_flags` (masks, counts, onsets),
 `epoch_metadata` (`reject_flag` / `reject_method` / `flag_*` / `evt_*`), `put_bads_back` (the save block's "bad
 channels back in, original order, marked bad" lines, phase 7: tool 0's step 8 rebuilds the saved epochs with it). The notebook keeps the UI, the EDF reading
 (load block, suffix helpers, the TXT/CSV/XML event chain: the Curry generator rewrites them; copies of
@@ -3199,7 +3275,14 @@ tools read tool 7's epochs + a decision* for the decision tables, the sidecar lo
 - **Stages and aggregation**: one checkbox per stage actually present in the files (AASM + custom, all
   ON). **No derived groups** (NREM, whole-night…): they are one `groupby` away in the exported tables and
   doubled the table size. `Min epochs per cell` (default 20 → the cell is NaN but `n_epochs` is kept, so a
-  shortage is visible). Optional **night thirds** (draft, OFF): the sleep period (first to last non-W
+  shortage is visible). It holds **per participant** (a cell = participant × stage × channel): a participant under it
+  is missing from the group figure of that stage. **Said before the run (2026-11-17, phase 5 ter)**: after the scan, a
+  line under the field (`min_epochs_info`, `spectral_lib.min_epochs_html`, from the kept epochs of each stage counted at
+  scan: `kept_per_stage`) gives, per stage, how many participants reach the minimum and the median of their kept epochs,
+  in orange with the stages short of it, and says that naps or short recordings may need a lower minimum. **The value
+  never changes by itself**: a minimum is a choice of method. The database report opens with the stages absent from its
+  figures and why (`missing_stages_html`: no kept epoch, or no participant reaching the minimum, *Re-aggregate only*
+  being enough to include them). Optional **night thirds** (draft, OFF): the sleep period (first to last non-W
   epoch **of the whole night**, every epoch counted: it no longer depends on the rejection decision) split into
   three equal spans of the epoch index, the stage × third averages using the kept epochs, written to a
   companion table whose `n_epochs_rejected` / `n_epochs_out_of_scope` are **those of the stage × third
@@ -3523,9 +3606,19 @@ the whole chain, with **one version of each tool** instead of a third set of twi
 same way. The plan, with what was measured on real recordings, is `tools/plan_brainvision.md`. Done: the reader (phase 1),
 tools 1, 2, 3, 6 (phase 2), tool 3bis with the channel checks and tool 6's comparison with the median channel (phase 3),
 tools 4, 5, 7, 0 and 8bis (phase 4), a flat online reference left out and the event files declared in tool 4 (phase 4 bis),
-the high-density display of tools 0, 6, 7, 8, 9 (phase 5). Left: the removal of the Curry twins (phase 6), then the
-documentation (phase 7). **The Curry twins are frozen until their removal (phase 6)**: their notebooks stay as they are and
-their generators are no longer re-run (their match strings no longer apply), so a fix to an EDF tool does not reach them.
+the high-density display of tools 0, 6, 7, 8, 9 (phase 5), the two rounds of the user's visual inspection (phases 5 bis and
+5 ter). Left: the removal of the Curry twins (phase 6), a *Stop* button beside *Run* (phase 6 bis, `jupyter-ui-poll`), the
+report folders numbered after their tool (phase 6 ter), then the documentation (phase 7). **The Curry twins are frozen until
+their removal (phase 6)**: their notebooks stay as they are and their generators are no longer re-run (their match strings no
+longer apply), so a fix to an EDF tool does not reach them.
+
+### Interpolation of the dropped channels (TODO, asked on 2026-11-17)
+
+No tool interpolates: tools 8 and 8bis drop a bad channel, tool 9 computes it but leaves it out of the figures and of the
+group statistics (`channel_dropped`). On a cap with electrode positions (BrainVision, Curry), a spherical-spline
+interpolation of the dropped channels would give full topographies and group means per electrode. A choice of method to
+design in its own plan: which tool (9, as an option off by default?), per epoch or per participant, how the tables mark an
+interpolated value, and never for a montage without positions (an EDF PSG).
 
 ### Task triggers: reading, checks, trigger-locked analyses (TODO, after the slow-wave and spindle extraction)
 

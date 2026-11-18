@@ -1359,11 +1359,18 @@ def positioned_channels(P):
     return np.flatnonzero(np.isfinite(loc).all(axis=1) & (np.abs(loc).sum(axis=1) > 0))
 
 
-def _draw_channel_topomap(ax, P, values, title, cmap='viridis', mask=None):
+TOPO_RING_COLOR = '#c0392b'     # an electrode over its threshold
+TOPO_FLAT_COLOR = '#00bcd4'     # an electrode under the flat threshold (peak-to-peak map), cyan
+
+
+def _draw_channel_topomap(ax, P, values, title, cmap='viridis', mask=None, vlim=(None, None), marks=(),
+                          flat_mask=None, extend='neither'):
     """Small per-channel topomap of `values` (one per channel) for the current epoch, drawn on the channels that have a
     position (the others are named under the title). `mask` (bool per channel) rings the flagged electrodes in red so
-    a bad sensor is identifiable without reading the colour scale. Non-fatal: any MNE/layout failure prints a note in
-    the panel instead of raising."""
+    a bad sensor is identifiable without reading the colour scale; `flat_mask` rings in cyan the ones under the flat
+    threshold. `vlim` = the colour scale (a value beyond it takes the colour of its end, `extend` draws that end as an
+    arrow), `marks` = [(value, colour)] lines on the colour bar (the thresholds). Non-fatal: any MNE/layout failure prints
+    a note in the panel instead of raising."""
     try:
         idx = positioned_channels(P)
         info = P['epochs'].info
@@ -1373,18 +1380,35 @@ def _draw_channel_topomap(ax, P, values, title, cmap='viridis', mask=None):
             info = mne.pick_info(info, idx)
             vals = vals[idx]
             mask = None if mask is None else np.asarray(mask, dtype=bool)[idx]
+            flat_mask = None if flat_mask is None else np.asarray(flat_mask, dtype=bool)[idx]
             title += f"\n(no position: {', '.join(left_out[:3])}{'…' if len(left_out) > 3 else ''})"
         good = np.isfinite(vals)
         if not good.any():
             raise ValueError('no finite value')
         vals = np.where(good, vals, float(np.median(vals[good])))   # NaN 1/f fits -> neutral colour
+        if None not in vlim and not vlim[1] > vlim[0]:               # a threshold of 0: the epoch's own range
+            vlim, extend = (None, None), 'neither'
+        flat_pos = None
+        if flat_mask is not None and np.asarray(flat_mask, dtype=bool).any():
+            flat_mask = np.asarray(flat_mask, dtype=bool)
+            try:
+                # where MNE places these electrodes on the map (its own function, private: on failure, a red ring)
+                from mne.channels.layout import _find_topomap_coords
+                flat_pos = _find_topomap_coords(info, picks=np.flatnonzero(flat_mask))
+            except Exception:
+                mask = flat_mask if mask is None else (np.asarray(mask, dtype=bool) | flat_mask)
         im, _ = mne.viz.plot_topomap(
-            vals, info, axes=ax, show=False, cmap=cmap, sensors=True, contours=0, outlines='head',
+            vals, info, axes=ax, show=False, cmap=cmap, sensors=True, contours=0, outlines='head', vlim=vlim,
             mask=None if mask is None else np.asarray(mask, dtype=bool),
-            mask_params=dict(marker='o', markerfacecolor='none', markeredgecolor='#c0392b',
+            mask_params=dict(marker='o', markerfacecolor='none', markeredgecolor=TOPO_RING_COLOR,
                              linewidth=0, markersize=6, markeredgewidth=1.5))
-        cb = ax.figure.colorbar(im, ax=ax, fraction=0.046, pad=0.04)
+        if flat_pos is not None:
+            ax.plot(flat_pos[:, 0], flat_pos[:, 1], 'o', markerfacecolor='none', markeredgecolor=TOPO_FLAT_COLOR,
+                    markersize=6, markeredgewidth=1.5, linewidth=0, zorder=10)
+        cb = ax.figure.colorbar(im, ax=ax, fraction=0.046, pad=0.04, extend=extend)
         cb.ax.tick_params(labelsize=6)
+        for value, colour in marks:
+            cb.ax.axhline(value, color=colour, lw=1.2)
         ax.set_title(title, fontsize=7)
     except Exception as e:
         ax.set_axis_off()
@@ -1506,7 +1530,7 @@ def plot_epoch_detail(P, ei, freqs, psds_uV2, thresholds, spectro_ch_idx=0, fmin
     if topomap:
         fig = plt.figure(figsize=(11, DETAIL_TOPO_FIG_HEIGHT_IN))
         gs = fig.add_gridspec(1, 2, width_ratios=[1.6, 1.0], wspace=0.12)
-        topo = gs[0, 1].subgridspec(2, 2, hspace=0.5, wspace=0.45)
+        topo = gs[0, 1].subgridspec(2, 2, hspace=0.75, wspace=0.45)     # titles of two lines (the rule)
         topo_axes = [fig.add_subplot(topo[i, j]) for i in range(2) for j in range(2)]
     else:
         fig = plt.figure(figsize=(8.5, DETAIL_FIG_HEIGHT_IN))
@@ -1516,7 +1540,8 @@ def plot_epoch_detail(P, ei, freqs, psds_uV2, thresholds, spectro_ch_idx=0, fmin
     # ax_band = fig.add_subplot(gs[1, 0])   # mean band power   - commented out (see the docstring)
     # ax_spec = fig.add_subplot(gs[1, 1])   # epoch spectrogram - commented out (see the docstring)
 
-    # (a) PSD — clean stage reference in the background, flagged channels highlighted
+    # (a) PSD — the clean stage reference ON TOP of the channels (at 32-64 channels the channels hid it), drawn as lines
+    # only (black median, dotted IQR) so it cannot be mistaken for this epoch's grey band; flagged channels highlighted
     ax = ax_psd
     clean = np.asarray(clean_mask, dtype=bool) if clean_mask is not None else ~P['reject_flag']
     ref = np.asarray(psds_uV2)[(np.asarray(P['stages']) == stg) & clean]
@@ -1524,9 +1549,9 @@ def plot_epoch_detail(P, ei, freqs, psds_uV2, thresholds, spectro_ch_idx=0, fmin
         ref_ep = ref.mean(axis=1)                       # (n_clean_ep, n_freqs), mean across channels
         med = np.median(ref_ep, axis=0)
         q1, q3 = np.percentile(ref_ep, [25, 75], axis=0)
-        ax.fill_between(freqs, q1, q3, color='0.55', alpha=0.35, zorder=1,
-                        label=f'clean {stg} IQR (n={ref_ep.shape[0]})')
-        ax.semilogy(freqs, med, color='0.10', lw=1.8, zorder=2, label=f'clean {stg} median')
+        ax.semilogy(freqs, med, color='black', lw=1.8, zorder=8, label=f'clean {stg} median (n={ref_ep.shape[0]} epochs)')
+        ax.semilogy(freqs, q1, color='black', lw=0.9, ls=':', zorder=8, label=f'clean {stg} IQR')
+        ax.semilogy(freqs, q3, color='black', lw=0.9, ls=':', zorder=8)
     n_flagged = 0
     labelled_grey = False
     hd = n_ch > HD_CHANNEL_THRESHOLD
@@ -1562,7 +1587,8 @@ def plot_epoch_detail(P, ei, freqs, psds_uV2, thresholds, spectro_ch_idx=0, fmin
         lo_env, hi_env = np.percentile(arr, [5, 95], axis=0)
         ax.fill_between(freqs, lo_env, hi_env, color='0.78', alpha=0.55, zorder=3,
                         label=f'this epoch — channels not flagged (n={len(unflagged_psd)}, p5–p95)')
-        ax.semilogy(freqs, np.median(arr, axis=0), color='0.55', lw=1.0, zorder=4)
+        ax.semilogy(freqs, np.median(arr, axis=0), color='0.55', lw=1.0, zorder=4,
+                    label='this epoch — their median')
     if n_flagged > max_flagged_labels:
         ax.plot([], [], ' ', label=f'… +{n_flagged - max_flagged_labels} more flagged')
     ax.set_xlabel('Frequency (Hz)')
@@ -1617,12 +1643,28 @@ def plot_epoch_detail(P, ei, freqs, psds_uV2, thresholds, spectro_ch_idx=0, fmin
     # (e) spatial view — only a high-density montage with real electrode positions can show this, and
     #     it answers the question that dominates at 32-64 channels: ONE bad electrode (a hot spot) or
     #     a whole-head artefact (a global shift)? One map per metric of the table, red rings = the channels over that
-    #     metric's threshold. 1/f R² is bad when LOW: its colour scale is reversed, so a bad electrode is bright on all four.
-    maps = [('ptp', 'Peak-to-peak (µV)', 'viridis'), ('grad', 'Gradient (µV)', 'viridis'),
-            ('mae', '1/f MAE', 'magma'), ('r2', '1/f R²', 'magma_r')]
-    for ax, (key, title, cmap) in zip(topo_axes, maps):
-        mask = np.array([key in values['breached'].get(c, []) for c in range(n_ch)], dtype=bool)
-        _draw_channel_topomap(ax, P, values[key], title, cmap=cmap, mask=mask)
+    #     metric's threshold, cyan rings = under the flat threshold (peak-to-peak). 1/f R² is bad when LOW: its colour
+    #     scale is reversed, so a bad electrode is bright on all four.
+    #     Each colour scale is centred on its threshold (the threshold in the middle, a value beyond the scale takes the
+    #     colour of its end): scaled from the epoch's min to its max, one very bad channel squeezed every other one into a
+    #     single colour, and a ringed electrode could look like its neighbours.
+    thr = values['thr']
+    r2_low = 2 * thr['r2'] - 1
+    maps = [('ptp', f"Peak-to-peak (µV)\nred > {thr['amp']:g}, cyan < {thr['flat']:g}", 'viridis',
+             (0, 2 * thr['amp']), [(thr['amp'], TOPO_RING_COLOR), (thr['flat'], TOPO_FLAT_COLOR)], 'max'),
+            ('grad', f"Gradient (µV)\nred > {thr['grad']:g}", 'viridis', (0, 2 * thr['grad']),
+             [(thr['grad'], TOPO_RING_COLOR)], 'max'),
+            ('mae', f"1/f MAE\nred > {thr['mae']:g}", 'magma', (0, 2 * thr['mae']), [(thr['mae'], TOPO_RING_COLOR)], 'max'),
+            ('r2', f"1/f R²\nred < {thr['r2']:g}", 'magma_r', (r2_low, 1), [(thr['r2'], TOPO_RING_COLOR)], 'min')]
+    for ax, (key, title, cmap, vlim, marks, extend) in zip(topo_axes, maps):
+        if key == 'ptp':
+            mask = np.asarray(values['ptp']) > thr['amp']
+            flat_mask = np.asarray(values['ptp']) < thr['flat']
+        else:
+            mask = np.array([key in values['breached'].get(c, []) for c in range(n_ch)], dtype=bool)
+            flat_mask = None
+        _draw_channel_topomap(ax, P, values[key], title, cmap=cmap, mask=mask, vlim=vlim, marks=marks,
+                              flat_mask=flat_mask, extend=extend)
     return fig
 
 

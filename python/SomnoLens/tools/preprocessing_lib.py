@@ -807,10 +807,11 @@ def set_bads_aside(epochs):
     all_channel_order = None
     if bad_names:
         all_channel_order = list(epochs.ch_names)
+        # event_id lists every stage code (W to R) even when a stage has no epoch (a nap without N3): MNE would refuse it
         bad_epochs = mne.EpochsArray(
             epochs.get_data(picks=bad_names),
             mne.pick_info(epochs.info, mne.pick_channels(epochs.ch_names, bad_names, ordered=True)),
-            events=epochs.events, tmin=epochs.tmin, event_id=epochs.event_id, verbose=False)
+            events=epochs.events, tmin=epochs.tmin, event_id=epochs.event_id, on_missing='ignore', verbose=False)
         epochs.drop_channels(bad_names)
     return bad_names, bad_epochs, all_channel_order
 

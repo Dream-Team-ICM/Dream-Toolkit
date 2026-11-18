@@ -91,6 +91,53 @@ def test_a_pipeline_bar_lines_up_with_the_bar_above_it():
     assert step_row.children[2] is step_text
 
 
+def test_a_narrow_page_puts_the_text_under_the_bar_instead_of_cutting_it():
+    _, row = UI.progress_bar('Participants:')
+    _, step_row, _, _ = UI.phase_bar('Pipeline:')
+    for r in (row, step_row):
+        assert r.layout.flex_flow == 'row wrap'
+        assert r.children[2].layout.min_width == UI.PROGRESS_TEXT_MIN
+
+
+def test_the_step_at_work_shows_a_turning_sign_until_the_run_ends():
+    bar, _ = UI.progress_bar('Participants:')
+    _, _, _, step_text = UI.phase_bar('Pipeline:')
+    step_text.value = '<small>p1: computing the PSD</small>'
+    assert UI.SPINNER in step_text.value and 'p1: computing the PSD' in step_text.value and 'line-height:1.4' in step_text.value
+    step_text.value = 'p1 · done ✅'                     # a step done: no sign
+    assert UI.SPINNER not in step_text.value and 'p1 · done ✅' in step_text.value
+    step_text.value = 'p2 · loading'
+    UI.finish_progress(bar)                               # the run is over: the sign stops, the text stays
+    assert UI.SPINNER not in step_text.value and 'p2 · loading' in step_text.value
+    step_text.value = ''
+    assert step_text.value == ''
+
+
+def test_a_log_line_takes_the_colour_of_its_symbol(capsys):
+    UI.log('[p1] ⚠ channel check: C3 is noisy')
+    UI.log('❌ Error saving: ⚠ disk full')                 # the first symbol decides
+    UI.log('12 participants to process')
+    UI.log('✅ done', kind='warn')
+    lines = capsys.readouterr().out.splitlines()
+    assert lines[0] == '\x1b[38;2;230;81;0m[p1] ⚠ channel check: C3 is noisy\x1b[0m'      # WARN_COLOR
+    assert lines[1].startswith('\x1b[38;2;198;40;40m❌')                                  # ERROR_COLOR
+    assert lines[2] == '12 participants to process'
+    assert lines[3].startswith('\x1b[38;2;230;81;0m✅')
+    # a log written as HTML lines (tools 5 and 9)
+    assert UI.log_html('  ⚠️ band skipped') == f'<span style="color:{UI.WARN_COLOR}">  ⚠️ band skipped</span>'
+    assert UI.log_html('12 participants') == '12 participants'
+
+
+def test_a_status_line_turns_while_its_step_works():
+    import ipywidgets as widgets
+    assert UI.SPINNER in UI.working('Reading the recording…') and 'Reading the recording…' in UI.working('Reading the recording…')
+    status = UI.working_text(widgets.HTML(''))           # tool 0's step lines
+    status.value = '<i>Metrics: C3 (1/62)…</i>'
+    assert UI.SPINNER in status.value
+    UI.stop_working()
+    assert UI.SPINNER not in status.value and 'Metrics: C3 (1/62)…' in status.value
+
+
 def test_suffix_menu_lists_the_suffixes_and_follows_its_field():
     import ipywidgets as widgets
     field = widgets.Text(value='_x.txt', description='Hypno suffix:', layout=widgets.Layout(width='420px'))

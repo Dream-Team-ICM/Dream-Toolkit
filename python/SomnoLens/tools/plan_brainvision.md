@@ -657,7 +657,7 @@ sans un des stades et avec un canal décoché échoue, dans l'outil 7 comme à l
 dans cet appel. Les autres cas ne changent pas. Test : un enregistrement synthétique sans N3, un canal décoché, outils 7 et 0.
 
 **2. Barres de progression (tous les outils).**
-- **Texte tronqué** quand la page est étroite : le texte de droite passe sous la barre et revient à la ligne au lieu d'être coupé.
+- **Texte tronqué** quand la page est étroite : le texte de droite passe sous la barre et revient à la ligne au lieu d'être coupé. ==> a validé après inspection du résultat, j'ai peur que le rendu ne soit pas terrible.
 - **Nouvelle règle (SPEC, rappel court dans CLAUDE.md)** : une barre ne reste jamais immobile pendant qu'une étape travaille.
   - Une étape qui boucle (canaux, époques, morceaux, figures) fait avancer la barre à chaque élément.
   - Une étape qui ne peut pas le dire (une lecture MNE, la prédiction de YASA) affiche un petit signe animé à côté de son nom. Le
@@ -730,6 +730,38 @@ bande des époques de 0,4 à 0,2 pouce.
 d'époques, le menu d'hypnogramme et les boutons de l'outil 0), puis standard sur les outils 0, 3bis, 6, 7, 8, 8bis, 9. `refactor_check.py`
 sur la chaîne EDF : toutes les tables identiques. Changent les rapports des outils 6 (légende des canaux signalés) et 9 (titres).
 Le panneau de détail des outils 8 et 0 est seulement à l'écran. Puis ton inspection visuelle.
+
+**Précisions apportées en faisant** (2026-11-17) :
+- le signe animé est mis par `ui_lib` sur tout texte d'étape d'une barre d'étapes : les outils 5, 6, 7, 8 (barre du rapport) et 9
+  l'ont donc sans autre changement, l'outil 3bis sur sa nouvelle barre *Models*, l'outil 0 sur les lignes d'état de ses étapes ;
+- outil 9 : le lissage avant l'ajustement 1/f n'avait aucune progression, et l'ajustement en parallèle (au-dessus de 5 000
+  ajustements, donc toujours sur un casque) non plus. Les deux avancent maintenant (par blocs de 25 époques, et par paquets du
+  calcul parallèle, quatre par cœur), avec les mêmes nombres ;
+- outil 3bis : une étude sans EOG déclaré enregistre maintenant `eog_mode` *None* (mêmes signaux qu'avant : le mode bipolaire par
+  défaut ne trouvait aucun EOG) ;
+- outil 0 : le menu EOG de GSSC à l'étape 3 garde ses modes fixes (un seul participant, ses canaux de contexte affichés à
+  l'étape 1) ;
+- les menus de l'outil 3bis et les étiquettes `(n/N)` gardent comme valeur le nom seul : les tests et l'enregistrement des
+  réglages ne changent pas.
+
+**Mesures de l'outil 0** (2026-11-18, enregistrement synthétique : 62 EEG + EOG + EMG + ECG, 500 Hz, 90 min, dans `%TEMP%`) :
+
+| Étape de l'outil 0 | Durée | Outil séparé | Durée |
+|---|---|---|---|
+| 1 (chargement) | 18 s | — | — |
+| 5 (qualité) | 154 s | 6 | 165 s |
+| 6 (prétraitement) | 53 s | 7 | 66 s |
+| 7 (décision) | 3 s | 8bis | 6 s |
+| 8 (spectral) | 40 s | 9 | non comparable* |
+
+\* Sur un bruit pur, l'outil 8bis écarte tous les canaux et exclut le participant, que la sélection de l'outil 9 laisse de côté.
+
+- **Les étapes ne sont pas plus lentes que les outils séparés** (un peu plus rapides : elles n'écrivent pas de rapport). L'impression
+  vient de l'étape 5, longue en elle-même sur 62 canaux (les mêmes calculs que l'outil 6).
+- **L'étape 1 (18 s)** : lecture 3 s, signal de chaque époque en µV 1 s, **PSD de chaque époque × canal 8 s** (pour le panneau de
+  détail), le reste (canaux de contexte, spectrogramme, premier dessin) environ 6 s. **La mémoire** : le signal est tenu deux fois en
+  float64 (l'enregistrement pour les étapes 5 et 6, sa copie par époque pour l'explorateur), 1,4 Go chacun ici, 2,5 Go pour le
+  kernel. Sur une nuit de 8 h, ce serait environ 95 s et 14 Go : la mémoire d'un PC de 16 Go déborde sur le disque, et tout ralentit.
 
 ### Phase 6 : suppression des jumeaux Curry
 

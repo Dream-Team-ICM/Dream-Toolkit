@@ -307,6 +307,17 @@ Since phase 5 bis it also checks that tool 7's hypnogram spans exactly the epoch
 `test_brainvision_chain.py` checks tool 0's menu of scored-event files, its step 5 starting as tool 6 prepared the participant,
 and the explorer showing the channels ticked in step 6.
 
+Phase 5 ter (the second visual inspection) adds, in quick: `test_preprocessing_lib.py`, a channel unticked on a nap without N3
+(MNE refused it, in tool 7 and in tool 0's step 6); `test_ui_lib.py`, the text of a bar going under it on a narrow page, the
+turning sign of a step at work and its stop at the end of the run, a log line in the colour of its symbol; `test_high_density.py`,
+the topomaps scaled on their thresholds (a flat electrode ringed cyan, a huge one red), the clean reference drawn over the
+channels, tool 9's per-channel figures drawn on the mean of the channels at 62 and alone at 4, a long title wrapping on a narrow
+figure, the line of the minimum of epochs and the stages absent from the database figures, tool 6's overlays saying why a channel
+is flagged; `test_autoscoring_menus.py`, tool 3bis's menus (only the EOG tool 2 declares, `(n/N)`, the default after a scan, what a
+recording lacking a channel gets, the channels SleepFM reads). In standard: `test_autoscoring_formats.py`, the EOG menus of tool
+3bis on BrainVision recordings with a single right EOG; `test_brainvision_chain.py`, tool 0 on a nap without N3 (the orange box
+before step 6, another hypnogram shown read only, *Tick all* / *Untick all*, step 6 with a channel unticked).
+
 `test_context_gain.py` checks the **Divide by** of tool 2 (an ECG and a chin EMG recorded through an adapter that amplifies them
 100 times, which the file does not say):
 

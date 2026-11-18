@@ -253,16 +253,24 @@ def _channel_colors(n):
     return [cmap(i / max(1, n - 1)) for i in range(n)] if n > 1 else [cmap(0.5)]
 
 
+def flag_legend(reasons):
+    """A channel's flag reasons in a few words for a legend: 'flat_pct=5.0% > 3.5%' -> 'flat_pct=5.0%'."""
+    return '; '.join(reason.split(' ')[0] for reason in reasons)
+
+
 def _overlay_styles(ch_names, flagged=None):
     """The plot keywords of each channel of an overlay (color, alpha, label; 'thin' = a thinner line). Up to
     HD_CHANNEL_THRESHOLD channels: one colour per channel, all in the legend. Above (a high-density cap): the channels
     within thresholds in thin grey, under one legend entry, and only the `flagged` ones in colour, on top and named in
-    the legend (63 names neither fit nor can be told apart by colour)."""
+    the legend (63 names neither fit nor can be told apart by colour). `flagged`: the names of the flagged channels, or
+    {name: its flag reasons} (ch_flags), and the legend then says why each one is flagged ('C3: flat_pct=5.0%')."""
     n = len(ch_names)
+    reasons = {ch: flag_legend(r) for ch, r in flagged.items() if r} if isinstance(flagged, dict) else {}
     if n <= HD_CHANNEL_THRESHOLD:
         colors = _channel_colors(n)
         alpha = max(0.3, min(0.8, 10.0 / max(1, n)))  # more channels -> more transparent
-        return [dict(color=colors[i], alpha=alpha, label=ch) for i, ch in enumerate(ch_names)]
+        return [dict(color=colors[i], alpha=alpha, label=f'{ch}: {reasons[ch]}' if ch in reasons else ch)
+                for i, ch in enumerate(ch_names)]
     flagged = [ch for ch in ch_names if ch in set(flagged or [])]
     # saturated qualitative colours: a single turbo colour is a pale green, lost among the grey lines
     colors = {ch: plt.get_cmap('tab10')(i % 10) for i, ch in enumerate(flagged)}
@@ -270,7 +278,8 @@ def _overlay_styles(ch_names, flagged=None):
     styles = []
     for ch in ch_names:
         if ch in colors:
-            styles.append(dict(color=colors[ch], alpha=0.9, label=f'{ch} (flagged)', zorder=3))
+            styles.append(dict(color=colors[ch], alpha=0.9, zorder=3,
+                               label=f'{ch}: {reasons[ch]}' if ch in reasons else f'{ch} (flagged)'))
         else:
             styles.append(dict(color='#9e9e9e', alpha=0.35, label=grey_label, zorder=2, thin=True))
             grey_label = '_nolegend_'

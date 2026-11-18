@@ -203,7 +203,10 @@ The "what to do / what not to break" reminders, grouped by theme. Each points to
 - **Voila page conventions = `tools/ui_lib.py`** (imported as `UI` by every page and Curry twin): intro template
   + References, `section_html` / `subsection_html` (continuous numbering), message colours, buttons by role
   (`run` / `save` green, `read` blue = **Scan** as the entry button, `caution`, `helper`), widths, **every progress bar**
-  (`progress_bar`, and `phase_bar` for a pipeline bar with its legend of steps: never an `IntProgress` in a page), `picker_title`
+  (`progress_bar`, and `phase_bar` for a pipeline bar with its legend of steps: never an `IntProgress` in a page). **A bar
+  never stays still while a step works**: a loop reports through an optional `progress(done, total)` of the library, a step
+  that cannot gets the turning sign (`working_text` / `working`, stopped by `finish_progress` / `stop_working`). A log
+  line with a symbol goes through `UI.log` (coloured), `picker_title`
   / `help_html` / `text_block` (a long widget text needs one: a widget HTML spaces wrapped lines by 28 px),
   progress bars, suffix menus (`suffix_menu`: the field stays what the tool reads), the **Inputs found** list
   (`input_row`: the study folder is the only picker to use, the tool finds the rest, **the picker stays what the run

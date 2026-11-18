@@ -339,6 +339,35 @@ def test_tool0_events_menu_preparation_of_tool_6_and_channels_of_step_6(tmp_path
         assert 'Montage error' not in nb.widget_text()
 
 
+@pytest.mark.tool0
+def test_tool0_explorer_and_step_6_on_a_nap_without_n3(tmp_path):
+    """Phase 5 ter: the explorer says the montage reads better after step 6 and shows another hypnogram read only; step 6
+    ticks / unticks every channel and runs with a channel unticked on a nap without N3 (MNE refused it before)."""
+    data, _ = make_nap_study(tmp_path / 'data', {'bv01': entry()}, events=False)
+    (data / 'bv01_hypno_gssc.txt').write_text('\n'.join(['N2'] * N_EPOCHS) + '\n', encoding='utf-8')
+    with NotebookSession(T0) as nb:
+        nb.pick('fc_data', data)
+        nb.set('dd_part', 'bv01')
+        nb.set('dd_hypno', '_hypno_remapped.txt')
+        nb.click('btn_run1')
+        assert nb.value("STATUS['1']") == 'up_to_date', nb.widget_text()[-2000:]
+        assert 'Step 6 has not run' in nb.value('html_explorer_info.value')
+        assert '_hypno_gssc.txt' in nb.value('[v for _, v in dd_hyp_shown.options]')
+        nb.set('dd_hyp_shown', '_hypno_gssc.txt')
+        assert nb.value("stage_btns['W'].disabled") and 'shown (_hypno_gssc.txt): <b>N2</b>' in nb.value('lbl_epoch.value')
+        nb.set('dd_hyp_shown', 'in use')
+        assert not nb.value("stage_btns['W'].disabled")
+        nb.click('btn_ch6_none')
+        assert not any(nb.value('[cb.value for cb in CH6.values()]'))
+        nb.click('btn_ch6_all')
+        assert all(nb.value('[cb.value for cb in CH6.values()]'))
+        nb.set("CH6['O2']", False)
+        nb.click('btn_run6')
+        assert nb.value("STATUS['6']") == 'up_to_date', nb.widget_text()[-3000:]
+        assert nb.value("STATE['preproc']['bad_names']") == ['O2']
+        assert 'Step 6 has not run' not in nb.value('html_explorer_info.value')
+
+
 @pytest.mark.tool4
 @pytest.mark.tool5
 @pytest.mark.tool7

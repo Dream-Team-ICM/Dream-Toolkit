@@ -188,7 +188,8 @@ def test_tool8bis_decision_figure_is_smaller_on_a_dense_montage():
         plt.close(fig)
         return inches
     assert size(4) == pytest.approx((100 / 6, 1.0 + 0.4 + 0.88 + 0.7))          # as before
-    assert size(62) == pytest.approx((14.0, 1.0 + 0.4 + 0.14 * 62 + 0.7))       # was 16.7 x 14.1 inches
+    # was 16.7 x 14.1 inches; phase 5 ter: lower hypnogram and decision strip, so that it holds on one page
+    assert size(62) == pytest.approx((14.0, 0.6 + 0.2 + 0.14 * 62 + 0.7))
 
 
 @pytest.mark.quick
@@ -282,6 +283,121 @@ def test_tool9_overlays_the_psd_of_a_dense_montage():
     fig = SL.plot_loglog_with_fit(freqs, psds, np.zeros((20, 62, 90)), masks, names(62), [], 1, (2.0, 45.0))
     assert 30 not in list(visible_axes(fig)[0].get_xticks())
     plt.close(fig)
+
+
+# ---------------------------------------------------------------------------------------------------------
+# Phase 5 ter: the second visual inspection (quick)
+# ---------------------------------------------------------------------------------------------------------
+def detail_figure(P):
+    freqs, psds = L.compute_psds(P['epochs'], fmax=30.0)
+    return L.plot_epoch_detail(P, 0, freqs, psds, L.DEFAULT_THRESHOLDS)
+
+
+@pytest.mark.quick
+@pytest.mark.tool8
+@pytest.mark.tool0
+def test_the_topomaps_are_scaled_on_their_thresholds():
+    """One electrode 100 times too large no longer squeezes the others into one colour; a flat one gets a cyan ring."""
+    P = L.participant_from_epochs(make_epochs(EEG62))
+    P['data_uV'][0, 5] *= 100                         # F7
+    P['data_uV'][0, 6] *= 0                           # F8, flat
+    fig = detail_figure(P)
+    maps = {ax.get_title().split('\n')[0]: ax for ax in fig.axes if ax.images}
+    thr = L.DEFAULT_THRESHOLDS
+    assert maps['Peak-to-peak (µV)'].images[0].get_clim() == (0, 2 * thr['amplitude_ptp_uV']['N2'])
+    assert maps['1/f R²'].images[0].get_clim() == pytest.approx((2 * thr['1f_r2_min'] - 1, 1))
+    ptp = maps['Peak-to-peak (µV)']
+    assert 'red > ' in ptp.get_title() and 'cyan < ' in ptp.get_title()
+    edges = [line.get_markeredgecolor() for line in ptp.get_lines()]
+    assert L.TOPO_FLAT_COLOR in edges and L.TOPO_RING_COLOR in edges       # F8 cyan, F7 red
+    plt.close(fig)
+
+
+@pytest.mark.quick
+@pytest.mark.tool8
+@pytest.mark.tool0
+def test_the_clean_reference_is_drawn_over_the_channels():
+    for n_ch in (4, 62):
+        fig = detail_figure(L.participant_from_epochs(make_epochs(EEG62[:n_ch])))
+        ax = next(a for a in fig.axes if a.get_title().startswith('PSD vs clean'))     # the topomaps come first
+        lines = {line.get_label(): line for line in ax.get_lines()}
+        median = next(line for label, line in lines.items() if label.startswith('clean N2 median'))
+        assert median.get_color() == 'black' and median.get_zorder() > max(
+            line.get_zorder() for label, line in lines.items() if not label.startswith(('clean', '_child')))
+        assert 'clean N2 IQR' in lines and lines['clean N2 IQR'].get_linestyle() == ':'
+        assert not ax.collections or n_ch > 12        # no grey fill under the reference (only this epoch's band, dense)
+        plt.close(fig)
+
+
+@pytest.mark.quick
+@pytest.mark.tool9
+@pytest.mark.tool0
+def test_tool9_draws_every_per_channel_figure_on_the_mean_of_the_channels_above_12():
+    rng = np.random.default_rng(5)
+    n_ep, freqs = 20, np.linspace(0.5, 30.0, 60)
+    meta = pd.DataFrame({'epoch_idx': range(n_ep), 'stage': ['N2'] * n_ep})
+    masks = {'N2': np.ones(n_ep, dtype=bool)}
+    for n_ch, n_items in ((4, 1), (62, 2)):
+        psds = np.exp(rng.normal(size=(n_ep, n_ch, len(freqs))))
+        res = {k: rng.normal(1, 0.1, (n_ep, n_ch)) for k in ('offset', 'knee', 'exponent', 'r2', 'mae', 'n_peaks')}
+        res['fit_ok'] = np.ones((n_ep, n_ch), dtype=bool)
+        bands = {'delta': {'power_db': rng.normal(size=(n_ep, n_ch))}}
+        for items in (SL.loglog_items('x', freqs, psds, np.zeros_like(psds), masks, names(n_ch), [], 1, (2.0, 30.0), res),
+                      SL.aperiodic_night_items('x', meta, res, names(n_ch), []),
+                      SL.band_power_items('x', bands, names(n_ch), masks, [], 'power_db', 'Power (dB/Hz)')):
+            assert len(items) == n_items, n_ch
+            if n_items == 2:
+                assert visible_axes(items[0][2])[0].get_title().startswith('mean of the 62 channels')
+                assert items[1][0] == 'html' and '<details>' in items[1][2]
+            plt.close('all')
+        rows = pd.DataFrame([{'file_id': f, 'stage': 'N2', 'band': 'delta', 'channel': ch, 'power_db_from_log_mean': v,
+                              'exponent_mean': v, 'offset_mean': v}
+                             for f in ('a', 'b') for ch, v in zip(names(n_ch), rng.normal(size=n_ch))])
+        assert len(SL.group_band_items('x', rows, 'power_db_from_log_mean', 'Power', [])) == n_items
+        assert len(SL.group_aperiodic_items('x', rows, [])) == n_items
+        plt.close('all')
+
+
+@pytest.mark.quick
+@pytest.mark.tool9
+@pytest.mark.tool0
+def test_a_long_title_wraps_on_a_narrow_figure():
+    n_ep, freqs = 10, np.linspace(0.5, 30.0, 60)
+    values = np.random.default_rng(6).normal(size=(n_ep, 62, len(freqs)))
+    title = 'Mean PSD per stage after removing the aperiodic component'
+    fig = SL.plot_psd_overlay(freqs, {'W': np.ones(n_ep, dtype=bool)}, names(62), [], 1, title, 'dB', values_db=values)
+    assert '\n' in fig.get_suptitle() and fig.get_suptitle().replace('\n', ' ') == f'{title}: every channel'
+    plt.close(fig)
+    fig = SL.plot_psd_overlay(freqs, {s: np.ones(n_ep, dtype=bool) for s in ('W', 'N1', 'N2')}, names(62), [], 1, title,
+                              'dB', values_db=values)
+    assert '\n' not in fig.get_suptitle()           # wide enough: one line, as before
+    plt.close(fig)
+
+
+@pytest.mark.quick
+@pytest.mark.tool9
+def test_tool9_says_how_many_participants_reach_the_minimum_of_epochs():
+    line = SL.min_epochs_html({'a': {'W': 30, 'N2': 10}, 'b': {'W': 25, 'N2': 25}}, 20, ['W', 'N2', 'R'])
+    assert 'W 2/2 (median 27.5), N2 1/2 (median 17.5), R 0/2 (median 0)' in line
+    assert 'For naps or short recordings, a lower minimum includes them' in line and '(N2, R)' in line
+    assert 'lower minimum' not in SL.min_epochs_html({'a': {'W': 30}}, 20, ['W'])
+    rows = pd.DataFrame({'file_id': ['a', 'b', 'a'], 'stage': ['W', 'W', 'N2'], 'n_epochs': [30, 25, 10]})
+    html = SL.missing_stages_html(rows, ['W', 'N2', 'R'], 20)
+    assert 'W' not in html.split('<li>')[1] and '<b>N2</b>: 1 participant(s) have kept epochs' in html
+    assert '<b>R</b>: no participant has a kept epoch' in html
+    assert SL.missing_stages_html(rows, ['W'], 20) is None
+
+
+@pytest.mark.quick
+@pytest.mark.tool6
+@pytest.mark.tool0
+def test_tool6_overlays_say_why_a_channel_is_flagged():
+    reasons = {'F7': ['flat_pct=5.0% > 3.5%', 'n_peaks=2 (bimodal)']}
+    for n_ch, expected in ((4, ['Fp1', 'Fp2', 'F7: flat_pct=5.0%; n_peaks=2', 'F3']),
+                           (62, ['61 channels within thresholds', 'F7: flat_pct=5.0%; n_peaks=2'])):
+        fig = QL.plot_overlay_psd(make_raw(n_ch), SFREQ, flagged=reasons)
+        assert [t.get_text() for t in fig.axes[0].get_legend().get_texts()] == expected
+        plt.close(fig)
 
 
 # ---------------------------------------------------------------------------------------------------------
