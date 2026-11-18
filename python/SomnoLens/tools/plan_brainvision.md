@@ -809,19 +809,30 @@ scratchpad de la session, pas dans le dépôt.
     d'étape.
   - Je vérifie le résultat sur une capture de la page Voila (Edge sans fenêtre, sur la page locale : rien n'est envoyé).
 
-**2. Panneau de détail des outils 8 et 0 : la PSD.**
-- Ce que j'ai compris : au-dessus de l'époque rejetée, la ligne à faire ressortir est celle des époques propres, et le noir ne le dit
-  pas. Si tu parlais d'une autre figure, dis-le-moi.
-- Les époques propres du stade passent dans le bleu des époques gardées de la section 2 (`#2c7fb8`) : médiane en trait plein, IQR en
-  pointillés.
-  - Légende : *clean N2 epochs: median (n=48 of 412 epochs)* et *clean N2 epochs: IQR*.
-  - Titre : *PSD of this epoch vs the clean N2 epochs*.
-- **La légende passe sous le graphique**, sur deux colonnes : elle ne cache plus les courbes. Maquettes : `1a_detail_now.png`,
-  `1b_detail_proposed.png`.
+**2. La PSD de l'époque affichée (outils 8 et 0) : la médiane des époques propres manque dans l'outil 8.**
+- **Pourquoi** : une époque compte comme propre seulement si aucun de ses canaux n'est signalé (la règle *any* de l'outil 7). Sur 62
+  canaux, presque aucune époque de veille ne passe. Sous 3 époques propres, la figure ne trace pas la médiane, sans le dire. Ta
+  capture de l'outil 0 était sur le signal brut, où rien n'est signalé : les 320 époques W y comptaient comme propres. Sur le signal
+  prétraité, l'outil 0 aurait le même manque.
+- **Correction, au-dessus de 12 canaux** : la référence est faite des canaux propres de chaque époque du stade (les paires époque ×
+  canal non signalées, les canaux écartés exclus). Chaque époque dont au moins la moitié des canaux sont propres donne la moyenne de
+  ses canaux propres, puis la médiane et l'IQR se prennent sur ces époques.
+  - Outil 8 : avec les méthodes cochées en section 1, comme sa carte des paires.
+  - Outil 0 : sur le signal prétraité, avec les signalements de l'étape 6. Sur le signal brut ou filtré, rien n'est signalé : toutes
+    les époques du stade, comme aujourd'hui.
+  - Légende : *clean W median (clean channels of 47 of 320 epochs)*.
+  - À 12 canaux ou moins, rien ne change (les époques sans canal signalé).
+- **Si la référence ne peut pas être faite** (moins de 3 époques), une ligne dans la figure le dit, avec le nombre d'époques propres.
+- La médiane reste en noir, comme dans l'outil 0. **La légende passe sous le graphique**, sur deux colonnes : elle ne déborde plus.
+- La même règle vaut pour les PSD par stade de la section 2 de l'outil 8 (et de son rapport) : leur médiane des époques propres manque
+  pour la même raison sur un casque.
 
 **3. Topographies des outils 8 et 0.** Le rendu étrange vient de l'interpolation. MNE peint l'espace entre les électrodes, puis
-jusqu'au bord de la tête. Sur la maquette, quatre électrodes temporales sous le seuil de R² colorent tout le bord gauche et droit de
-la carte (ligne A). Trois propositions, dans `2_topomaps_A_B_C.png` :
+jusqu'au bord de la tête. Quand deux électrodes voisines ont des valeurs très différentes, la surface entre elles dépasse les deux
+valeurs : ce sont les intersections que tu vois. La transition est plus marquée pour l'amplitude, car une électrode au-delà de deux
+fois le seuil sature la couleur. Sur la maquette, quatre électrodes temporales sous le seuil de R² colorent tout le bord gauche et
+droit de la carte (ligne A). Trois propositions, sur deux époques synthétiques : `%TEMP%\dtk_q5\topomaps_epoch1.png` et
+`topomaps_epoch2.png` (à décider) :
 - **B** : les mêmes cartes interpolées, avec les couleurs du seuil (pâle sous le seuil, orange puis rouge au-dessus).
 - **C (je recommande)** : chaque électrode est un disque de sa couleur, sans interpolation, avec les couleurs de B.
   - La valeur montrée est celle de l'électrode : rien n'est inventé entre elles.
@@ -836,17 +847,17 @@ la carte (ligne A). Trois propositions, dans `2_topomaps_A_B_C.png` :
 - Maquettes : `3_tool7_heatmap_*_proposed.png`, `4_tool8bis_*_now.png` et `4_tool8bis_*_proposed.png`.
 - **Une fonction `edf_io_lib.draw_hypnogram`**, à côté de `custom_stage_style`, trace la ligne : couleur, épaisseur, REM et stades
   personnalisés, axe de gauche seul avec les noms des stades. Chaque figure garde ses axes (époques ou heures) et ses autres panneaux.
-  - Au minimum : les bandeaux au-dessus d'une matrice d'époques (outil 7, outil 8 pour sa carte et sa bande de revue, outil 8bis).
-  - **À décider** : aussi les autres hypnogrammes ? Ce sont 3bis et sa comparaison, 5, 6 et 0 au-dessus du spectrogramme, et 9
-    (époques propres). Aujourd'hui ils varient : noir de 1,0 (6, 0), gris de 1,1 avec cadre complet (5), 1,2 avec grille (3bis). Je
-    recommande tous : le SPEC demande déjà un seul style partout (*Display conventions*, 2026-10-13).
+  - **Tous les hypnogrammes (décidé)** : les bandeaux au-dessus d'une matrice d'époques (outil 7, outil 8 pour sa carte et sa bande de
+    revue, outil 8bis), 3bis et sa comparaison, 5, 6 et 0 au-dessus du spectrogramme, 9 (époques propres). Aujourd'hui ils varient :
+    noir de 1,0 (6, 0), gris de 1,1 avec cadre complet (5), 1,2 avec grille (3bis). Le SPEC demande déjà un seul style partout
+    (*Display conventions*, 2026-10-13).
 
 **5. Outil 9 : paramètres apériodiques.**
 - **Au fil de la nuit** (rapport individuel) : des points pleins, plus gros (alpha 0,9 au lieu de 0,6, trois fois la surface).
   Maquettes : `5_tool9_night_now.png`, `5_tool9_night_proposed.png`.
 - **Par stade** (rapport de la base) : un point plein par participant et la médiane en trait noir, au lieu des boîtes pâles.
   Maquettes : `5_tool9_group_now.png`, `5_tool9_group_proposed.png`.
-  - **À décider** : la même chose pour la puissance par bande de la base, qui est le même type de figure ?
+  - **La puissance par bande de la base aussi (décidé)** : c'est le même type de figure.
 - Les couleurs des stades ne changent pas : ce sont celles de toute la boîte à outils (N1 et N2 y sont deux violets proches). Je ne les
   change que si tu le demandes.
 
@@ -854,11 +865,12 @@ la carte (ligne A). Trois propositions, dans `2_topomaps_A_B_C.png` :
 - Quick :
   - les largeurs de la légende et l'alignement de la barre sur elle (`test_ui_lib`) ;
   - plus de signe après *Done.* dans l'outil 8 ;
-  - la PSD du panneau de détail (époques propres en bleu, légende sous le graphique) ;
+  - la PSD de l'époque affichée : sur 62 canaux dont chaque époque a un canal signalé, la médiane des canaux propres est tracée ;
+    à 4 canaux, la même référence qu'aujourd'hui ; sous 3 époques, la ligne qui le dit ; la légende sous le graphique ;
   - les topographies retenues ;
-  - la même ligne d'hypnogramme dans chaque outil concerné ;
-  - les points pleins de l'outil 9.
-- Standard : les outils touchés (au minimum 0, 6, 7, 8, 8bis, 9 ; aussi 3bis et 5 si tous les hypnogrammes sont harmonisés).
+  - la même ligne d'hypnogramme dans chaque outil ;
+  - les points pleins de l'outil 9 (paramètres apériodiques, puissance par bande de la base).
+- Standard : les outils 0, 3bis, 5, 6, 7, 8, 8bis, 9.
   `test_settings_skip.py` lit l'étiquette *Done.* de l'outil 6 : il est adapté.
 - `refactor_check.py` : toutes les tables identiques. Seuls les rapports des outils touchés changent.
 - Puis ton inspection visuelle.
