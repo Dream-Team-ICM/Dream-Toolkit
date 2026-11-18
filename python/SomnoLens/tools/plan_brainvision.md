@@ -1,8 +1,8 @@
 # Plan : format BrainVision (.vhdr, .vmrk, .eeg) et une seule version de chaque outil
 
-**Statut** : version 3 du 2026-11-06, confirmée. Phases 1 à 5, 4 ter et 5 bis faites et commitées. Phase 5 ter (deuxième
-inspection visuelle) écrite le 2026-11-17, à confirmer. Restent ensuite la phase 6 (jumeaux Curry), les phases 6 bis (bouton Stop)
-et 6 ter (numérotation des dossiers de rapports), puis la phase 7.
+**Statut** : version 3 du 2026-11-06, confirmée. Phases 1 à 5, 4 ter, 5 bis et 5 ter faites et commitées (5 ter avec la
+correction A + B de l'outil 0). Phase 5 quater (troisième inspection visuelle) écrite le 2026-11-18, à confirmer. Restent ensuite la
+phase 6 (jumeaux Curry), les phases 6 bis (bouton Stop) et 6 ter (numérotation des dossiers de rapports), puis la phase 7.
 Chaque phase est validée avant la suivante.
 **Objectif immédiat** : pouvoir inspecter ces données et faire l'autoscoring (phases 1 à 3). Le reste de la chaîne suit
 (phase 4), puis l'affichage haute densité (phase 5) et la suppression des jumeaux Curry (phase 6).
@@ -633,7 +633,7 @@ du rapport de l'outil 7, figure et tableau des époques propres des rapports de 
 - outil 0, étape 5 : la préparation de l'outil 6 est reprise au choix du participant, et une ligne la dit ;
 - la superposition de l'outil 9 trace les canaux en gris clair : le gris de l'éveil, celui de la moyenne, se confondait avec eux.
 
-### Phase 5 ter : deuxième inspection visuelle (2026-11-17, à confirmer)
+### Phase 5 ter : deuxième inspection visuelle (2026-11-17, faite)
 
 **Décidé avec toi** : le bouton Stop passe dans une phase à part (6 bis, avec `jupyter-ui-poll`), la numérotation des dossiers de
 rapports après la phase 6 (6 ter), l'interpolation des canaux rejetés plus tard, hors de ce plan (noté dans les modules prévus du SPEC).
@@ -770,7 +770,7 @@ Le panneau de détail des outils 8 et 0 est seulement à l'écran. Puis ton insp
   d'un PSG de 6 canaux jusqu'à 500, 48 sur un casque de 62 canaux. Sa légende dit `n=48 of 412 epochs`. Chaque spectre ne dépend
   que de son époque : les valeurs sont celles d'une PSD de toute la nuit (vérifié, identiques en brut, à 1e-15 près avec le lissage).
 - **B, le signal de l'explorateur en float32**, lu 50 époques à la fois (aucune copie float64 de la nuit). L'outil 8 reste en
-  float64. L'affichage prétraité ne recopie plus les époques de l'étape 6 quand aucun canal n'est décoché.
+  float64. L'affichage prétraité ne recopie plus les époques de l'étape 6 : elle a déjà mis ses canaux décochés de côté.
 
 Mesuré après (même enregistrement de 90 min, PC en usage pendant la mesure : les durées sont relatives) :
 
@@ -785,6 +785,83 @@ Mesuré après (même enregistrement de 90 min, PC en usage pendant la mesure : 
 Sur une nuit de 8 h, la référence reste à 2 s par stade (48 époques quelle que soit la durée), au lieu d'environ 50 s de PSD au
 chargement, et le pic de mémoire passe d'environ 32 Go à environ 16 Go (la lecture de l'enregistrement en float64 reste le plus gros
 poste).
+
+### Phase 5 quater : troisième inspection visuelle (2026-11-18, à confirmer)
+
+Des maquettes sur données synthétiques (62 et 4 canaux) montrent chaque proposition à côté de la figure actuelle. Elles sont dans le
+scratchpad de la session, pas dans le dépôt.
+
+**1. Barres de progression (`ui_lib`, toutes les pages).**
+- **Noms des étapes coupés** (*Figur*, *HTM*) : chaque segment de la légende devient au moins aussi large que son nom. Les autres
+  segments se partagent le reste selon leur coût. La barre bleue suit les mêmes largeurs, donc elle reste alignée sur la légende. Les
+  outils comptent toujours dans leurs propres unités : la conversion est faite dans `phase_bar`, aucun outil ne change pour cela.
+  Maquette : `6_phase_bar.html` (ou sa capture `6_phase_bar.png`).
+- Le texte de droite qui passe sous la barre sur une page étroite (phase 5 ter) reste : il ne gêne pas.
+- **Signe qui tourne après *Done.*** (outil 8, section 2, barre du rapport). L'outil écrit son dernier texte après `finish_progress`,
+  qui avait déjà arrêté les signes, donc le texte final en reçoit un nouveau. Correction : le texte final d'abord (*Done.*, *HTML not
+  saved.*, *Failed.*), puis `finish_progress`. Les autres pages écrivent dans le bon ordre (vérifié).
+- **Textes à droite des deux barres alignés.**
+  - Aujourd'hui, le texte de la barre des participants est centré sur la hauteur de la barre, en taille normale. Celui de la barre
+    d'étapes est collé en haut, en petit. Dans l'outil 3bis, *1 / 3* et *sub01: GSSC* ne sont donc pas à la même hauteur.
+  - Les deux textes prennent le même bloc : même taille, première ligne centrée sur sa barre.
+  - Les outils 6 et 7 ajoutent après la barre une étiquette *Participant X (i/N)*, décalée elle aussi. Elle disparaît : la barre dit
+    déjà *i / N*, et le texte d'étape nomme le participant (*sub01 · loading…*). Le *Done. (durée)* de l'outil 7 passe dans le texte
+    d'étape.
+  - Je vérifie le résultat sur une capture de la page Voila (Edge sans fenêtre, sur la page locale : rien n'est envoyé).
+
+**2. Panneau de détail des outils 8 et 0 : la PSD.**
+- Ce que j'ai compris : au-dessus de l'époque rejetée, la ligne à faire ressortir est celle des époques propres, et le noir ne le dit
+  pas. Si tu parlais d'une autre figure, dis-le-moi.
+- Les époques propres du stade passent dans le bleu des époques gardées de la section 2 (`#2c7fb8`) : médiane en trait plein, IQR en
+  pointillés.
+  - Légende : *clean N2 epochs: median (n=48 of 412 epochs)* et *clean N2 epochs: IQR*.
+  - Titre : *PSD of this epoch vs the clean N2 epochs*.
+- **La légende passe sous le graphique**, sur deux colonnes : elle ne cache plus les courbes. Maquettes : `1a_detail_now.png`,
+  `1b_detail_proposed.png`.
+
+**3. Topographies des outils 8 et 0.** Le rendu étrange vient de l'interpolation. MNE peint l'espace entre les électrodes, puis
+jusqu'au bord de la tête. Sur la maquette, quatre électrodes temporales sous le seuil de R² colorent tout le bord gauche et droit de
+la carte (ligne A). Trois propositions, dans `2_topomaps_A_B_C.png` :
+- **B** : les mêmes cartes interpolées, avec les couleurs du seuil (pâle sous le seuil, orange puis rouge au-dessus).
+- **C (je recommande)** : chaque électrode est un disque de sa couleur, sans interpolation, avec les couleurs de B.
+  - La valeur montrée est celle de l'électrode : rien n'est inventé entre elles.
+  - Les cercles rouges (au-dessus du seuil) et cyan (plat) ne changent pas.
+- **D** : B, avec une extrapolation limitée à la zone des électrodes.
+
+**4. Hypnogrammes : une seule ligne partout.**
+- **Outil 7** : le titre passe sur l'axe de l'hypnogramme, comme dans l'outil 8. Sur un casque, il ne flotte plus à un pouce
+  au-dessus. Pour tous les montages.
+- **Outil 8bis** : le style de l'outil 7, c'est-à-dire plus de cadre, un trait gris `#555555` de 1,2, REM en rouge à la même
+  épaisseur, et plus d'étiquette *stage*.
+- Maquettes : `3_tool7_heatmap_*_proposed.png`, `4_tool8bis_*_now.png` et `4_tool8bis_*_proposed.png`.
+- **Une fonction `edf_io_lib.draw_hypnogram`**, à côté de `custom_stage_style`, trace la ligne : couleur, épaisseur, REM et stades
+  personnalisés, axe de gauche seul avec les noms des stades. Chaque figure garde ses axes (époques ou heures) et ses autres panneaux.
+  - Au minimum : les bandeaux au-dessus d'une matrice d'époques (outil 7, outil 8 pour sa carte et sa bande de revue, outil 8bis).
+  - **À décider** : aussi les autres hypnogrammes ? Ce sont 3bis et sa comparaison, 5, 6 et 0 au-dessus du spectrogramme, et 9
+    (époques propres). Aujourd'hui ils varient : noir de 1,0 (6, 0), gris de 1,1 avec cadre complet (5), 1,2 avec grille (3bis). Je
+    recommande tous : le SPEC demande déjà un seul style partout (*Display conventions*, 2026-10-13).
+
+**5. Outil 9 : paramètres apériodiques.**
+- **Au fil de la nuit** (rapport individuel) : des points pleins, plus gros (alpha 0,9 au lieu de 0,6, trois fois la surface).
+  Maquettes : `5_tool9_night_now.png`, `5_tool9_night_proposed.png`.
+- **Par stade** (rapport de la base) : un point plein par participant et la médiane en trait noir, au lieu des boîtes pâles.
+  Maquettes : `5_tool9_group_now.png`, `5_tool9_group_proposed.png`.
+  - **À décider** : la même chose pour la puissance par bande de la base, qui est le même type de figure ?
+- Les couleurs des stades ne changent pas : ce sont celles de toute la boîte à outils (N1 et N2 y sont deux violets proches). Je ne les
+  change que si tu le demandes.
+
+**Tests proposés**
+- Quick :
+  - les largeurs de la légende et l'alignement de la barre sur elle (`test_ui_lib`) ;
+  - plus de signe après *Done.* dans l'outil 8 ;
+  - la PSD du panneau de détail (époques propres en bleu, légende sous le graphique) ;
+  - les topographies retenues ;
+  - la même ligne d'hypnogramme dans chaque outil concerné ;
+  - les points pleins de l'outil 9.
+- Standard : les outils touchés (au minimum 0, 6, 7, 8, 8bis, 9 ; aussi 3bis et 5 si tous les hypnogrammes sont harmonisés).
+  `test_settings_skip.py` lit l'étiquette *Done.* de l'outil 6 : il est adapté.
+- `refactor_check.py` : toutes les tables identiques. Seuls les rapports des outils touchés changent.
+- Puis ton inspection visuelle.
 
 ### Phase 6 : suppression des jumeaux Curry
 
