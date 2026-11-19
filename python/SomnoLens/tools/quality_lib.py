@@ -2,16 +2,11 @@
 
 Moved verbatim from tool 6 (its shared-function cell, and the computation lines of its run loop): tool 6 and
 tool 0's step 5 call the same code, so they give the same numbers by construction. Edit here, never in a
-notebook. The Curry twin of tool 6 does not import this file: tools_curry/_make_tool6_curry.py copies it into
-the twin and strips the EDF physical-range metric (bounds_pct) from that copy, so re-run the generator after
-any edit here.
+notebook.
 
 Format-agnostic: everything works on an already-loaded mne Raw (µV = get_data() * 1e6). Reading the recording
-(EDF here, Curry in the twin) stays in the notebooks.
+(EDF, BrainVision, Curry: recording_lib) stays in the notebooks.
 """
-import json
-from pathlib import Path
-
 import matplotlib
 import matplotlib.pyplot as plt
 import mne
@@ -21,6 +16,8 @@ from scipy.signal import find_peaks, savgol_filter
 from scipy.stats import kurtosis as scipy_kurtosis, skew as scipy_skew
 
 import channel_check_lib as CC
+from edf_io_lib import HD_CHANNEL_THRESHOLD   # the dense layout of the figures above 12 channels (same folder)
+from edf_io_lib import draw_hypnogram         # the toolkit's hypnogram, one look everywhere
 
 
 # ---------------------------------------------------------------------------------------------------------
@@ -252,28 +249,66 @@ def _channel_colors(n):
     return [cmap(i / max(1, n - 1)) for i in range(n)] if n > 1 else [cmap(0.5)]
 
 
-def _overlay_legend(ax):
-    """Compact per-channel legend placed to the right of the axes."""
+def flag_legend(reasons):
+    """A channel's flag reasons in a few words for a legend: 'flat_pct=5.0% > 3.5%' -> 'flat_pct=5.0%'."""
+    return '; '.join(reason.split(' ')[0] for reason in reasons)
+
+
+def _overlay_styles(ch_names, flagged=None):
+    """The plot keywords of each channel of an overlay (color, alpha, label; 'thin' = a thinner line). Up to
+    HD_CHANNEL_THRESHOLD channels: one colour per channel, all in the legend. Above (a high-density cap): the channels
+    within thresholds in thin grey, under one legend entry, and only the `flagged` ones in colour, on top and named in
+    the legend (63 names neither fit nor can be told apart by colour). `flagged`: the names of the flagged channels, or
+    {name: its flag reasons} (ch_flags), and the legend then says why each one is flagged ('C3: flat_pct=5.0%')."""
+    n = len(ch_names)
+    reasons = {ch: flag_legend(r) for ch, r in flagged.items() if r} if isinstance(flagged, dict) else {}
+    if n <= HD_CHANNEL_THRESHOLD:
+        colors = _channel_colors(n)
+        alpha = max(0.3, min(0.8, 10.0 / max(1, n)))  # more channels -> more transparent
+        return [dict(color=colors[i], alpha=alpha, label=f'{ch}: {reasons[ch]}' if ch in reasons else ch)
+                for i, ch in enumerate(ch_names)]
+    flagged = [ch for ch in ch_names if ch in set(flagged or [])]
+    # saturated qualitative colours: a single turbo colour is a pale green, lost among the grey lines
+    colors = {ch: plt.get_cmap('tab10')(i % 10) for i, ch in enumerate(flagged)}
+    grey_label = f'{n - len(flagged)} channels within thresholds'
+    styles = []
+    for ch in ch_names:
+        if ch in colors:
+            styles.append(dict(color=colors[ch], alpha=0.9, zorder=3,
+                               label=f'{ch}: {reasons[ch]}' if ch in reasons else f'{ch} (flagged)'))
+        else:
+            styles.append(dict(color='#9e9e9e', alpha=0.35, label=grey_label, zorder=2, thin=True))
+            grey_label = '_nolegend_'
+    return styles
+
+
+def _overlay_legend(ax, thick=False):
+    """Compact per-channel legend placed to the right of the axes. `thick` (a high-density overlay): the legend lines
+    drawn opaque and 2 points wide, the thin transparent traces leaving them invisible."""
     handles, labels = ax.get_legend_handles_labels()
     ncol = 1 if len(labels) <= 16 else 2
-    ax.legend(handles, labels, loc='upper left', bbox_to_anchor=(1.01, 1.0),
-              ncol=ncol, fontsize=6.5, frameon=False, handlelength=1.2, columnspacing=0.8)
+    legend = ax.legend(handles, labels, loc='upper left', bbox_to_anchor=(1.01, 1.0),
+                       ncol=ncol, fontsize=6.5, frameon=False, handlelength=1.2, columnspacing=0.8)
+    if thick:
+        for line in legend.get_lines():
+            line.set_linewidth(2.0)
+            line.set_alpha(1.0)
 
 
-def plot_overlay_timeseries(raw, sf, y_lim=None):
+def plot_overlay_timeseries(raw, sf, y_lim=None, flagged=None):
     """Butterfly view: every channel's time series overlaid on one uV axis.
     Reads one channel at a time from `raw` (a cheap slice of the preloaded data) so the
-    whole multi-channel recording is never held as a second float64 array."""
+    whole multi-channel recording is never held as a second float64 array. `flagged`: see _overlay_styles."""
     ch_names = raw.ch_names
     n_times = raw.n_times
     step = max(1, int(sf / 10))   # ~10 Hz display resolution
     t_h = np.arange(0, n_times, step) / sf / 3600
-    colors = _channel_colors(len(ch_names))
-    _alpha = max(0.3, min(0.8, 10.0 / max(1, len(ch_names))))  # more channels -> more transparent
+    styles = _overlay_styles(ch_names, flagged)
     fig, ax = plt.subplots(figsize=(10, 3.4))
     for i, ch in enumerate(ch_names):
         sig = raw.get_data(picks=[i])[0] * 1e6
-        ax.plot(t_h, sig[::step], lw=0.3, color=colors[i], alpha=_alpha, label=ch, rasterized=True)
+        style = dict(styles[i])
+        ax.plot(t_h, sig[::step], lw=0.3 * (0.6 if style.pop('thin', False) else 1.0), rasterized=True, **style)
         del sig
     ax.set_xlim(0, n_times / sf / 3600)
     if y_lim is not None:
@@ -283,17 +318,16 @@ def plot_overlay_timeseries(raw, sf, y_lim=None):
     ax.set_ylabel('µV', fontsize=11)
     for sp in ['right', 'top']:
         ax.spines[sp].set_visible(False)
-    _overlay_legend(ax)
+    _overlay_legend(ax, thick=len(ch_names) > HD_CHANNEL_THRESHOLD)
     fig.subplots_adjust(right=0.82)
     return fig
 
 
-def plot_overlay_distribution(raw, x_lim=None):
+def plot_overlay_distribution(raw, x_lim=None, flagged=None):
     """Amplitude distribution (density) of every channel overlaid as outline curves
-    (one channel at a time)."""
+    (one channel at a time). `flagged`: see _overlay_styles."""
     ch_names = raw.ch_names
-    colors = _channel_colors(len(ch_names))
-    _alpha = max(0.3, min(0.8, 10.0 / max(1, len(ch_names))))  # more channels -> more transparent
+    styles = _overlay_styles(ch_names, flagged)
     fig, ax = plt.subplots(figsize=(9, 3.6))
     for i, ch in enumerate(ch_names):
         sig = raw.get_data(picks=[i])[0] * 1e6
@@ -303,7 +337,8 @@ def plot_overlay_distribution(raw, x_lim=None):
         total = histo.sum()
         dens = histo / (total * width) if (total > 0 and width > 0) else histo.astype(float)
         centers = (edges[:-1] + edges[1:]) / 2
-        ax.plot(centers, dens, lw=1.0, color=colors[i], alpha=_alpha, label=ch)
+        style = dict(styles[i])
+        ax.plot(centers, dens, lw=1.0 * (0.6 if style.pop('thin', False) else 1.0), **style)
         del sig
     if x_lim is not None:
         ax.set_xlim(-x_lim, x_lim)
@@ -311,18 +346,18 @@ def plot_overlay_distribution(raw, x_lim=None):
     ax.set_ylabel('Density', fontsize=11)
     for sp in ['right', 'top']:
         ax.spines[sp].set_visible(False)
-    _overlay_legend(ax)
+    _overlay_legend(ax, thick=len(ch_names) > HD_CHANNEL_THRESHOLD)
     fig.subplots_adjust(right=0.82)
     return fig
 
 
-def plot_overlay_psd(raw, sf):
-    """Welch PSD (4 s windows) of every channel overlaid on one axis (one channel at a time)."""
+def plot_overlay_psd(raw, sf, flagged=None):
+    """Welch PSD (4 s windows) of every channel overlaid on one axis (one channel at a time). `flagged`: see
+    _overlay_styles."""
     ch_names = raw.ch_names
     n_per_seg = int(4 * sf)
     n_overlap = n_per_seg // 2
-    colors = _channel_colors(len(ch_names))
-    _alpha = max(0.3, min(0.8, 10.0 / max(1, len(ch_names))))  # more channels -> more transparent
+    styles = _overlay_styles(ch_names, flagged)
     fig, ax = plt.subplots(figsize=(9, 3.6))
     freqs = None
     for i, ch in enumerate(ch_names):
@@ -331,7 +366,8 @@ def plot_overlay_psd(raw, sf):
             sig[np.newaxis, :], sfreq=sf, fmin=0.5, fmax=min(100.0, sf / 2 - 0.5),
             n_per_seg=n_per_seg, n_overlap=n_overlap, n_fft=n_per_seg, verbose=False)
         psd_db = 10 * np.log10(np.maximum(psds[0], 1e-10))
-        ax.plot(freqs, psd_db, lw=0.9, color=colors[i], alpha=_alpha, label=ch)
+        style = dict(styles[i])
+        ax.plot(freqs, psd_db, lw=0.9 * (0.6 if style.pop('thin', False) else 1.0), **style)
         del sig, psds
     if freqs is not None:
         ax.set_xlim(0.5, float(freqs[-1]))
@@ -339,7 +375,7 @@ def plot_overlay_psd(raw, sf):
     ax.set_ylabel('Power (dB/Hz)', fontsize=11)
     for sp in ['right', 'top']:
         ax.spines[sp].set_visible(False)
-    _overlay_legend(ax)
+    _overlay_legend(ax, thick=len(ch_names) > HD_CHANNEL_THRESHOLD)
     fig.subplots_adjust(right=0.82)
     return fig
 
@@ -395,53 +431,12 @@ METRIC_INTERPRETATIONS = {
 
 
 # --- Custom (non-AASM) sleep stages -------------------------------------------
-# Projects may intentionally keep labels outside the AASM set (W/N1/N2/N3/R). They are
-# declared in config_param/custom_stages.json (written by 3_remap_hypno) and recognised
-# here so the hypnospectrogram and per-stage tables include them.
-BASE_STAGE_COLORS = {'W': '#969696', 'N1': '#9e9ac8', 'N2': '#807dba', 'N3': '#6a51a3', 'R': '#c994c7'}
-# Distinct, non-red palette for custom stages (red is reserved for REM on the hypnogram).
-CUSTOM_STAGE_PALETTE = ['#8dd3c7', '#ffffb3', '#bebada', '#80b1d3', '#fdb462', '#b3de69', '#fccde5', '#d9d9d9']
-
-
-def load_custom_stages(folder):
-    """Read config_param/custom_stages.json; return list of kept non-AASM labels ([] if absent/unreadable)."""
-    if not folder:
-        return []
-    path = Path(folder) / 'config_param' / 'custom_stages.json'
-    if not path.exists():
-        return []
-    try:
-        with open(path, encoding='utf-8') as f:
-            data = json.load(f)
-        stages = data.get('custom_stages', []) if isinstance(data, dict) else []
-        return [str(s) for s in stages]
-    except Exception:
-        return []
-
-
-def parse_custom_field(text):
-    """Parse the comma-separated 'Custom stages' field into a clean, de-duplicated list."""
-    seen = []
-    for tok in str(text).split(','):
-        tok = tok.strip()
-        if tok and tok not in seen:
-            seen.append(tok)
-    return seen
-
-
-def custom_stage_style(custom_stages):
-    """Stage -> y-position, stage -> colour, and axis ticks for AASM + custom stages.
-    AASM keeps YASA heights (W top ... N3 bottom); custom stages stack below N3 (-1, -2, ...)
-    in declaration order with auto-assigned colours. Returns (stage_y, stage_colors, ytick_pos, ytick_labels)."""
-    stage_y = {'W': 4, 'R': 3, 'N1': 2, 'N2': 1, 'N3': 0}
-    stage_colors = dict(BASE_STAGE_COLORS)
-    for i, cs in enumerate(custom_stages):
-        stage_y[cs] = -1 - i
-        stage_colors[cs] = CUSTOM_STAGE_PALETTE[i % len(CUSTOM_STAGE_PALETTE)]
-    ordered = sorted(stage_y.items(), key=lambda kv: kv[1])
-    ytick_pos = [y for _, y in ordered]
-    ytick_labels = ['REM' if s == 'R' else s for s, _ in ordered]
-    return stage_y, stage_colors, ytick_pos, ytick_labels
+# Projects may intentionally keep labels outside the AASM set (W/N1/N2/N3/R). They are declared in
+# config_param/custom_stages.json (written by 3_remap_hypno) and recognised so the hypnospectrogram and per-stage
+# tables include them. One copy of the helpers, in edf_io_lib (this module kept its own for the Curry generator of tool
+# 6, gone in phase 6 of tools/plan_brainvision.md); imported here, tool 6 still finds them in this module.
+from edf_io_lib import (BASE_STAGE_COLORS, CUSTOM_STAGE_PALETTE, custom_stage_style, load_custom_stages,  # noqa: E402
+                        parse_custom_field)
 
 
 def compute_hypnospectrogram_sxx(sig_uV, sf, fmin=0.5, fmax=40):
@@ -503,7 +498,6 @@ def render_hypnospectrogram(f, t, Sxx, hypno_labels, custom_stages, trimperc=2.5
     same rendering (colour scaling, dead-epoch greying) as the per-channel figures.
     Returns a Figure."""
     hypno_labels = np.asarray(hypno_labels)
-    stage_y, stage_colors, ytick_pos, ytick_labels = custom_stage_style(custom_stages)
     Sxx, norm, spec_cmap = spectrogram_colour_scale(Sxx, trimperc)
 
     # Two rows (hypnogram strip, spectrogram) and a thin right column for the colour scale, used only beside
@@ -514,25 +508,12 @@ def render_hypnospectrogram(f, t, Sxx, hypno_labels, custom_stages, trimperc=2.5
     ax1 = fig.add_subplot(grid[1, 0])
     cax = fig.add_subplot(grid[1, 1])
 
-    # Hypnogram strip: one y per 30s epoch; black line, REM red, each custom stage in its colour, all at the
-    # line's own width (discreet).
+    # Hypnogram strip, one y per 30 s epoch: the toolkit's hypnogram (edf_io_lib.draw_hypnogram).
     n_ep = len(hypno_labels)
     ep_hours = np.arange(n_ep + 1) * 30 / 3600
-    y = np.array([stage_y.get(s, np.nan) for s in hypno_labels], dtype=float)
-    y_step = np.append(y, y[-1] if n_ep else np.nan)
-    ax0.step(ep_hours, y_step, where='post', color='k', lw=1.0)
-    for s in (['R'] + list(custom_stages)):
-        col = REM_COLOR if s == 'R' else stage_colors.get(s)
-        for ei in np.where(hypno_labels == s)[0]:
-            ax0.plot([ep_hours[ei], ep_hours[ei + 1]], [stage_y[s], stage_y[s]],
-                     color=col, lw=1.0, solid_capstyle='butt')
-    ax0.set_yticks(ytick_pos)
-    ax0.set_yticklabels(ytick_labels, fontsize=8)
-    ax0.set_ylim(min(ytick_pos) - 0.8, max(ytick_pos) + 0.8)
-    ax0.set_xlim(0, ep_hours[-1] if n_ep else 1)
-    ax0.xaxis.set_visible(False)
-    for sp in ['top', 'right', 'bottom']:
-        ax0.spines[sp].set_visible(False)
+    draw_hypnogram(ax0, ep_hours, hypno_labels, custom_stages, x_axis=False, fontsize=8)
+    if not n_ep:
+        ax0.set_xlim(0, 1)
 
     # Spectrogram.
     im = ax1.pcolormesh(t, f, Sxx, norm=norm, cmap=spec_cmap, antialiased=True, shading='auto')
@@ -701,23 +682,29 @@ def plot_participant_electrode_scatter(df_sub, custom_stages=None):
     file_id = str(df_sub["file_id"].iloc[0]) if "file_id" in df_sub.columns and len(df_sub) else ""
     channels = list(df_sub["channel"])
     x = np.arange(len(channels))
+    hd = len(channels) > HD_CHANNEL_THRESHOLD
     ncols = min(3, len(OVERVIEW_KEY_METRICS))
     nrows = int(np.ceil(len(OVERVIEW_KEY_METRICS) / ncols))
     fig, axes = plt.subplots(nrows, ncols, figsize=(6 * ncols, 4 * nrows), squeeze=False)
     axes = axes.flatten()
     for ax, m in zip(axes, OVERVIEW_KEY_METRICS):
-        if m not in df_sub.columns:
+        # a metric without values (At EDF bounds: no declared range, e.g. BrainVision): no panel, as in the pooled view
+        if m not in df_sub.columns or not df_sub[m].notna().any():
             ax.set_visible(False)
             continue
         vals = df_sub[m].values
         flags = (df_sub["exclude"].fillna(False).astype(bool).values
                  if "exclude" in df_sub.columns else np.zeros(len(vals), dtype=bool))
         colors = ["#c0392b" if f else "#555555" for f in flags]
-        ax.scatter(x, vals, color=colors, s=40, alpha=0.85, zorder=3, linewidths=0)
+        ax.scatter(x, vals, color=colors, s=14 if hd else 40, alpha=0.85, zorder=3, linewidths=0)
         ax.set_title(OVERVIEW_METRIC_LABELS.get(m, m), fontsize=11, fontweight="bold")
         ax.set_xticks(x)
-        rot = 30 if len(channels) > 4 else 0
-        ax.set_xticklabels(channels, rotation=rot, fontsize=9, ha="right" if rot else "center")
+        if hd:
+            # a high-density cap: the electrode names written upright, small, so that 64 of them do not overlap
+            ax.set_xticklabels(channels, rotation=90, fontsize=5.5, ha="center")
+        else:
+            rot = 30 if len(channels) > 4 else 0
+            ax.set_xticklabels(channels, rotation=rot, fontsize=9, ha="right" if rot else "center")
         ax.margins(x=0.05)
         for sp in ["right", "top"]:
             ax.spines[sp].set_visible(False)
@@ -884,7 +871,9 @@ def settings_differences(stored, do_resample, target_freq, do_highpass, hp_freq_
     for _, channel_row in stored.iterrows():
         reason = channel_row['suspect_reason']
         old = flag_criteria(reason.split(';')) if isinstance(reason, str) and reason.strip() else []
-        new = flag_criteria(flag_channel(channel_row, thresholds))
+        new = flag_criteria(flag_channel(channel_row, thresholds)
+                            + comparison_flag(channel_row.get('noisy_vs_median_pct', np.nan),
+                                              channel_row.get('flat_vs_median_pct', np.nan), len(stored)))
         if old != new:
             flag_rows.append((f"flags of {channel_row['channel']}", ', '.join(old) or 'none', ', '.join(new) or 'none'))
     if flag_rows and 'flag_thresholds' in stored.columns:
@@ -1060,15 +1049,39 @@ def compute_channel_metrics(raw, sf, file_id, thresholds, hypno_vec, custom_stag
     comparison = compare_channels(raw, sf)
     for row in file_rows:
         row.update(comparison[row['channel']])
+        extra = comparison_flag(row['noisy_vs_median_pct'], row['flat_vs_median_pct'], len(raw.ch_names))
+        if extra:
+            ch_flags[row['channel']] = ch_flags[row['channel']] + extra
+            row['suspect_reason'] = '; '.join(ch_flags[row['channel']])
+            row['exclude'] = True
     return ch_metrics, ch_flags, file_rows, file_stage_rows
+
+
+def comparison_flag(noisy_pct, flat_pct, n_channels):
+    """The comparison with the median channel as a flag criterion, above HD_CHANNEL_THRESHOLD channels only: [] or one
+    reason, e.g. 'noisy_vs_median=100% of the epochs > 20% (over 3 times the median channel)'. On a cap, the median
+    channel of an epoch is a sound reference, and a disconnected electrode clips nothing (no physical range): none of the
+    criteria of flag_channel sees it. With fewer channels (a PSG), the electrodes differ too much from one another: the
+    comparison stays an alert apart (compare_channels)."""
+    if n_channels <= HD_CHANNEL_THRESHOLD:
+        return []
+    share = 100 * CC.SHARE
+    if noisy_pct > share:      # NaN (fewer than 3 channels, a table written before the columns) is never over
+        return [f'noisy_vs_median={noisy_pct:.0f}% of the epochs > {share:g}% (over {CC.NOISY_RATIO:g} times the median '
+                'channel)']
+    if flat_pct > share:
+        return [f'flat_vs_median={flat_pct:.0f}% of the epochs > {share:g}% (under {CC.DEAD_RATIO:g} times the median '
+                'channel)']
+    return []
 
 
 def compare_channels(raw, sf):
     """Every channel compared with the median channel of the same 30-s epoch (channel_check_lib, every epoch of the
     night, filtered 0.3-35 Hz): {channel: {'noisy_vs_median_pct', 'flat_vs_median_pct', 'comparison_alert'}}. The flags
     judge each channel alone; this sees what only a comparison shows on a dense montage: a disconnected electrode is
-    many times larger than its neighbours. An alert apart, never a flag (not in suspect_reason / exclude, so tool 7
-    unticks nothing more). NaN and no alert with fewer than 3 channels (no median)."""
+    many times larger than its neighbours. Up to HD_CHANNEL_THRESHOLD channels an alert apart, never a flag (not in
+    suspect_reason / exclude, so tool 7 unticks nothing more); above, also a flag (comparison_flag). NaN and no alert
+    with fewer than 3 channels (no median)."""
     names = list(raw.ch_names)
     empty = {ch: {'noisy_vs_median_pct': np.nan, 'flat_vs_median_pct': np.nan, 'comparison_alert': ''} for ch in names}
     epochs = np.arange(int(raw.n_times // (CC.EPOCH_S * sf)))

@@ -53,6 +53,7 @@ except Exception:
 from preprocessing_lib import smooth_psd_median, smooth_psd_lowess
 from edf_io_lib import (   # one copy, in edf_io_lib (same folder)
     BASE_STAGE_COLORS, CUSTOM_STAGE_PALETTE, load_custom_stages, parse_custom_field, custom_stage_style,
+    HD_CHANNEL_THRESHOLD, draw_hypnogram,
 )
 
 mne.set_log_level('ERROR')
@@ -110,14 +111,15 @@ MANUAL_EVENT_COLUMNS = ['type', 'onset_s', 'duration_s', 'epoch_idx', 'epoch_num
 # rejected, and 451 of them (34% of the file) are flagged on a SINGLE electrode out of 32 - where the
 # right action is to drop that electrode, not to throw away 30 s of 32-channel EEG. Hence the channel
 # triage helpers (channel_badness / channels_over_threshold / recompute_reject's epoch rule) below.
-HD_CHANNEL_THRESHOLD = 12       # channels above which the high-density layout/behaviour kicks in
+# HD_CHANNEL_THRESHOLD (12, from edf_io_lib): channels above which the high-density layout/behaviour kicks in
 MONTAGE_ROW_IN       = 0.50     # inches per channel row (classic)
 MONTAGE_ROW_MIN_IN   = 0.16     # floor: thinner rows are unreadable anyway
 MONTAGE_MAX_H_IN     = 13.0     # cap on the montage figure height (inches)
 N_1F_SUBSAMPLE_HD    = 250      # default 1/f epoch subsample above the threshold (0 = fit every epoch)
-DEFAULT_TABLE_ROWS   = 8        # per-channel metric table: flagged channels + this many worst ones
-DETAIL_FIG_HEIGHT_IN = 3.3      # navigator detail panel (PSD + metric table): low enough that the montage,
-                                # the PSD and the table fit on one screen
+DEFAULT_TABLE_ROWS   = 8        # unused since the table scrolls (epoch_metric_table_html): kept for the frozen Curry twin
+DETAIL_FIG_HEIGHT_IN = 3.3      # navigator detail panel (PSD, the metric table beside it): low enough that the
+                                # montage, the PSD and the table fit on one screen
+DETAIL_TOPO_FIG_HEIGHT_IN = 4.4  # the same with the four topomaps in 2 x 2 (high-density montages with positions)
 
 AASM_STAGES = ['W', 'N1', 'N2', 'N3', 'R']
 
@@ -255,15 +257,24 @@ def load_participant(fif_path):
     return participant_from_epochs(epochs)
 
 
-def participant_from_epochs(epochs):
+def participant_from_epochs(epochs, dtype=None):
     """The dict of load_participant, built from an Epochs object already in memory: tool 0 epochs the
     recording itself (like tool 7) and feeds it to the same display code as tool 8. The metadata must
-    carry 'stage' and 'reject_flag'. The bad channels are dropped from `epochs` in place, as above."""
+    carry 'stage' and 'reject_flag'. The bad channels are dropped from `epochs` in place, as above.
+
+    `dtype` (optional, np.float32 in tool 0's explorer): the signal kept at that precision, read 50 epochs at a time so
+    that no float64 copy of the whole night exists (half the memory of a 64-channel night, for the eyes only). None =
+    float64, as tool 8 reads it."""
     bad_channels = list(epochs.info['bads'])
     if bad_channels:
         epochs.drop_channels(bad_channels)
     meta = epochs.metadata.reset_index(drop=True).copy()
-    data_uV = epochs.get_data() * 1e6                       # (n_ep, n_ch, n_t), µV
+    if dtype is None:
+        data_uV = epochs.get_data() * 1e6                   # (n_ep, n_ch, n_t), µV
+    else:
+        data_uV = np.empty((len(epochs), len(epochs.ch_names), len(epochs.times)), dtype=dtype)
+        for start in range(0, len(epochs), 50):
+            data_uV[start:start + 50] = epochs.get_data(item=slice(start, start + 50)) * 1e6
     stages = meta['stage'].astype(str).values
     reject_flag = meta['reject_flag'].astype(bool).values
     methods_present = [m for m in METHOD_ORDER
@@ -713,13 +724,64 @@ def recompute_reject(meta, methods_sel, stages_sel, event_types_sel=None,
 
 
 # ---------------------------------------------------------------------------
+# The clean reference of the PSD figures (Section 2 overlays, the detail panel of tools 8 and 0)
+# ---------------------------------------------------------------------------
+# On a dense montage nearly every epoch has one flagged channel, so 'the epochs with no flagged channel' leaves no
+# reference at all (a 62-channel nap: no clean wake epoch). There the reference is made of the clean CHANNELS of each
+# epoch: an epoch counts when at least this share of its channels is clean, and gives the mean of those channels.
+REF_MIN_CLEAN_SHARE = 0.5
+
+
+def clean_pairs(meta, methods_sel, event_types_sel, pair_flags, ch_names, dropped_channels=()):
+    """(n_ep, n_ch) bool: the (epoch, channel) pairs that no selected method flags, for the clean reference of a dense
+    montage. Same conventions as recompute_reject's channel layer: a selected method with no per-channel column (always
+    'event', the 1/f methods of flags recomputed from the signal) flags every channel of its epochs, and a dropped
+    channel is never clean."""
+    n_ep, n_ch = len(meta), len(ch_names)
+    epoch_level = [m for m in methods_sel if m == 'event' or m not in pair_flags]
+    epoch_hit = (recompute_reject(meta, epoch_level, (), event_types_sel)[0] if epoch_level
+                 else np.zeros(n_ep, dtype=bool))
+    flagged = np.repeat(epoch_hit[:, None], n_ch, axis=1)
+    for m in methods_sel:
+        if m != 'event' and m in pair_flags:
+            flagged |= np.asarray(pair_flags[m], dtype=bool)
+    dropped = {str(c) for c in (dropped_channels or ())}
+    flagged[:, [i for i, c in enumerate(ch_names) if str(c) in dropped]] = True
+    return ~flagged
+
+
+def reference_epochs(stages, stage, clean_mask=None, clean_pairs=None):
+    """(n_ep,) bool: the epochs of `stage` that make its clean reference. Without `clean_pairs`, the ones in `clean_mask`
+    (the epochs with no flagged channel). With `clean_pairs` (a dense montage), the ones with at least
+    REF_MIN_CLEAN_SHARE of their channels clean, within `clean_mask` when given (every epoch otherwise)."""
+    in_stage = np.asarray(stages) == stage
+    allowed = np.ones(len(in_stage), dtype=bool) if clean_mask is None else np.asarray(clean_mask, dtype=bool)
+    if clean_pairs is None:
+        return in_stage & allowed
+    pairs = np.asarray(clean_pairs, dtype=bool)
+    return in_stage & allowed & (pairs.sum(axis=1) >= REF_MIN_CLEAN_SHARE * pairs.shape[1])
+
+
+def reference_spectra(psds_uV2, epochs, clean_pairs=None):
+    """(n_ref, n_freqs): one spectrum per reference epoch (reference_epochs), the mean of its channels, or of its clean
+    channels with `clean_pairs`."""
+    psds = np.asarray(psds_uV2)[epochs]
+    if clean_pairs is None:
+        return psds.mean(axis=1)
+    weights = np.asarray(clean_pairs, dtype=bool)[epochs].astype(float)
+    return (psds * weights[:, :, None]).sum(axis=1) / weights.sum(axis=1)[:, None]
+
+
+# ---------------------------------------------------------------------------
 # Section 2 — per-stage report figures (shared by notebook + batch)
 # ---------------------------------------------------------------------------
-def _draw_psd_overlay(ax, freqs, psds_uV2, stages, reject_flag, reject_method, stage, custom_stages=()):
+def _draw_psd_overlay(ax, freqs, psds_uV2, stages, reject_flag, reject_method, stage, custom_stages=(),
+                      clean_pairs=None):
     """Draw one stage's per-epoch mean-across-channel PSD overlay into `ax`.
     The clean median + IQR band are drawn ON TOP (foreground) so a clean reference stands out; the
     individual clean traces (kept, per user preference) and the method-coloured rejected traces sit
-    BEHIND them, attenuated. Returns nothing."""
+    BEHIND them, attenuated. `clean_pairs` (a dense montage, see clean_pairs): the clean traces are the clean channels of
+    each reference epoch (reference_epochs), not the epochs with no flagged channel. Returns nothing."""
     sel = (np.asarray(stages) == stage)
     if sel.sum() == 0:
         ax.text(0.5, 0.5, f'No {stage} epochs', ha='center', va='center')
@@ -738,14 +800,21 @@ def _draw_psd_overlay(ax, freqs, psds_uV2, stages, reject_flag, reject_method, s
             lab = mth
         ax.semilogy(freqs, row, color=col, lw=0.7, alpha=0.45, zorder=2, label=lab)
     # clean epochs: faint individual traces, then median + IQR ON TOP (foreground)
-    clean = psd_ep[~rej]
+    if clean_pairs is None:
+        clean, what = psd_ep[~rej], ''
+    else:
+        clean = reference_spectra(psds_uV2, reference_epochs(stages, stage, clean_pairs=clean_pairs), clean_pairs)
+        what = f' (clean channels of {clean.shape[0]} epochs)'
     for row in clean:
         ax.semilogy(freqs, row, color='0.8', lw=0.4, alpha=0.30, zorder=1)
     if clean.shape[0] >= 3:
         med = np.median(clean, axis=0)
         q1, q3 = np.percentile(clean, [25, 75], axis=0)
         ax.fill_between(freqs, q1, q3, color='0.55', alpha=0.40, zorder=4, label='clean IQR')
-        ax.semilogy(freqs, med, color='0.10', lw=2.0, zorder=5, label='clean median')
+        ax.semilogy(freqs, med, color='0.10', lw=2.0, zorder=5, label=f'clean median{what}')
+    else:
+        ax.text(0.02, 0.03, f'no clean reference: {clean.shape[0]} clean epoch(s), 3 needed', transform=ax.transAxes,
+                fontsize=7, color='0.35')
     ax.set_xlabel('Frequency (Hz)')
     ax.set_ylabel('PSD (µV²/Hz)')
     ax.set_title(f'{stage} — {int(sel.sum())} epochs, {int(rej.sum())} rejected', fontsize=9)
@@ -753,10 +822,10 @@ def _draw_psd_overlay(ax, freqs, psds_uV2, stages, reject_flag, reject_method, s
 
 
 def plot_psd_overlay(freqs, psds_uV2, stages, reject_flag, reject_method, stage, custom_stages=(),
-                     title_prefix=''):
+                     title_prefix='', clean_pairs=None):
     """Single-stage PSD overlay as its own Figure (thin wrapper over `_draw_psd_overlay`)."""
     fig, ax = plt.subplots(figsize=(6.2, 4.0))
-    _draw_psd_overlay(ax, freqs, psds_uV2, stages, reject_flag, reject_method, stage, custom_stages)
+    _draw_psd_overlay(ax, freqs, psds_uV2, stages, reject_flag, reject_method, stage, custom_stages, clean_pairs)
     if title_prefix:
         ax.set_title(title_prefix + ax.get_title(), fontsize=10)
     fig.tight_layout()
@@ -764,9 +833,10 @@ def plot_psd_overlay(freqs, psds_uV2, stages, reject_flag, reject_method, stage,
 
 
 def plot_psd_overlays_grid(freqs, psds_uV2, stages, reject_flag, reject_method, stage_order,
-                           custom_stages=()):
+                           custom_stages=(), clean_pairs=None):
     """All per-stage PSD overlays in ONE figure on a 2-column grid (shorter notebook + report).
-    Clean median/IQR in the foreground; clean + rejected traces attenuated behind. Returns a Figure."""
+    Clean median/IQR in the foreground; clean + rejected traces attenuated behind. `clean_pairs`: see
+    _draw_psd_overlay. Returns a Figure."""
     stage_order = list(stage_order)
     n = len(stage_order)
     if n == 0:
@@ -778,7 +848,8 @@ def plot_psd_overlays_grid(freqs, psds_uV2, stages, reject_flag, reject_method, 
     fig, axes = plt.subplots(nrow, ncol, figsize=(6.4 * ncol, 3.4 * nrow), squeeze=False)
     for k, st in enumerate(stage_order):
         r, c = divmod(k, ncol)
-        _draw_psd_overlay(axes[r][c], freqs, psds_uV2, stages, reject_flag, reject_method, st, custom_stages)
+        _draw_psd_overlay(axes[r][c], freqs, psds_uV2, stages, reject_flag, reject_method, st, custom_stages,
+                          clean_pairs)
     for k in range(n, nrow * ncol):                       # blank any unused grid cell
         r, c = divmod(k, ncol)
         axes[r][c].set_axis_off()
@@ -912,21 +983,9 @@ def plot_channel_flag_heatmap(P, pair_flags, methods_sel, in_scope, badness_pct=
     fig, axes = plt.subplots(2, 2, figsize=(fig_w, fig_h),
                              gridspec_kw={'height_ratios': [h_hyp, h_mat], 'width_ratios': [4.2, 1.0],
                                           'hspace': 0.06, 'wspace': 0.03})
-    # --- hypnogram strip (shares the epoch axis with the matrix) ---
+    # --- hypnogram strip (shares the epoch axis with the matrix; the toolkit's hypnogram) ---
     ax_hyp = axes[0][0]
-    stage_y, stage_colors, ytick_pos, ytick_labels = custom_stage_style(custom_stages)
-    floor = min(ytick_pos) - 1
-    hypno_y = np.array([stage_y.get(s, floor) for s in stages])
-    ax_hyp.step(np.arange(n_ep + 1), np.append(hypno_y, hypno_y[-1]), where='post',
-                color='#555555', lw=1.0)
-    for ei in range(n_ep):                  # REM in red at the line's width (the toolkit's discreet convention)
-        if stages[ei] == 'R':
-            ax_hyp.plot([ei, ei + 1], [stage_y['R'], stage_y['R']], color='#c0392b', lw=1.0,
-                        solid_capstyle='butt')
-    ax_hyp.set_yticks(ytick_pos); ax_hyp.set_yticklabels(ytick_labels, fontsize=6)
-    ax_hyp.set_xlim(0, n_ep); ax_hyp.set_xticks([])
-    for sp in ['top', 'right', 'bottom']:
-        ax_hyp.spines[sp].set_visible(False)
+    draw_hypnogram(ax_hyp, np.arange(n_ep + 1), stages, custom_stages, x_axis=False, fontsize=7)
     # Title on the HYPNOGRAM axis (the TOP one) — on the matrix axis it was drawn inside the 6%-of-height
     # gap between the two axes, i.e. straight over the hypnogram strip.
     src = f' — flags: {flags_source}' if flags_source else ''
@@ -1025,13 +1084,14 @@ def build_rejection_table_html(meta, methods_present, stage_order, title='', rej
 def build_participant_report_figs(P, metrics, freqs, psds_uV2, thresholds, custom_stages,
                                   reject_flag=None, reject_method=None, stage_order=None, methods=None,
                                   pair_flags=None, in_scope=None, badness_pct=None,
-                                  dropped_channels=(), flags_source='', drop_pct=None):
+                                  dropped_channels=(), flags_source='', drop_pct=None, clean_pairs=None):
     """Assemble the Section-2 figures for one participant. Returns (list_of_(title, fig), table_html).
     `reject_flag` / `reject_method` / `stage_order` / `methods` let tool 8 pass its RECOMPUTED
     selected-methods decision + in-scope stage order; all default to the tool-7 metadata (batch twin
     unchanged). When `pair_flags` is given the channels × epochs flagging heatmap is prepended (it is
     the per-channel overview; see plot_channel_flag_heatmap) — omitted when None, so the batch twin's
-    output is unchanged."""
+    output is unchanged. `clean_pairs` (tool 8, above HD_CHANNEL_THRESHOLD channels): the clean reference of the PSD
+    overlays from the clean channels of each epoch (see _draw_psd_overlay)."""
     meta = P['meta']
     stages = P['stages']
     if reject_flag is None:
@@ -1062,7 +1122,7 @@ def build_participant_report_figs(P, metrics, freqs, psds_uV2, thresholds, custo
                                                flags_source=flags_source, drop_pct=drop_pct)))
     figs.append(('PSD overlays (clean median/IQR in front)',
                  plot_psd_overlays_grid(freqs, psds_uV2, stages, reject_flag, reject_method,
-                                        stage_order, custom_stages=custom_stages)))
+                                        stage_order, custom_stages=custom_stages, clean_pairs=clean_pairs)))
     figs.append(('Metric distributions',
                  plot_metric_distributions(metrics, stages, reject_flag, thresholds, stage_order,
                                            reject_method=reject_method, fit_note=fit_note)))
@@ -1344,44 +1404,164 @@ def plot_epoch_montage(P, ei, thresholds, context=1, ctx=None, onsets=None, titl
     return fig
 
 
-def has_positions(P):
-    """True when the epochs carry usable electrode positions (Curry `.cdt` keeps a real DigMontage
-    through tool 7; Compumedics EDF has none). Gates the topomap panel — non-fatal when absent."""
+def positioned_channels(P):
+    """Indices of the channels with a usable electrode position: they gate and carry the topomap panel. All of them on a
+    Curry montage (a real DigMontage through tool 7); on a BrainVision cap, every EEG electrode but an eye electrode
+    recorded on an EEG input (it has none); none on a Compumedics EDF."""
     try:
         loc = np.array([c['loc'][:3] for c in P['epochs'].info['chs']], dtype=float)
     except Exception:
-        return False
-    return bool(loc.shape[0] and np.isfinite(loc).all() and (np.abs(loc).sum(axis=1) > 0).all())
+        return np.array([], dtype=int)
+    if not loc.shape[0]:
+        return np.array([], dtype=int)
+    return np.flatnonzero(np.isfinite(loc).all(axis=1) & (np.abs(loc).sum(axis=1) > 0))
 
 
-def _draw_channel_topomap(ax, P, values, title, cmap='viridis', mask=None):
-    """Small per-channel topomap of `values` (one per channel) for the current epoch. `mask` (bool per
-    channel) rings the flagged electrodes in red so a bad sensor is identifiable without reading the
-    colour scale. Non-fatal: any MNE/layout failure prints a note in the panel instead of raising."""
+TOPO_RING_COLOR = '#c0392b'     # an electrode over its threshold
+TOPO_FLAT_COLOR = '#00bcd4'     # an electrode under the flat threshold (peak-to-peak map), cyan
+
+
+def _draw_channel_topomap(ax, P, values, title, cmap='viridis', mask=None, vlim=(None, None), marks=(),
+                          flat_mask=None, extend='neither'):
+    """Small per-channel topomap of `values` (one per channel) for the current epoch, drawn on the channels that have a
+    position (the others are named under the title). `mask` (bool per channel) rings the flagged electrodes in red so
+    a bad sensor is identifiable without reading the colour scale; `flat_mask` rings in cyan the ones under the flat
+    threshold. `vlim` = the colour scale (a value beyond it takes the colour of its end, `extend` draws that end as an
+    arrow), `marks` = [(value, colour)] lines on the colour bar (the thresholds). Non-fatal: any MNE/layout failure prints
+    a note in the panel instead of raising."""
     try:
+        idx = positioned_channels(P)
         info = P['epochs'].info
         vals = np.asarray(values, dtype=float)
+        if len(idx) < len(vals):
+            left_out = [P['ch_names'][c] for c in range(len(vals)) if c not in set(idx.tolist())]
+            info = mne.pick_info(info, idx)
+            vals = vals[idx]
+            mask = None if mask is None else np.asarray(mask, dtype=bool)[idx]
+            flat_mask = None if flat_mask is None else np.asarray(flat_mask, dtype=bool)[idx]
+            title += f"\n(no position: {', '.join(left_out[:3])}{'…' if len(left_out) > 3 else ''})"
         good = np.isfinite(vals)
         if not good.any():
             raise ValueError('no finite value')
         vals = np.where(good, vals, float(np.median(vals[good])))   # NaN 1/f fits -> neutral colour
+        if None not in vlim and not vlim[1] > vlim[0]:               # a threshold of 0: the epoch's own range
+            vlim, extend = (None, None), 'neither'
+        flat_pos = None
+        if flat_mask is not None and np.asarray(flat_mask, dtype=bool).any():
+            flat_mask = np.asarray(flat_mask, dtype=bool)
+            try:
+                # where MNE places these electrodes on the map (its own function, private: on failure, a red ring)
+                from mne.channels.layout import _find_topomap_coords
+                flat_pos = _find_topomap_coords(info, picks=np.flatnonzero(flat_mask))
+            except Exception:
+                mask = flat_mask if mask is None else (np.asarray(mask, dtype=bool) | flat_mask)
         im, _ = mne.viz.plot_topomap(
-            vals, info, axes=ax, show=False, cmap=cmap, sensors=True, contours=0, outlines='head',
+            vals, info, axes=ax, show=False, cmap=cmap, sensors=True, contours=0, outlines='head', vlim=vlim,
             mask=None if mask is None else np.asarray(mask, dtype=bool),
-            mask_params=dict(marker='o', markerfacecolor='none', markeredgecolor='#c0392b',
-                             linewidth=0, markersize=9, markeredgewidth=2.0))
-        cb = ax.figure.colorbar(im, ax=ax, fraction=0.046, pad=0.04)
+            mask_params=dict(marker='o', markerfacecolor='none', markeredgecolor=TOPO_RING_COLOR,
+                             linewidth=0, markersize=6, markeredgewidth=1.5))
+        if flat_pos is not None:
+            ax.plot(flat_pos[:, 0], flat_pos[:, 1], 'o', markerfacecolor='none', markeredgecolor=TOPO_FLAT_COLOR,
+                    markersize=6, markeredgewidth=1.5, linewidth=0, zorder=10)
+        cb = ax.figure.colorbar(im, ax=ax, fraction=0.046, pad=0.04, extend=extend)
         cb.ax.tick_params(labelsize=6)
-        ax.set_title(title, fontsize=8)
+        for value, colour in marks:
+            cb.ax.axhline(value, color=colour, lw=1.2)
+        ax.set_title(title, fontsize=7)
     except Exception as e:
         ax.set_axis_off()
         ax.text(0.5, 0.5, f'topomap n/a\n({e})', ha='center', va='center', fontsize=7, color='0.4')
 
 
+def epoch_channel_values(P, ei, freqs, psds_uV2, thresholds, fmin=2.0):
+    """The metrics of every channel of epoch `ei` that the detail panel shows, against the thresholds of its stage:
+    'ptp', 'grad', 'mae', 'r2' (one value per channel, tool 7's formulas), 'fits' (fit_1f of each channel), 'thr'
+    {'amp', 'flat', 'grad', 'mae', 'r2'} and 'breached' {channel index: the metrics over their threshold}. Computed once
+    for the figure (plot_epoch_detail) and the table (epoch_metric_table_html)."""
+    n_ch = len(P['ch_names'])
+    stg = P['stages'][ei]
+    fits = [fit_1f(freqs, psds_uV2[ei, c], fmin=fmin) for c in range(n_ch)]
+    thr = {'amp': thresholds['amplitude_ptp_uV'].get(stg, 250.0), 'flat': thresholds['flat_ptp_uV'],
+           'grad': thresholds['gradient_uV_per_sample'], 'mae': thresholds['1f_mae_max'], 'r2': thresholds['1f_r2_min']}
+    cur = P['data_uV'][ei]
+    values = {'ptp': np.ptp(cur, axis=-1), 'grad': np.max(np.abs(np.diff(cur, axis=-1)), axis=-1),
+              'mae': np.array([f[0] for f in fits], dtype=float), 'r2': np.array([f[1] for f in fits], dtype=float)}
+    breached = {}
+    for c in range(n_ch):
+        over = []
+        if values['ptp'][c] > thr['amp'] or values['ptp'][c] < thr['flat']:     # amplitude OR flat: both on the p-p
+            over.append('ptp')
+        if values['grad'][c] > thr['grad']:
+            over.append('grad')
+        if not np.isnan(values['mae'][c]) and values['mae'][c] > thr['mae']:
+            over.append('mae')
+        if not np.isnan(values['r2'][c]) and values['r2'][c] < thr['r2']:
+            over.append('r2')
+        if over:
+            breached[c] = over
+    return {**values, 'fits': fits, 'thr': thr, 'breached': breached}
+
+
+DETAIL_REF_MAX_SPECTRA = 3000     # the clean reference of tool 0's detail panel: at most this many spectra (epochs x channels)
+
+
+def detail_reference_epochs(P, ei, clean_mask=None, max_spectra=DETAIL_REF_MAX_SPECTRA, clean_pairs=None):
+    """The epochs of the clean reference of epoch `ei`'s detail panel, the ones plot_epoch_detail takes (the clean epochs
+    of its stage, reference_epochs), for tool 0, which computes their PSD only when a stage is first shown. At most
+    `max_spectra` spectra: every epoch of a stage of a 6-channel PSG up to 500, 48 epochs of a 62-channel cap (about 2 s,
+    6 s with tool 7's smoothing), spread evenly over the night. `clean_pairs`: see reference_epochs. Returns (indices,
+    n_clean): the epochs chosen, and how many clean epochs the stage has (plot_epoch_detail's `n_clean`, for its
+    legend)."""
+    if clean_pairs is None:
+        clean = np.asarray(clean_mask, dtype=bool) if clean_mask is not None else ~P['reject_flag']
+    else:
+        clean = clean_mask
+    idx = np.flatnonzero(reference_epochs(P['stages'], P['stages'][ei], clean, clean_pairs))
+    n_max = max(3, max_spectra // max(1, len(P['ch_names'])))
+    n_clean = len(idx)
+    if n_clean > n_max:
+        idx = idx[np.unique(np.linspace(0, n_clean - 1, n_max).round().astype(int))]
+    return idx, n_clean
+
+
+DETAIL_TABLE_HEIGHT_PX = 340      # the metric table scrolls past this height (about the detail figure's)
+
+
+def epoch_metric_table_html(P, ei, values, max_height_px=DETAIL_TABLE_HEIGHT_PX):
+    """The per-channel metric table of the detail panel, as HTML in a box that scrolls past `max_height_px` (every
+    channel of a 64-channel cap stays reachable, the page does not grow): every channel in file order, one value per
+    metric, a value over its threshold in red bold and its channel name too. `values` = epoch_channel_values."""
+    thr = values['thr']
+    columns = [('ptp', 'p-p (µV)', '{:.0f}', f"&gt; {thr['amp']:g} or &lt; {thr['flat']:g}"),
+               ('grad', 'gradient (µV)', '{:.0f}', f"&gt; {thr['grad']:g}"),
+               ('mae', '1/f MAE', '{:.3f}', f"&gt; {thr['mae']:g}"),
+               ('r2', '1/f R²', '{:.3f}', f"&lt; {thr['r2']:g}")]
+    cell = 'padding:2px 8px; text-align:right; border-bottom:1px solid #eee;'
+    head = 'padding:3px 8px; text-align:right; position:sticky; top:0; background:#f5f5f5; border-bottom:1px solid #bbb;'
+    red = ' color:#c0392b; font-weight:bold;'
+    header = (f'<th style="{head} text-align:left;">channel</th>'
+              + ''.join(f'<th style="{head}">{name}<br><span style="font-weight:normal; color:#666;">{rule}</span></th>'
+                        for _, name, _, rule in columns))
+    rows = []
+    for c, name in enumerate(P['ch_names']):
+        over = values['breached'].get(c, [])
+        rows.append(f'<tr><td style="{cell} text-align:left;{red if over else ""}">{name}</td>'
+                    + ''.join(f'<td style="{cell}{red if key in over else ""}">{fmt.format(values[key][c])}</td>'
+                              for key, _, fmt, _ in columns) + '</tr>')
+    n_over = len(values['breached'])
+    title = (f'<div style="font-size:12px; margin-bottom:4px;"><b>Per-channel metrics</b> (stage {P["stages"][ei]}): '
+             f'{n_over} of {len(P["ch_names"])} channel(s) over a threshold, in red</div>')
+    return (title + f'<div style="max-height:{max_height_px}px; overflow-y:auto; border:1px solid #ddd;">'
+            f'<table style="border-collapse:collapse; font-size:12px; width:100%;"><thead><tr>{header}</tr></thead>'
+            f'<tbody>{"".join(rows)}</tbody></table></div>')
+
+
 def plot_epoch_detail(P, ei, freqs, psds_uV2, thresholds, spectro_ch_idx=0, fmin=2.0,
-                      clean_mask=None, table_rows=None, topomap=None):
-    """Detail panel for epoch `ei`: per-channel PSD (left) with the per-channel metric table right beside
-    it (right), plus the two topomaps on a high-density montage.
+                      clean_mask=None, table_rows=None, topomap=None, values=None, n_clean=None, clean_pairs=None):
+    """Detail panel for epoch `ei`: the per-channel PSD, plus four small topomaps on a high-density montage. The
+    per-channel metric table is HTML beside it (epoch_metric_table_html, a box that scrolls): drawn in the figure, a
+    64-channel table had to be cut to a few rows. `values` = epoch_channel_values (computed here when None).
+    `table_rows` is ignored: kept for the frozen Curry twin of tool 8 until its removal (plan_brainvision, phase 6).
 
     The former bottom row — mean band power + 50 Hz ratio, and the epoch spectrogram — is COMMENTED OUT:
     neither helped decide on a single epoch (the band bars only restate what the PSD already shows, and the
@@ -1396,28 +1576,29 @@ def plot_epoch_detail(P, ei, freqs, psds_uV2, thresholds, spectro_ch_idx=0, fmin
       * each channel whose 1/f fit is flagged (MAE > threshold or R² < threshold) is drawn in its METHOD
         colour and gets its aperiodic fit dashed; unflagged channels stay grey (no 'worst channel'
         emphasis anymore — what matters is which channels actually breach a threshold).
-    Table: value (threshold) per metric, the value shown in RED when it breaches its threshold.
 
     `clean_mask` (optional (n_ep,) bool): epochs to use as the clean reference; default = not rejected
     according to the tool-7 metadata.
-    `table_rows` (optional int): HIGH-DENSITY lever — keep every channel that breaches a threshold plus
-        this many worst-by-p-p ones in the metric table, instead of one row per channel (illegible past
-        ~15 rows). None (default) = every channel, i.e. the classic behaviour.
-    `topomap` (optional bool): draw the spatial panels (peak-to-peak + 1/f MAE). None (default) = auto:
-        on when the epochs carry electrode positions AND the montage is dense. Curry keeps a real
+    `clean_pairs` (optional (n_ep, n_ch) bool, tools 8 and 0 above HD_CHANNEL_THRESHOLD channels): the reference is made
+    of the clean channels of each epoch with at least half its channels clean (reference_epochs), within `clean_mask`
+    when given (every epoch otherwise): on a dense montage nearly no epoch is free of flagged channels.
+    `n_clean` (optional int): how many clean epochs the stage has when `clean_mask` keeps a sample of them (tool 0,
+    detail_reference_epochs): the legend then says 'n=48 of 412 epochs'.
+    Under 3 reference epochs no reference is drawn, and a line in the plot says why. The legend is under the plot.
+    `topomap` (optional bool): draw the spatial panels (peak-to-peak, gradient, 1/f MAE, 1/f R²). None (default) =
+        auto: on when the montage is dense AND more than HD_CHANNEL_THRESHOLD of its channels carry an electrode
+        position (drawn on those: a BrainVision eye electrode on an EEG input has none). Curry keeps a real
         DigMontage through tool 7; position-less EDF simply never gets the panel."""
     from scipy.signal import welch as _welch   # only used by the commented-out 50 Hz-ratio block
     data, sf, ch = P['data_uV'], P['sfreq'], P['ch_names']
     stg = P['stages'][ei]
     n_ch = len(ch)
     if topomap is None:
-        topomap = (n_ch > HD_CHANNEL_THRESHOLD) and has_positions(P)
-    fits = [fit_1f(freqs, psds_uV2[ei, c], fmin=fmin) for c in range(n_ch)]
-    mae_thr = thresholds['1f_mae_max']
-    r2_thr = thresholds['1f_r2_min']
-    amp_thr = thresholds['amplitude_ptp_uV'].get(stg, 250.0)
-    grad_thr = thresholds['gradient_uV_per_sample']
-    flat_thr = thresholds['flat_ptp_uV']
+        topomap = (n_ch > HD_CHANNEL_THRESHOLD) and len(positioned_channels(P)) > HD_CHANNEL_THRESHOLD
+    if values is None:
+        values = epoch_channel_values(P, ei, freqs, psds_uV2, thresholds, fmin=fmin)
+    fits = values['fits']
+    mae_thr, r2_thr = values['thr']['mae'], values['thr']['r2']
 
     # which 1/f method (if any) flags each channel -> trace colour
     def _fit_flag(c):
@@ -1428,36 +1609,45 @@ def plot_epoch_detail(P, ei, freqs, psds_uV2, thresholds, spectro_ch_idx=0, fmin
             return '1f_error'
         return None
 
-    # Layout: ONE row - PSD (left) + the metric table beside it (right); the extra columns carry the two
-    # topomaps when positions are available (high-density montages). The former bottom row (mean band
-    # power + epoch spectrogram) is commented out - see the docstring. To restore it: go back to a 2-row
-    # gridspec (height_ratios=[1.15, 1.0], hspace=0.35, figsize height 8), uncomment ax_band/ax_spec here
-    # and blocks (c)/(d) below, and put the topomaps back on gs[0, 2] / gs[1, 2].
+    # Layout: the PSD alone, or the PSD and the four small topomaps in 2 x 2 beside it (high-density montages with
+    # positions, a taller figure for their two rows). The metric table is HTML, beside the figure in the tool. The former
+    # bottom row (mean band power + epoch spectrogram) is commented out - see the docstring. To restore it: a 2-row
+    # gridspec (height_ratios=[1.15, 1.0], hspace=0.35, figsize height 8) and uncomment ax_band/ax_spec and blocks (c)/(d).
     if topomap:
-        fig = plt.figure(figsize=(18, DETAIL_FIG_HEIGHT_IN))
-        gs = fig.add_gridspec(1, 4, width_ratios=[1.35, 1.0, 0.62, 0.62], wspace=0.25)
-        ax_topo_ptp = fig.add_subplot(gs[0, 2])
-        ax_topo_mae = fig.add_subplot(gs[0, 3])
+        fig = plt.figure(figsize=(11, DETAIL_TOPO_FIG_HEIGHT_IN))
+        gs = fig.add_gridspec(1, 2, width_ratios=[1.6, 1.0], wspace=0.12)
+        topo = gs[0, 1].subgridspec(2, 2, hspace=0.75, wspace=0.45)     # titles of two lines (the rule)
+        topo_axes = [fig.add_subplot(topo[i, j]) for i in range(2) for j in range(2)]
     else:
-        fig = plt.figure(figsize=(13, DETAIL_FIG_HEIGHT_IN))
-        gs = fig.add_gridspec(1, 2, width_ratios=[1.35, 1.0], wspace=0.2)
-        ax_topo_ptp = ax_topo_mae = None
+        fig = plt.figure(figsize=(8.5, DETAIL_FIG_HEIGHT_IN))
+        gs = fig.add_gridspec(1, 1)
+        topo_axes = []
     ax_psd = fig.add_subplot(gs[0, 0])
-    ax_table = fig.add_subplot(gs[0, 1])
     # ax_band = fig.add_subplot(gs[1, 0])   # mean band power   - commented out (see the docstring)
     # ax_spec = fig.add_subplot(gs[1, 1])   # epoch spectrogram - commented out (see the docstring)
 
-    # (a) PSD — clean stage reference in the background, flagged channels highlighted
+    # (a) PSD — the clean stage reference ON TOP of the channels (at 32-64 channels the channels hid it), drawn as lines
+    # only (black median, dotted IQR) so it cannot be mistaken for this epoch's grey band; flagged channels highlighted
     ax = ax_psd
-    clean = np.asarray(clean_mask, dtype=bool) if clean_mask is not None else ~P['reject_flag']
-    ref = np.asarray(psds_uV2)[(np.asarray(P['stages']) == stg) & clean]
-    if ref.shape[0] >= 3:
-        ref_ep = ref.mean(axis=1)                       # (n_clean_ep, n_freqs), mean across channels
+    if clean_pairs is None:
+        clean = np.asarray(clean_mask, dtype=bool) if clean_mask is not None else ~P['reject_flag']
+    else:
+        clean = clean_mask
+    ref_epochs = reference_epochs(P['stages'], stg, clean, clean_pairs)
+    ref_ep = reference_spectra(psds_uV2, ref_epochs, clean_pairs)   # (n_ref, n_freqs), mean across (clean) channels
+    if ref_ep.shape[0] >= 3:
         med = np.median(ref_ep, axis=0)
         q1, q3 = np.percentile(ref_ep, [25, 75], axis=0)
-        ax.fill_between(freqs, q1, q3, color='0.55', alpha=0.35, zorder=1,
-                        label=f'clean {stg} IQR (n={ref_ep.shape[0]})')
-        ax.semilogy(freqs, med, color='0.10', lw=1.8, zorder=2, label=f'clean {stg} median')
+        n_ref = f'{ref_ep.shape[0]} of {n_clean}' if n_clean and n_clean > ref_ep.shape[0] else f'{ref_ep.shape[0]}'
+        what = f'n={n_ref} epochs' if clean_pairs is None else f'clean channels of {n_ref} epochs'
+        ax.semilogy(freqs, med, color='black', lw=1.8, zorder=8, label=f'clean {stg} median ({what})')
+        ax.semilogy(freqs, q1, color='black', lw=0.9, ls=':', zorder=8, label=f'clean {stg} IQR')
+        ax.semilogy(freqs, q3, color='black', lw=0.9, ls=':', zorder=8)
+    else:
+        rule = ('epochs with no flagged channel' if clean_pairs is None
+                else 'epochs with at least half their channels clean')
+        ax.text(0.02, 0.03, f'No clean {stg} reference: {ref_ep.shape[0]} {rule}, 3 needed',
+                transform=ax.transAxes, fontsize=7, color='0.35', zorder=9)
     n_flagged = 0
     labelled_grey = False
     hd = n_ch > HD_CHANNEL_THRESHOLD
@@ -1493,71 +1683,18 @@ def plot_epoch_detail(P, ei, freqs, psds_uV2, thresholds, spectro_ch_idx=0, fmin
         lo_env, hi_env = np.percentile(arr, [5, 95], axis=0)
         ax.fill_between(freqs, lo_env, hi_env, color='0.78', alpha=0.55, zorder=3,
                         label=f'this epoch — channels not flagged (n={len(unflagged_psd)}, p5–p95)')
-        ax.semilogy(freqs, np.median(arr, axis=0), color='0.55', lw=1.0, zorder=4)
+        ax.semilogy(freqs, np.median(arr, axis=0), color='0.55', lw=1.0, zorder=4,
+                    label='this epoch — their median')
     if n_flagged > max_flagged_labels:
         ax.plot([], [], ' ', label=f'… +{n_flagged - max_flagged_labels} more flagged')
     ax.set_xlabel('Frequency (Hz)')
     ax.set_ylabel('PSD (µV²/Hz)')
     ax.set_title(f'PSD vs clean {stg} reference — {n_flagged} channel(s) flagged by the 1/f fit '
                  f'(dashed = aperiodic fit)', fontsize=9)
-    ax.legend(fontsize=6, ncol=3 if hd else 2, loc='upper right')
+    # under the plot: inside, a 12-channel legend hid the spectra and ran over the top of the axes
+    ax.legend(fontsize=6, ncol=3 if hd else 2, loc='upper center', bbox_to_anchor=(0.5, -0.13), frameon=False)
 
-    # (b) per-channel metric table, right beside the PSD (red = breaches its threshold)
-    ax = ax_table
-    ax.set_axis_off()
-    cur = data[ei]
-    # Vectorised per-channel values (identical to the former per-channel float() calls) — also feed
-    # the topomaps below.
-    ptp_all = np.ptp(cur, axis=-1)
-    grad_all = np.max(np.abs(np.diff(cur, axis=-1)), axis=-1)
-    mae_all = np.array([fits[c][0] for c in range(n_ch)], dtype=float)
-    r2_all = np.array([fits[c][1] for c in range(n_ch)], dtype=float)
-    breached = {c for c in range(n_ch)
-                if (ptp_all[c] > amp_thr or ptp_all[c] < flat_thr or grad_all[c] > grad_thr
-                    or (not np.isnan(mae_all[c]) and mae_all[c] > mae_thr)
-                    or (not np.isnan(r2_all[c]) and r2_all[c] < r2_thr))}
-    # Which channels get a row: all of them (classic), or — on a dense montage — every breaching
-    # channel plus the `table_rows` worst by peak-to-peak, kept in file order.
-    if table_rows is None:
-        show_rows = list(range(n_ch))
-    else:
-        worst = np.argsort(ptp_all)[::-1][:max(0, int(table_rows))]
-        show_rows = sorted(breached | {int(w) for w in worst})
-    header = ['ch', 'p-p (thr)', 'grad (thr)', 'MAE (thr)', 'R² (thr)']
-    table = [header]
-    bad_cells = []                                       # (row, col) to paint red
-    for row, c in enumerate(show_rows, start=1):
-        ptp, grad = float(ptp_all[c]), float(grad_all[c])
-        mae_c, r2_c = fits[c][0], fits[c][1]
-        table.append([ch[c],
-                      f'{ptp:.0f} ({amp_thr:.0f})',
-                      f'{grad:.0f} ({grad_thr:.0f})',
-                      f'{mae_c:.3f} ({mae_thr:.2f})',
-                      f'{r2_c:.3f} ({r2_thr:.2f})'])
-        if ptp > amp_thr or ptp < flat_thr:              # amplitude OR flat both breach the p-p cell
-            bad_cells.append((row, 1))
-        if grad > grad_thr:
-            bad_cells.append((row, 2))
-        if not np.isnan(mae_c) and mae_c > mae_thr:
-            bad_cells.append((row, 3))
-        if not np.isnan(r2_c) and r2_c < r2_thr:
-            bad_cells.append((row, 4))
-    # top-anchored (aligns with the PSD); the channel column is narrower so the value columns breathe
-    tb = ax.table(cellText=table, loc='upper center', cellLoc='center',
-                  colWidths=[0.15, 0.2125, 0.2125, 0.2125, 0.2125])
-    tb.auto_set_font_size(False)
-    tb.set_fontsize(8 if len(show_rows) <= 15 else 7)
-    tb.scale(1, 1.4 if len(show_rows) <= 15 else 1.05)   # tighter rows once the table gets long
-    for col in range(len(header)):                       # header in bold
-        tb[(0, col)].get_text().set_fontweight('bold')
-    for (r, cc) in bad_cells:                            # breached values in red bold
-        cell = tb[(r, cc)]
-        cell.get_text().set_color('#c0392b')
-        cell.get_text().set_fontweight('bold')
-    # Subset note on a SECOND line: appended horizontally it would collide with the PSD title.
-    subset_txt = ('' if len(show_rows) == n_ch
-                  else f'\n{len(show_rows)}/{n_ch} channels shown ({len(breached)} flagged)')
-    ax.set_title(f'Per-channel metrics (stage {stg}) — red = over threshold{subset_txt}', fontsize=9)
+    # (b) the per-channel metric table is HTML, beside the figure in the tool (epoch_metric_table_html)
 
     # --- COMMENTED OUT: the two bottom panels of the old 2x2 detail figure ---------------------
     # Neither helped decide on ONE epoch: the band bars restate what the PSD above already shows,
@@ -1602,11 +1739,29 @@ def plot_epoch_detail(P, ei, freqs, psds_uV2, thresholds, spectro_ch_idx=0, fmin
 
     # (e) spatial view — only a high-density montage with real electrode positions can show this, and
     #     it answers the question that dominates at 32-64 channels: ONE bad electrode (a hot spot) or
-    #     a whole-head artefact (a global shift)? Red rings = channels breaching any threshold.
-    if topomap:
-        mask = np.array([c in breached for c in range(n_ch)], dtype=bool)
-        _draw_channel_topomap(ax_topo_ptp, P, ptp_all, 'Peak-to-peak (µV)', cmap='viridis', mask=mask)
-        _draw_channel_topomap(ax_topo_mae, P, mae_all, '1/f MAE', cmap='magma', mask=mask)
+    #     a whole-head artefact (a global shift)? One map per metric of the table, red rings = the channels over that
+    #     metric's threshold, cyan rings = under the flat threshold (peak-to-peak). 1/f R² is bad when LOW: its colour
+    #     scale is reversed, so a bad electrode is bright on all four.
+    #     Each colour scale is centred on its threshold (the threshold in the middle, a value beyond the scale takes the
+    #     colour of its end): scaled from the epoch's min to its max, one very bad channel squeezed every other one into a
+    #     single colour, and a ringed electrode could look like its neighbours.
+    thr = values['thr']
+    r2_low = 2 * thr['r2'] - 1
+    maps = [('ptp', f"Peak-to-peak (µV)\nred > {thr['amp']:g}, cyan < {thr['flat']:g}", 'viridis',
+             (0, 2 * thr['amp']), [(thr['amp'], TOPO_RING_COLOR), (thr['flat'], TOPO_FLAT_COLOR)], 'max'),
+            ('grad', f"Gradient (µV)\nred > {thr['grad']:g}", 'viridis', (0, 2 * thr['grad']),
+             [(thr['grad'], TOPO_RING_COLOR)], 'max'),
+            ('mae', f"1/f MAE\nred > {thr['mae']:g}", 'magma', (0, 2 * thr['mae']), [(thr['mae'], TOPO_RING_COLOR)], 'max'),
+            ('r2', f"1/f R²\nred < {thr['r2']:g}", 'magma_r', (r2_low, 1), [(thr['r2'], TOPO_RING_COLOR)], 'min')]
+    for ax, (key, title, cmap, vlim, marks, extend) in zip(topo_axes, maps):
+        if key == 'ptp':
+            mask = np.asarray(values['ptp']) > thr['amp']
+            flat_mask = np.asarray(values['ptp']) < thr['flat']
+        else:
+            mask = np.array([key in values['breached'].get(c, []) for c in range(n_ch)], dtype=bool)
+            flat_mask = None
+        _draw_channel_topomap(ax, P, values[key], title, cmap=cmap, mask=mask, vlim=vlim, marks=marks,
+                              flat_mask=flat_mask, extend=extend)
     return fig
 
 
@@ -1621,24 +1776,9 @@ def plot_review_strip(P, final_reject, overridden, custom_stages=(), in_scope=No
     the classic un-hatched strip."""
     stages = P['stages']
     n_ep = len(stages)
-    stage_y, stage_colors, ytick_pos, ytick_labels = custom_stage_style(custom_stages)
-    floor = min(ytick_pos) - 1
-    hypno_y = np.array([stage_y.get(s, floor) for s in stages])
     fig, axes = plt.subplots(2, 1, figsize=(12, 3.2),
                              gridspec_kw={'height_ratios': [1.4, 1.0], 'hspace': 0.15})
-    ax = axes[0]
-    xs = np.arange(n_ep + 1)
-    ax.step(xs, np.append(hypno_y, hypno_y[-1]), where='post', color='#555555', lw=1.0)
-    for ei in range(n_ep):                  # REM in red at the line's width (the toolkit's discreet convention)
-        if stages[ei] == 'R':
-            ax.plot([ei, ei + 1], [stage_y['R'], stage_y['R']], color='#c0392b', lw=1.0,
-                    solid_capstyle='butt')
-    ax.set_yticks(ytick_pos)
-    ax.set_yticklabels(ytick_labels, fontsize=7)
-    ax.set_xlim(0, n_ep)
-    ax.set_xticks([])
-    for sp in ['top', 'right', 'bottom']:
-        ax.spines[sp].set_visible(False)
+    draw_hypnogram(axes[0], np.arange(n_ep + 1), stages, custom_stages, x_axis=False, fontsize=7)
     ax = axes[1]
     fr = np.asarray(final_reject, dtype=bool)
     insc = np.ones(n_ep, dtype=bool) if in_scope is None else np.asarray(in_scope, dtype=bool)

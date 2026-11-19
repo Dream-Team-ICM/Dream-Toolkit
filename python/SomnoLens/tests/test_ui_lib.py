@@ -12,8 +12,8 @@ import ui_lib as UI  # noqa: E402
 
 pytestmark = pytest.mark.quick
 
-# Every Voila page: the EDF tools and their Curry twins
-PAGES = sorted(ROOT.glob('tools/*_voila.ipynb')) + sorted(ROOT.glob('tools_curry/*_voila.ipynb'))
+# Every Voila page (one per tool, whatever the format of the recordings)
+PAGES = sorted(ROOT.glob('tools/*_voila.ipynb'))
 
 
 def cells(page):
@@ -64,13 +64,104 @@ def test_buttons_follow_their_role(role):
 
 def test_progress_bar_text_follows_the_bar():
     bar, row = UI.progress_bar('Participants:')
-    assert row.children[0] is bar and row.children[1].value == ''
+    label, in_row, text = row.children
+    assert in_row is bar and 'Participants:' in label.value and text.value == ''
     bar.max, bar.value = 10, 3
-    assert row.children[1].value == '3 / 10'
+    assert '3 / 10' in text.value and text.value.startswith(UI._BAR_TEXT_BLOCK)
     UI.finish_progress(bar)
     assert bar.bar_style == 'success'
     UI.finish_progress(bar, n_failed=1)
     assert bar.bar_style == 'warning'
+
+
+def test_a_pipeline_bar_lines_up_with_the_bar_above_it():
+    bar, row = UI.progress_bar('Participants:')
+    step, step_row, set_phases, step_text = UI.phase_bar('Pipeline:')
+    # the label column and the bar have the same widths in both rows, and the bars carry no label of their own
+    column = step_row.children[1]
+    shown, legend = column.children
+    assert row.children[0].layout.width == step_row.children[0].layout.width == UI.LABEL_WIDTH
+    assert bar.layout.width == shown.layout.width == UI.PROGRESS_TRACK and bar.description == shown.description == ''
+    assert step.layout.display == 'none' and legend.layout.width == UI.PROGRESS_TRACK and legend.value == ''
+    set_phases([('Load', 10, 'Load'), ('Report', 30, 'Report building')])
+    assert 'width:25.0%' in legend.value and 'width:75.0%' in legend.value and 'title="Report building"' in legend.value
+    step.max, step.value = 40, 10                         # the end of the first step: the end of its segment
+    assert shown.value == UI.SHOWN_STEPS // 4
+    UI.finish_progress(step)
+    assert shown.bar_style == 'success'
+    set_phases([])
+    assert legend.value == ''
+    step_text.value = 'x · loading…'
+    assert step_row.children[2] is step_text
+
+
+def test_a_short_step_keeps_its_name_and_the_bar_follows_its_segment():
+    """Tool 8's report bar: 'Figures' and 'HTML' cost 6 % and 4 % of the time, too narrow for their names ('Figur', 'HTM')."""
+    step, step_row, set_phases, _ = UI.phase_bar('Report:')
+    shown, legend = step_row.children[1].children
+    phases = [('PSD', 45, 'PSD'), ('Metrics + 1/f', 45, 'Metrics'), ('Figures', 6, 'Figures'), ('HTML', 4, 'HTML')]
+    set_phases(phases)
+    widths = UI._legend_widths(phases)
+    track = int(UI.PROGRESS_TRACK[:-2])
+    for (name, _, _), width in zip(phases, widths):
+        assert width * track >= UI.LEGEND_CHAR_PX * len(name) + 8 - 1e-9, name
+        assert f'width:{100 * width:.1f}%' in legend.value
+    assert abs(sum(widths) - 1) < 1e-9 and widths[0] == widths[1]          # the long steps share the rest by cost
+    step.max = 100
+    for done, edge in ((45, widths[0]), (90, widths[0] + widths[1]), (96, sum(widths[:3])), (100, 1.0)):
+        step.value = done                                 # the end of each step: the end of its segment
+        assert abs(shown.value - UI.SHOWN_STEPS * edge) <= 1, done
+    step.value = 93                                       # half of 'Figures': half of its segment
+    assert abs(shown.value - UI.SHOWN_STEPS * (widths[0] + widths[1] + widths[2] / 2)) <= 1
+
+
+def test_a_narrow_page_puts_the_text_under_the_bar_instead_of_cutting_it():
+    _, row = UI.progress_bar('Participants:')
+    _, step_row, _, _ = UI.phase_bar('Pipeline:')
+    for r in (row, step_row):
+        assert r.layout.flex_flow == 'row wrap'
+        assert r.children[2].layout.min_width == UI.PROGRESS_TEXT_MIN
+
+
+def test_the_step_at_work_shows_a_turning_sign_until_the_run_ends():
+    bar, _ = UI.progress_bar('Participants:')
+    _, _, _, step_text = UI.phase_bar('Pipeline:')
+    step_text.value = '<small>p1: computing the PSD</small>'
+    assert UI.SPINNER in step_text.value and 'p1: computing the PSD' in step_text.value and 'line-height:1.4' in step_text.value
+    # the same size as the text of the participants' bar above it, whatever the tool writes
+    assert '<small>' not in step_text.value and step_text.value.startswith(UI._BAR_TEXT_BLOCK)
+    step_text.value = 'p1 · done ✅'                     # a step done: no sign
+    assert UI.SPINNER not in step_text.value and 'p1 · done ✅' in step_text.value
+    step_text.value = 'p2 · loading'
+    UI.finish_progress(bar)                               # the run is over: the sign stops, the text stays
+    assert UI.SPINNER not in step_text.value and 'p2 · loading' in step_text.value
+    step_text.value = ''
+    assert step_text.value == ''
+
+
+def test_a_log_line_takes_the_colour_of_its_symbol(capsys):
+    UI.log('[p1] ⚠ channel check: C3 is noisy')
+    UI.log('❌ Error saving: ⚠ disk full')                 # the first symbol decides
+    UI.log('12 participants to process')
+    UI.log('✅ done', kind='warn')
+    lines = capsys.readouterr().out.splitlines()
+    assert lines[0] == '\x1b[38;2;230;81;0m[p1] ⚠ channel check: C3 is noisy\x1b[0m'      # WARN_COLOR
+    assert lines[1].startswith('\x1b[38;2;198;40;40m❌')                                  # ERROR_COLOR
+    assert lines[2] == '12 participants to process'
+    assert lines[3].startswith('\x1b[38;2;230;81;0m✅')
+    # a log written as HTML lines (tools 5 and 9)
+    assert UI.log_html('  ⚠️ band skipped') == f'<span style="color:{UI.WARN_COLOR}">  ⚠️ band skipped</span>'
+    assert UI.log_html('12 participants') == '12 participants'
+
+
+def test_a_status_line_turns_while_its_step_works():
+    import ipywidgets as widgets
+    assert UI.SPINNER in UI.working('Reading the recording…') and 'Reading the recording…' in UI.working('Reading the recording…')
+    status = UI.working_text(widgets.HTML(''))           # tool 0's step lines
+    status.value = '<i>Metrics: C3 (1/62)…</i>'
+    assert UI.SPINNER in status.value
+    UI.stop_working()
+    assert UI.SPINNER not in status.value and 'Metrics: C3 (1/62)…' in status.value
 
 
 def test_suffix_menu_lists_the_suffixes_and_follows_its_field():
@@ -197,7 +288,7 @@ def test_details_open_shows_it_can_be_opened():
 
 
 def test_there_are_pages():
-    assert len(PAGES) >= 20, [p.name for p in PAGES]
+    assert len(PAGES) >= 14, [p.name for p in PAGES]     # one page per tool (the Curry twins are gone: phase 6)
 
 
 @pytest.mark.parametrize('page', PAGES, ids=lambda p: p.name)
@@ -207,6 +298,7 @@ def test_page_follows_the_conventions(page):
     assert found[0][0] == 'markdown' and found[0][1].startswith('# Tool '), 'the page must open on its "# Tool N: ..." title'
     assert re.search(r'^\s*import ui_lib as UI\b', code, re.M), 'the page must import ui_lib as UI'
     assert not re.search(r"button_style\s*=\s*['\"]info['\"]", code), "no 'info' button style: use UI.button and a role"
+    assert 'IntProgress' not in code, 'a progress bar comes from UI.progress_bar / UI.phase_bar (they line up)'
     for kind, text in found:
         if kind == 'markdown':
             assert '<details>' not in text, 'a Details block opens with UI.details_open (it shows it can be opened)'

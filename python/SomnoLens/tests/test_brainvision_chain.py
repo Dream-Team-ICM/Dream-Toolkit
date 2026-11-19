@@ -1,0 +1,450 @@
+"""The rest of the chain on BrainVision recordings written by hand with invented values (phase 4 of
+tools/plan_brainvision.md): the reading functions of edf_io_lib / macrostructure_lib for any format, then tools 4, 5, 6, 7
+and 8bis on a small nap study (few N2 epochs, an eye electrode on an EEG input, a scored-event text export).
+Phase 4 bis: the online reference left out when it stays flat (tools 7 and 0), the event files declared in tool 4 (tools
+4, 5 and 7)."""
+import json
+import sys
+from pathlib import Path
+
+import mne
+import numpy as np
+import pandas as pd
+import pytest
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / 'tools'))
+import autoreject_lib as AR          # noqa: E402
+import edf_io_lib as EIO             # noqa: E402
+import macrostructure_lib as ML      # noqa: E402
+import recording_lib as REC          # noqa: E402
+import study_files_lib as SF         # noqa: E402
+import pipeline                      # noqa: E402
+from brainvision_files import recorder_comment, write_brainvision    # noqa: E402
+from nbdriver import NotebookSession                                 # noqa: E402
+
+T0 = 'tools/0_live_explore_1file_voila.ipynb'
+T4 = 'tools/4_remap_events_edf_voila.ipynb'
+SFREQ = 250
+# EEG inputs (against the online reference Cz, not stored) and an eye electrode on an EEG input, then the auxiliary inputs
+NAMES = ['Fp1', 'C3', 'C4', 'O1', 'O2', 'TP9', 'TP10', 'IO', 'EMG', 'ECG', 'Respi']
+RES = [0.05] * 8 + [1, 1, 1]
+UNITS = ['µV'] * 8 + ['mV', 'mV', 'UA']
+GRADIENTS = {'EMG': '1[mV/mV]', 'ECG': '1[mV/mV]', 'Respi': '1[mV/UA]'}
+# Positions for the EEG electrodes only, as Recorder writes them: MNE then types the eye electrode (no position) misc
+COORDS = {'Fp1': (1, -92, -72), 'C3': (1, -46, 0), 'C4': (1, 46, 0), 'O1': (1, -92, 72), 'O2': (1, 92, -72),
+          'TP9': (1, -115, -18), 'TP10': (1, 115, 18), 'IO': (0, 0, 0), 'EMG': (0, 0, 0), 'ECG': (0, 0, 0),
+          'Respi': (0, 0, 0)}
+EEG = ['Fp1', 'C3', 'C4', 'O1', 'O2', 'TP9', 'TP10', 'Cz']
+N_EPOCHS = 80                        # a 40-min nap
+START = '20260102030405123456'       # 2026-01-02 03:04:05 in the .vmrk
+EVENT_CLOCKS = ['3:14:05', '3:24:10']   # 600 s and 1205 s after the start
+EVENT_LABEL = 'Micro-éveil 2 ARO SPONT'
+
+
+def nap_stages():
+    """Mostly wake, a few N1 / N2 epochs (a nap)."""
+    stages = ['W'] * N_EPOCHS
+    stages[30:40] = ['N1'] * 10
+    stages[40:50] = ['N2'] * 10
+    return stages
+
+
+def write_recording(folder, name, seed=0, extra_segments=()):
+    """A nap recording: noise of 20 uV on every input, the eye electrode equal to TP9 (so IO - TP9 is zero). Returns the
+    .vhdr path and the values in uV."""
+    rng = np.random.default_rng(seed)
+    uv = rng.normal(0, 20, (len(NAMES), N_EPOCHS * 30 * SFREQ))
+    uv[NAMES.index('IO')] = uv[NAMES.index('TP9')]
+    stored = uv / np.array(RES)[:, None]
+    stored[8:] = uv[8:] * 1e-3
+    path = write_brainvision(folder, name, stored, NAMES, sfreq=SFREQ, resolutions=RES, units=UNITS, start=START,
+                             coordinates=COORDS, comment=recorder_comment(NAMES, RES, UNITS, gradients=GRADIENTS),
+                             extra_segments=extra_segments)
+    return path, uv
+
+
+def entry(ref_channels=('TP9',)):
+    """Tool 2's entry: the EEG, Cz (the online reference) and, as some studies do, the eye electrode kept in the montage
+    under another name (MNE types it misc: it has no position)."""
+    return {'config': 'config. 1', 'remap': {**{ch: ch for ch in EEG}, 'IO': 'EOG_R'}, 'ref_channels': list(ref_channels),
+            'context_channels': {'eog_right': 'IO', 'emg': 'EMG', 'ecg': 'ECG'}}
+
+
+def write_events(folder, name):
+    """The Compumedics French text export (UTF-16 with BOM): clock time, epoch, stage, label, duration, ..."""
+    lines = [f'{clock},{20 + i},Eveil,{EVENT_LABEL},0:05.0,-,-,Dos' for i, clock in enumerate(EVENT_CLOCKS)]
+    (Path(folder) / f'{name}_ScoredEvents_Export.txt').write_bytes(('\r\n'.join(lines) + '\r\n').encode('utf-16'))
+
+
+# ---------------------------------------------------------------------------------------------------------
+# The reading functions, any format (quick)
+# ---------------------------------------------------------------------------------------------------------
+@pytest.mark.quick
+@pytest.mark.tool5
+@pytest.mark.tool7
+@pytest.mark.tool0
+def test_the_start_of_a_paused_recording_is_not_used(tmp_path):
+    path, _ = write_recording(tmp_path / 'a', 'rec')
+    assert REC.read_start_datetime(path) == pd.Timestamp('2026-01-02 03:04:05').to_pydatetime()
+    write_events(tmp_path / 'a', 'rec')
+    events, source = EIO.load_events(path)
+    assert source == 'txt' and events['Start'].tolist() == [600.0, 1205.0]
+    paused, _ = write_recording(tmp_path / 'b', 'rec', extra_segments=(1000,))
+    write_events(tmp_path / 'b', 'rec')
+    assert REC.read_start_datetime(paused) is None           # its samples no longer follow the clock
+    assert EIO.load_events(paused) == (None, None)           # so the clock times of the export are not placed
+    with pytest.raises(ValueError, match='paused'):
+        ML.read_header_info(paused)
+
+
+@pytest.mark.quick
+@pytest.mark.tool5
+@pytest.mark.tool0
+def test_the_header_of_tool_5_for_a_brainvision_recording(tmp_path):
+    path, _ = write_recording(tmp_path, 'rec')
+    header = ML.read_header_info(path)
+    assert header['start_dt'] == pd.Timestamp('2026-01-02 03:04:05').to_pydatetime()
+    assert header['duration_s'] == N_EPOCHS * 30 and header['ch_names'] == NAMES       # the online reference left out
+    assert header['sfreq_per_ch']['C3'] == SFREQ
+
+
+@pytest.mark.quick
+@pytest.mark.tool7
+@pytest.mark.tool0
+def test_the_reads_of_tools_0_and_7(tmp_path):
+    path, uv = write_recording(tmp_path, 'rec')
+    raw = EIO.read_eeg_raw(path, entry()['remap'])
+    assert raw.ch_names == EEG[:-1] + ['EOG_R', 'Cz'] and not raw.get_data(picks=['Cz']).any()   # Cz recreated
+    assert set(raw.get_channel_types()) == {'eeg'}                       # the eye electrode too, like an EDF read
+    assert EIO.phys_bounds_for_remap(path, entry()['remap'])[0] == {}     # no declared range
+    # the context companion: the eye electrode gets tool 2's reference (TP9), like the EEG; here IO = TP9
+    with_ref = EIO.read_context_raw(path, entry()['context_channels'], SFREQ, entry())
+    as_recorded = EIO.read_context_raw(path, entry()['context_channels'], SFREQ, entry(ref_channels=()))
+    assert with_ref.ch_names == ['EOG-R', 'EMG', 'ECG'] == as_recorded.ch_names
+    assert np.abs(with_ref.get_data(picks=['EOG-R'])).max() < 1e-9 < np.abs(as_recorded.get_data(picks=['EOG-R'])).max()
+    np.testing.assert_allclose(with_ref.get_data(picks=['ECG']), as_recorded.get_data(picks=['ECG']))
+
+
+@pytest.mark.quick
+@pytest.mark.tool7
+@pytest.mark.tool0
+def test_the_online_reference_is_left_out_only_when_it_stays_flat(tmp_path):
+    path, _ = write_recording(tmp_path, 'rec')
+    assert REC.flat_online_reference(path, entry(ref_channels=())) == 'Cz'      # no reference: Cz stays at 0
+    assert REC.flat_online_reference(path, entry()) is None                     # Cz - TP9: a real signal
+    assert REC.flat_online_reference(path, {**entry(), 'ref_channels': 'average'}) is None
+    not_kept = entry(ref_channels=())
+    not_kept['remap'].pop('Cz')
+    assert REC.flat_online_reference(path, not_kept) is None                    # not in tool 2's montage
+    assert REC.flat_online_reference(tmp_path / 'night.edf', entry(ref_channels=())) is None   # an EDF has none
+
+
+@pytest.mark.quick
+@pytest.mark.tool4
+@pytest.mark.tool5
+@pytest.mark.tool7
+@pytest.mark.tool0
+def test_a_kind_of_event_file_declared_absent_is_not_looked_for(tmp_path):
+    path, _ = write_recording(tmp_path, 'rec')
+    write_events(tmp_path, 'rec')
+    (tmp_path / 'rec_event_xml.csv').write_text('Name,Start,Duration\nHypopnea,30.0,10.0\n', encoding='utf-8')
+    (tmp_path / 'rec.vhdr.XML').write_text('<CMPStudyConfig><ScoredEvents><ScoredEvent><Name>Snore</Name><Start>1</Start>'
+                                           '<Duration>1</Duration></ScoredEvent></ScoredEvents></CMPStudyConfig>',
+                                           encoding='utf-8')
+    assert all(EIO.event_companion_paths(path))
+    assert EIO.event_companion_paths(path, None, None, xml=False) == (None, None, None)
+    assert EIO.load_events(path)[1] == 'txt'
+    assert EIO.load_events(path, txt_suffix=None)[1] == 'csv'
+    assert EIO.load_events(path, txt_suffix=None, csv_suffix=None)[1] == 'xml'
+    assert EIO.load_events(path, None, None, xml=False) == (None, None)
+
+
+@pytest.mark.quick
+@pytest.mark.tool8bis
+@pytest.mark.tool0
+def test_the_reference_stages_of_tool_8bis():
+    stages = ['W', 'N1', 'N2', 'N3', 'R']
+    assert AR.default_reference_stages(stages) == ['N2', 'N3', 'R']
+    assert AR.default_reference_stages(stages, [400, 350, 15]) == ['N2', 'N3', 'R']     # nights: unchanged
+    assert AR.default_reference_stages(stages, [4, 20, 13]) == stages                   # naps: every stage
+    assert AR.default_reference_stages(['W', 'N1'], [0, 0]) == ['W', 'N1']
+
+
+# ---------------------------------------------------------------------------------------------------------
+# The tools on a nap study (standard)
+# ---------------------------------------------------------------------------------------------------------
+def make_nap_study(data, configs, events=True):
+    """Nap recordings with their hypnograms (and event exports), tool 2's file (`configs` = {participant: entry}), tool 4's
+    event remap (with events), a participant table: the layout the test chain uses. Returns (data, ids)."""
+    ids = list(configs)
+    for k, pid in enumerate(ids):
+        write_recording(data, pid, seed=k)
+        (data / f'{pid}_hypno_remapped.txt').write_text('\n'.join(nap_stages()) + '\n', encoding='utf-8')
+        if events:
+            write_events(data, pid)
+    (data / 'config_param').mkdir()
+    (data / 'config_param' / 'remap_reref_persubject.json').write_text(json.dumps(configs, indent=2), encoding='utf-8')
+    if events:
+        (data / 'config_param' / 'event_remap.json').write_text(
+            json.dumps({EVENT_LABEL: 'arousal_spontaneous'}, ensure_ascii=False), encoding='utf-8')
+    pd.DataFrame({'participant_id': ids, 'age': [30, 40][:len(ids)]}).to_csv(data / 'participants.tsv', sep='\t',
+                                                                           index=False)
+    return data, ids
+
+
+@pytest.fixture(scope='module')
+def nap_study(tmp_path_factory):
+    """Two nap recordings with their hypnograms and event exports, tool 2's file and tool 4's event remap, a participant
+    table: the layout the test chain uses."""
+    return make_nap_study(tmp_path_factory.mktemp('naps') / 'data', {pid: entry() for pid in ('bv01', 'bv02')})
+
+
+@pytest.mark.tool4
+def test_tool4_finds_the_events_of_brainvision_recordings(nap_study):
+    data, ids = nap_study
+    with NotebookSession(T4) as nb:
+        nb.pick('chooser', data)
+        nb.click('run_scan_button')
+        text = nb.widget_text()
+    assert f'Scanned {len(ids)} recording(s): {len(ids)} with events, 0 failed.' in text, text[-2000:]
+    assert f'event source: {len(ids)} from TXT' in text
+
+
+@pytest.mark.tool5
+def test_tool5_on_brainvision_naps(nap_study):
+    data, ids = nap_study
+    text = pipeline.run_tool5(data)
+    assert 'Traceback' not in text, text[-3000:]
+    table = pd.read_csv(data / 'reports_features_macrostructure' / 'global_sleep_metrics.tsv', sep='\t')
+    assert sorted(table['file_id']) == ids
+    assert (table['recording_start'] == '2026-01-02 03:04:05').all()       # from the .vmrk
+
+
+@pytest.fixture(scope='module')
+def preprocessed(nap_study):
+    """Tools 6 then 7 (event flagging on) on the nap study."""
+    data, ids = nap_study
+    text6 = pipeline.run_tool6(data)
+    text7 = pipeline.run_tool7(data, events=True)
+    return data, ids, text6, text7
+
+
+@pytest.mark.tool7
+def test_tool7_on_brainvision_naps(preprocessed):
+    data, ids, text6, text7 = preprocessed
+    assert 'Traceback' not in text6 + text7, (text6 + text7)[-3000:]
+    epochs_dir = data / 'derivatives' / 'preproc_epo'
+    for pid in ids:
+        epochs = mne.read_epochs(epochs_dir / f'{pid}_all-epo.fif', preload=False, verbose=False)
+        assert len(epochs) == N_EPOCHS and 'Cz' in epochs.ch_names          # the online reference, re-referenced
+        assert 'EOG_R' in epochs.ch_names and set(epochs.get_channel_types()) == {'eeg'}   # flagged like the EEG
+        context = mne.read_epochs(epochs_dir / f'{pid}_context-epo.fif', preload=True, verbose=False)
+        assert context.ch_names == ['EOG-R', 'EMG', 'ECG'] and len(context) == N_EPOCHS
+        assert np.abs(context.get_data(picks=['EOG-R'])).max() < 1e-9        # IO - TP9, tool 2's reference
+        onsets = pd.read_csv(epochs_dir / f'{pid}_event_onsets.tsv', sep='\t')
+        assert onsets['onset_s'].tolist() == [600.0, 1205.0]                 # the export's clock times, placed
+    assert 'channel check: ECG (ECG): does not look like an ECG' in text7   # the checks ran (a noise on the ECG input)
+
+
+@pytest.mark.tool8bis
+def test_tool8bis_ticks_every_stage_on_naps(preprocessed):
+    data, ids, _, _ = preprocessed
+    with NotebookSession(pipeline.T8BIS) as nb:
+        nb.pick('fc_raw', data / 'derivatives' / 'preproc_epo')
+        nb.pick('fc_reports', data / 'reports_preproc')
+        nb.click('btn_scan')
+        scan = nb.value('lbl_scan.value')
+        ticked = nb.value("{st: cb.value for st, cb in S['stage_checks'].items()}")
+    assert 'Few epochs in N2 / N3 / R (median 10 per participant' in scan, scan
+    assert ticked == {'W': True, 'N1': True, 'N2': True}
+
+
+# ---------------------------------------------------------------------------------------------------------
+# Phase 4 bis: the online reference left out when it stays flat, the event files declared in tool 4 (standard)
+# ---------------------------------------------------------------------------------------------------------
+@pytest.fixture(scope='module')
+def mixed_ref_study(tmp_path_factory):
+    """Two naps without events: tool 2 declares no reference for bv01 (its online reference Cz stays flat) and TP9 for
+    bv02 (Cz - TP9 is a real signal)."""
+    return make_nap_study(tmp_path_factory.mktemp('refs') / 'data',
+                          {'bv01': entry(ref_channels=()), 'bv02': entry()}, events=False)
+
+
+@pytest.mark.tool7
+def test_tool7_leaves_a_flat_online_reference_out(mixed_ref_study):
+    data, _ = mixed_ref_study
+    with NotebookSession(pipeline.T7) as nb:      # no tool 6: the channels come from tool 2's configuration
+        nb.pick('fc_edf', data)
+        nb.click('btn_load')
+        scan = nb.value('load_info.value')
+        nb.click('btn_run')
+        text = nb.widget_text()
+    assert 'Traceback' not in text, text[-3000:]
+    assert 'Online reference left out of the montage (flat: tool 2 declares no reference): bv01 (Cz).' in scan, scan
+    assert '[bv01] Online reference Cz left out of the montage' in text and '[bv02] Online reference' not in text
+    epochs_dir = data / 'derivatives' / 'preproc_epo'
+    flat = mne.read_epochs(epochs_dir / 'bv01_all-epo.fif', preload=False, verbose=False)
+    kept = mne.read_epochs(epochs_dir / 'bv02_all-epo.fif', preload=False, verbose=False)
+    assert 'Cz' not in flat.ch_names and 'C3' in flat.ch_names
+    assert 'Cz' in kept.ch_names                                              # re-referenced to TP9
+
+
+@pytest.mark.tool0
+def test_tool0_leaves_the_online_reference_out_like_tools_6_and_7(tmp_path):
+    data, _ = make_nap_study(tmp_path / 'data', {'bv01': entry(ref_channels=()), 'bv02': entry()}, events=False)
+    with NotebookSession(T0) as nb:
+        nb.pick('fc_data', data)
+        nb.set('dd_part', 'bv01')
+        nb.click('btn_run1')
+        assert nb.value("STATUS['1']") == 'up_to_date', nb.widget_text()[-2000:]
+        assert 'Cz' not in nb.value("STATE['raw'].ch_names")
+        assert any('Online reference Cz left out' in note for note in nb.value("STATE['notes']"))
+        nb.set('dd_part', 'bv02')
+        nb.click('btn_run1')
+        assert nb.value("STATUS['1']") == 'up_to_date', nb.widget_text()[-2000:]
+        assert 'Cz' in nb.value("STATE['raw'].ch_names")              # step 6 re-references it to TP9, like tool 7
+        nb.click('btn_run5')
+        assert nb.value("STATUS['5']") == 'up_to_date', nb.widget_text()[-2000:]
+        step5 = pd.DataFrame(nb.value("STATE['quality']['rows']"))
+    assert 'Cz' not in set(step5['channel']) and 'C3' in set(step5['channel'])   # left out of step 5, like tool 6
+
+
+@pytest.mark.tool0
+def test_tool0_events_menu_preparation_of_tool_6_and_channels_of_step_6(tmp_path):
+    """Phase 5 bis: the scored-event file chosen in a menu, step 5 starting as tool 6 prepared the participant (resampled
+    here), the explorer showing only the channels ticked in step 6."""
+    data, _ = make_nap_study(tmp_path / 'data', {'bv01': entry()}, events=True)
+    (data / 'bv01_other_events.csv').write_text('Name,Start,Duration\nMy event,100.0,5.0\n', encoding='utf-8')
+    reports = data / 'reports_quality_overview'
+    reports.mkdir()
+    pd.DataFrame({'file_id': ['bv01'], 'channel': ['C3'], 'signal_preparation': ['resampled to 128 Hz'],
+                  'suspect_reason': [''], 'exclude': [False]}).to_csv(reports / 'bv01_quality_metrics.tsv', sep='\t',
+                                                                       index=False)
+    with NotebookSession(T0) as nb:
+        nb.pick('fc_data', data)
+        nb.set('dd_part', 'bv01')
+        assert nb.value('cb_resample5.value') and nb.value('it_target5.value') == 128 and not nb.value('cb_hp5.value')
+        assert 'resampled to 128 Hz' in nb.value('html_prep5.value')
+        menu = nb.value('[v for _, v in dd_events.options]')
+        assert menu[0] == 'as tools 5 and 7' and menu[-2:] == ['(none)', 'Other file…']
+        assert 'bv01_ScoredEvents_Export.txt' in menu and 'bv01_other_events.csv' in menu
+        nb.set('dd_events', 'bv01_other_events.csv')
+        nb.click('btn_run1')
+        assert nb.value("STATUS['1']") == 'up_to_date', nb.widget_text()[-2000:]
+        assert nb.value("STATE['events_source']") == 'csv'
+        assert nb.value("list(STATE['events']['Name'])") == ['My event']
+        assert any('chosen here' in note for note in nb.value("STATE['notes']"))
+        nb.set("CH6['C3']", False)
+        nb.set('dd_channels', 'step6')
+        assert 'Montage error' not in nb.widget_text()
+
+
+@pytest.mark.tool0
+def test_tool0_explorer_and_step_6_on_a_nap_without_n3(tmp_path):
+    """Phase 5 ter: the explorer says the montage reads better after step 6 and shows another hypnogram read only; step 6
+    ticks / unticks every channel and runs with a channel unticked on a nap without N3 (MNE refused it before)."""
+    data, _ = make_nap_study(tmp_path / 'data', {'bv01': entry()}, events=False)
+    (data / 'bv01_hypno_gssc.txt').write_text('\n'.join(['N2'] * N_EPOCHS) + '\n', encoding='utf-8')
+    with NotebookSession(T0) as nb:
+        nb.pick('fc_data', data)
+        nb.set('dd_part', 'bv01')
+        nb.set('dd_hypno', '_hypno_remapped.txt')
+        nb.click('btn_run1')
+        assert nb.value("STATUS['1']") == 'up_to_date', nb.widget_text()[-2000:]
+        assert 'Step 6 has not run' in nb.value('html_explorer_info.value')
+        assert '_hypno_gssc.txt' in nb.value('[v for _, v in dd_hyp_shown.options]')
+        nb.set('dd_hyp_shown', '_hypno_gssc.txt')
+        assert nb.value("stage_btns['W'].disabled") and 'shown (_hypno_gssc.txt): <b>N2</b>' in nb.value('lbl_epoch.value')
+        nb.set('dd_hyp_shown', 'in use')
+        assert not nb.value("stage_btns['W'].disabled")
+        nb.click('btn_ch6_none')
+        assert not any(nb.value('[cb.value for cb in CH6.values()]'))
+        nb.click('btn_ch6_all')
+        assert all(nb.value('[cb.value for cb in CH6.values()]'))
+        nb.set("CH6['O2']", False)
+        nb.click('btn_run6')
+        assert nb.value("STATUS['6']") == 'up_to_date', nb.widget_text()[-3000:]
+        assert nb.value("STATE['preproc']['bad_names']") == ['O2']
+        assert 'Step 6 has not run' not in nb.value('html_explorer_info.value')
+        # the preprocessed signal in float32, O2 kept aside by step 6 and left out of the display, step 6's epochs shown
+        # without a copy; the detail panel's PSD computed for the epoch shown and its reference only, equal to a PSD of every
+        # epoch with tool 7's smoothing
+        nb.set('dd_signal', 'preproc')
+        nb.run('goto_epoch(3)')
+        assert 'Detail error' not in str(nb.value('[str(o) for o in out_detail.outputs]'))
+        assert nb.value("STATE['preproc']['bad_epochs'].ch_names") == ['O2'] and 'O2' not in nb.value("STATE['P']['ch_names']")
+        assert nb.value("STATE['P']['epochs'] is STATE['preproc']['epochs']")
+        assert nb.value("STATE['P']['data_uV'].dtype.name") == 'float32'
+        nb.run("_d = STATE['psd_done']; _f, _all = L.compute_psds(STATE['P']['epochs'], **STATE['psd_cfg'])")
+        assert nb.value("int(_d.sum())") >= 1 and nb.value("STATE['psd_cfg']['smoothing']['enabled']")
+        assert nb.value("bool(np.allclose(_all[_d], STATE['psds'][_d], rtol=1e-12, atol=0))")
+
+
+@pytest.mark.tool4
+@pytest.mark.tool5
+@pytest.mark.tool7
+def test_a_study_declared_with_a_text_export_only(tmp_path):
+    """Tool 4 pre-ticks the text export alone and saves it; tools 5 and 7 then hide the CSV / XML / summary fields, and
+    tool 5 gives the same table as on the same study without a declaration."""
+    configs = {pid: entry() for pid in ('bv01', 'bv02')}
+    data, ids = make_nap_study(tmp_path / 'declared', configs)
+    plain, _ = make_nap_study(tmp_path / 'plain', configs)
+    with NotebookSession(T4) as nb:
+        nb.pick('chooser', data)
+        assert nb.value('{k: cb.value for k, cb in cb_files.items()}') == \
+            {'txt': True, 'csv': False, 'xml': False, 'summary': False}         # from the files found
+        assert nb.value("{k: b.layout.display for k, b in suffix_boxes.items()}") == \
+            {'txt': '', 'csv': 'none', 'summary': 'none'}
+        nb.click('save_files_button')
+        assert 'Event files of this study saved' in nb.value('out_files.value')
+        nb.click('run_scan_button')
+        text4 = nb.widget_text()
+    assert f'event source: {len(ids)} from TXT' in text4
+    names, _ = SF.load_names(data)
+    assert SF.declared_event_files(names) == {'txt': '_ScoredEvents_Export.txt', 'csv': None, 'xml': False,
+                                              'summary': None}
+    tables = {}
+    for study in (data, plain):
+        with NotebookSession(pipeline.T5) as nb:
+            nb.pick('fc_data', study)
+            hidden = nb.value("{k: b.layout.display for k, b in event_file_boxes.items()}")
+            nb.pick('fc_subj', study / 'participants.tsv')
+            nb.set('dd_join_col', 'participant_id')
+            nb.click('btn_scan')
+            nb.click('btn_run')
+            assert 'Traceback' not in nb.widget_text()
+        expected = {'summary': 'none', 'txt': '', 'csv': 'none'} if study == data else \
+            {'summary': '', 'txt': '', 'csv': ''}
+        assert hidden == expected, study
+        tables[study] = pd.read_csv(study / 'reports_features_macrostructure' / 'global_sleep_metrics.tsv', sep='\t')
+    pd.testing.assert_frame_equal(tables[data], tables[plain])
+    with NotebookSession(pipeline.T7) as nb:
+        nb.pick('fc_edf', data)
+        assert nb.value('event_txt_box.layout.display') == '' and nb.value('event_csv_box.layout.display') == 'none'
+        assert nb.value("cb_event_reject.layout.display") == ''
+
+
+@pytest.mark.tool4
+@pytest.mark.tool5
+@pytest.mark.tool7
+def test_a_study_declared_without_scored_events(tmp_path):
+    data, _ = make_nap_study(tmp_path / 'data', {'bv01': entry()}, events=False)
+    with NotebookSession(T4) as nb:
+        nb.pick('chooser', data)
+        assert not any(nb.value('[cb.value for cb in cb_files.values()]'))    # nothing found beside the recordings
+        nb.click('save_files_button')
+        assert 'none (no scored events)' in nb.value('out_files.value')
+        nb.click('run_scan_button')
+        assert 'nothing to scan' in nb.widget_text()
+    with NotebookSession(pipeline.T7) as nb:
+        nb.pick('fc_edf', data)
+        assert nb.value('cb_event_reject.layout.display') == 'none' and not nb.value('cb_event_reject.value')
+        assert SF.NO_EVENTS_DECLARED.capitalize() in nb.value('event_none_info.value')
+    with NotebookSession(pipeline.T5) as nb:
+        nb.pick('fc_data', data)
+        nb.click('btn_scan')
+        scan = nb.widget_text()
+        nb.click('btn_run')
+    assert SF.NO_EVENTS_DECLARED in scan and 'no event_remap.json' not in scan, scan[-2000:]
+    checks = pd.read_csv(data / 'derivatives' / 'features_macrostructure' / 'bv01_sleep_metrics_checks.tsv', sep='\t')
+    assert 'no scored events in this study (declared in tool 4) - event indices are NaN' in checks['detail'].tolist()

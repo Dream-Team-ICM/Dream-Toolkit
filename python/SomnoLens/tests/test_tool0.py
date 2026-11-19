@@ -73,7 +73,11 @@ def test_step1_reads_the_recording_like_tool7(chain, tmp_path):
             assert nb.value("[str(s) for s in STATE['hypno_work']]") == meta['stage'].astype(str).tolist(), fid
             # tool 7 re-references to M2 then drops it; tool 0 shows the EEG as recorded, M2 included
             assert set(nb.value("STATE['P']['ch_names']")) - {'M2'} == set(ep.ch_names), fid
-            on7 = pd.read_csv(tool7_fif(chain, fid).with_name(f'{fid}_event_onsets.tsv'), sep='\t')
+            # the explorer's signal in float32, the detail panel's PSD only for the epoch shown and its stage's reference
+            assert nb.value("STATE['P']['data_uV'].dtype.name") == 'float32', fid
+            assert nb.value("int(STATE['psd_done'].sum()) == len(set(L.detail_reference_epochs(STATE['P'], "
+                            "STATE['cur'])[0]) | {STATE['cur']})"), fid
+            on7 =pd.read_csv(tool7_fif(chain, fid).with_name(f'{fid}_event_onsets.tsv'), sep='\t')
             on0 = pd.DataFrame(nb.value("STATE['onsets'][STATE['onsets']['mapped']][['type', 'onset_s']]"
                                         ".to_dict('records')"))
             key = lambda df: sorted(zip(df['type'].astype(str), df['onset_s'].astype(float).round(3)))

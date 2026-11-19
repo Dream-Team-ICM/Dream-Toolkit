@@ -3,7 +3,7 @@ Automatic sleep scoring with GSSC, YASA and SleepFM: the computation and the fig
 (3bis_autoscoring_voila.ipynb), shared with tool 0 (tool-0 redesign, tools/plan_tool0_redesign.md).
 
 The GSSC functions were MOVED VERBATIM from tool 3bis (its cell 2), plus its guarded GSSC import (cell 1) and
-`score_night`, the scoring part of its `score_one`, so both tools chain the same steps. YASA and SleepFM were
+`score_night_gssc`, the scoring part of its `score_one`, so both tools chain the same steps. YASA and SleepFM were
 ported from python/Score_EDF (SPEC §3bis): same inputs and computations, read from
 tool 2's configuration instead of Score_EDF's channel aliases. SleepFM itself lives in sleepfm_lib.py.
 Tool 3bis keeps its user interface and everything it writes; tool 0 calls the same functions on one night.
@@ -35,6 +35,7 @@ import mne
 from sklearn.metrics import accuracy_score, cohen_kappa_score, f1_score, confusion_matrix
 from edf_io_lib import (   # one copy, in edf_io_lib (same folder)
     CUSTOM_STAGE_PALETTE, load_custom_stages, drop_suffix_duplicates, adapt_remap_dict_to_suffixes, load_json_lenient,
+    context_divisors, context_gain, draw_hypnogram,
 )
 import recording_lib as RL
 import channel_check_lib as CC
@@ -78,12 +79,9 @@ except Exception as e:
 EPOCH_SEC = 30
 STAGES = ['W', 'N1', 'N2', 'N3', 'R']
 GSSC_STAGE = {0: 'W', 1: 'N1', 2: 'N2', 3: 'N3', 4: 'R'}       # GSSC's integer coding
-# Clinical hypnogram layout: W on top, then R, then NREM getting deeper downwards.
-HYPNO_Y = {'W': 0, 'R': 1, 'N1': 2, 'N2': 3, 'N3': 4}
 # Stage colours of the rest of the toolkit (BASE_STAGE_COLORS of tools 0/6/7/9 and qc_rejected_epochs_lib).
 STAGE_COLORS = {'W': '#969696', 'N1': '#9e9ac8', 'N2': '#807dba', 'N3': '#6a51a3', 'R': '#c994c7'}
-# Hypnogram drawing of tools 6/7: grey step line, REM highlighted in red.
-HYPNO_LINE_COLOR = '#555555'
+# REM of the expert line drawn over a hypnodensity (the hypnograms themselves: edf_io_lib.draw_hypnogram)
 HYPNO_REM_COLOR = '#c0392b'
 
 
@@ -113,8 +111,8 @@ def non_aasm_color(group, custom_stages):
 # Expert hypnogram drawn over a hypnodensity (probability axis 0-1): W on top, N3 at the bottom.
 OVERLAY_Y = {'W': 0.9, 'R': 0.7, 'N1': 0.5, 'N2': 0.3, 'N3': 0.1}
 CONSENSUS_RULE = 'loudest_vote'   # GSSC's native rule: the most confident combination wins, per epoch
-# EOG names that tool 2 may have kept in the remap: never offered as an EEG electrode.
-EOG_NAME_RE = re.compile(r'(EOG|^LOC$|^ROC$|^E1$|^E2$)', re.IGNORECASE)
+# EOG names (never offered as an EEG electrode) and mastoid names: one copy, in recording_lib (eog_reference uses them)
+EOG_NAME_RE, LEFT_MASTOIDS, RIGHT_MASTOIDS = RL.EOG_NAME_RE, RL.LEFT_MASTOIDS, RL.RIGHT_MASTOIDS
 
 ALGORITHMS = ['GSSC', 'YASA', 'SleepFM']
 EOG_MODES = ['L − R bipolar', 'L and R separately', 'Left only', 'Right only', 'None']
@@ -124,10 +122,6 @@ EOG_MODES = ['L − R bipolar', 'L and R separately', 'Left only', 'Right only',
 REFERENCE_CONTRALATERAL = 'Contralateral mastoid (as the models were trained)'
 REFERENCE_DECLARED = 'As declared in tool 2'
 REFERENCE_OPTIONS = [REFERENCE_CONTRALATERAL, REFERENCE_DECLARED]
-# 10-20 names of the left mastoid / earlobe, then the 10-10 electrode over the mastoid (a cap without M1 / M2). The
-# first one found is used, so a recording with M1 / M2 never takes TP9 / TP10.
-LEFT_MASTOIDS = ('M1', 'A1', 'TP9')
-RIGHT_MASTOIDS = ('M2', 'A2', 'TP10')
 
 
 def eeg_options(cfg_entry):
@@ -264,51 +258,10 @@ def load_eeg(edf_path, cfg_entry, wanted):
     return raw, present
 
 
-def _reference_words(refs):
-    """'TP9', 'mean of TP9, TP10', 'average of 63 EEG channels': the reference of a derivation, in a report."""
-    if len(refs) == 1:
-        return refs[0]
-    return f'mean of {", ".join(refs)}' if len(refs) <= 3 else f'average of {len(refs)} EEG channels'
-
-
 def eog_reference(path, cfg_entry, eog, reference, bipolar_pair=False):
-    """How each EOG is referenced for the models: ({label: harmonized names of the channels whose mean is subtracted},
-    description for the parameters file and the report ('' when every EOG is left as recorded), notes).
-    `eog` = {label: original name}, label 'EOG-L' (left eye) or 'EOG-R' (right eye).
-
-    An EOG electrode on an EEG input is recorded against the online reference (Cz on many 10-10 caps): it then also
-    holds the EEG of that electrode, inverted (spindles, K-complexes and slow waves are large at the vertex), which the
-    models never saw: they learnt on E1-M2 / E2-M1. Subtracting a mastoid removes it: (eye - Cz) - (M - Cz) = eye - M.
-    Such an EOG gets the reference of the EEG: the mastoid of the other side with the contralateral reference (left eye
-    on M2, right eye on M1), tool 2's reference otherwise. Left as recorded: an EOG on an auxiliary (already bipolar)
-    input; an EDF, whose header does not say against what a channel was recorded; the L - R derivation of two EOG
-    (`bipolar_pair`: the common term cancels); and an EOG without a mastoid of the other side (said in the notes)."""
-    online, on_reference = RL.online_reference(path)
-    eog = {label: orig for label, orig in eog.items() if orig in on_reference}
-    if not eog or bipolar_pair:
-        return {}, '', []
-    names = list(cfg_entry.get('remap', {}).values())
-    upper = {n.upper(): n for n in names}
-    declared = cfg_entry.get('ref_channels', [])
-    refs, notes = {}, []
-    for label, orig in eog.items():
-        if reference == REFERENCE_CONTRALATERAL:
-            other_side = RIGHT_MASTOIDS if label == 'EOG-L' else LEFT_MASTOIDS
-            mastoid = next((upper[m] for m in other_side if m in upper), None)
-            if mastoid is None:
-                notes.append(f'{label} ({orig}) is recorded against the online reference {online} and no mastoid of '
-                             'the other side is configured in tool 2: used as recorded')
-            else:
-                refs[label] = [mastoid]
-        elif declared == 'average':
-            refs[label] = [ch for ch in names if not EOG_NAME_RE.search(ch)]
-        elif isinstance(declared, list) and declared:
-            refs[label] = [ch for ch in declared if ch in names]
-        # tool 2 declared no reference: the EEG stays against the online reference, and so does the EOG
-    description = '; '.join(f'{label} = {eog[label]} - {_reference_words(r)}' for label, r in refs.items() if r)
-    if description:
-        description += f' ({", ".join(eog[label] for label in refs)} recorded against the online reference {online})'
-    return {label: r for label, r in refs.items() if r}, description, notes
+    """How each EOG is referenced for the models (recording_lib.eog_reference): with the contralateral reference, the
+    mastoid of the other side (the models learnt on E1-M2 / E2-M1), else tool 2's reference."""
+    return RL.eog_reference(path, cfg_entry, eog, reference == REFERENCE_CONTRALATERAL, bipolar_pair)
 
 
 def load_eog(edf_path, cfg_entry, sfreq, n_times, mode, reference=REFERENCE_CONTRALATERAL):
@@ -352,6 +305,11 @@ def load_eog(edf_path, cfg_entry, sfreq, n_times, mode, reference=REFERENCE_CONT
     else:
         data = np.pad(data, ((0, 0), (0, n_times - data.shape[1])))
     by_name = dict(zip(eog.ch_names, data))
+    divisors = context_divisors(cfg_entry)     # tool 2's correction of an input gain, before the reference
+    for k, ch in found.items():
+        if sides[k] in divisors:
+            by_name[ch] = by_name[ch] / divisors[sides[k]]
+            notes.append(f'{k} ({sides[k]}) divided by {divisors[sides[k]]:g} (tool 2)')
     rows = {}
     for k, ch in found.items():
         ref = [inverse[h] for h in refs.get(k, []) if h in inverse and inverse[h] in by_name]
@@ -366,10 +324,11 @@ def load_eog(edf_path, cfg_entry, sfreq, n_times, mode, reference=REFERENCE_CONT
     return np.vstack(list(rows.values())), list(rows), notes, eog_ref
 
 
-def gssc_combination_logits(infer, inst, eeg_names, eog_names):
+def gssc_combination_logits(infer, inst, eeg_names, eog_names, progress=None):
     """The scoring loop of gssc 0.0.9's EEGInfer.mne_infer, step for step, keeping what mne_infer
     throws away: the network output of EVERY signal combination (mne_infer only returns the final
     stages, not the probabilities). Pinned to gssc 0.0.9: re-check this loop before upgrading gssc.
+    `progress(done, total)` (optional) is called after each combination.
     Returns (logits (n_combinations, n_epochs, 5), combination names, epoch start times in s)."""
     # GSSC was trained on 0.3-30 Hz data: filter where the data are wider (as mne_infer does)
     band = [0.3 if round(inst.info['highpass'], 2) < 0.3 else None,
@@ -382,7 +341,7 @@ def gssc_combination_logits(infer, inst, eeg_names, eog_names):
     data = gssc_zscore(epo.get_data(picks=all_chans) * 1e6)
     device = 'cuda' if infer.use_cuda else 'cpu'
     logits, combos = [], []
-    for perm in perm_matrix:
+    for k, perm in enumerate(perm_matrix):
         sigs, used = {}, {'eeg': None, 'eog': None}
         for sig_idx, (sig_name, chans) in enumerate(sig_combs.items()):
             if not len(chans[perm[sig_idx]]):
@@ -396,13 +355,15 @@ def gssc_combination_logits(infer, inst, eeg_names, eog_names):
             y, _ = infer.con_net(reps, torch.zeros(10, 1, 256).to(device))   # context network over the night
         logits.append(y[:, 0, ].float().cpu().numpy())
         combos.append(' + '.join(v for v in used.values() if v))
+        if progress is not None:
+            progress(k + 1, len(perm_matrix))
     n_ep = logits[0].shape[0]
     return np.array(logits), combos, np.arange(start_time, n_ep * 30, 30)
 
 
-def run_gssc(infer, raw_eeg, eog_data, eog_names):
+def run_gssc(infer, raw_eeg, eog_data, eog_names, progress=None):
     """One GSSC scoring. Returns (stages (str array), onsets_s, probs (n_epochs, 5),
-    winning combination per epoch, number of combinations)."""
+    winning combination per epoch, number of combinations). `progress(done, total)`: after each combination."""
     eeg_names = list(raw_eeg.ch_names)
     data = raw_eeg.get_data()
     names, types = list(eeg_names), ['eeg'] * len(eeg_names)
@@ -411,7 +372,7 @@ def run_gssc(infer, raw_eeg, eog_data, eog_names):
         names += eog_names
         types += ['eog'] * len(eog_names)
     raw_in = mne.io.RawArray(data, mne.create_info(names, raw_eeg.info['sfreq'], types), verbose=False)
-    logits, combos, onsets = gssc_combination_logits(infer, raw_in, eeg_names, eog_names)
+    logits, combos, onsets = gssc_combination_logits(infer, raw_in, eeg_names, eog_names, progress=progress)
     # Consensus = gssc's own loudest_vote (the same call as in mne_infer): per epoch, the combination
     # whose output is the most confident (lowest entropy) wins.
     stage_int = np.asarray(gssc_loudest_vote(logits))
@@ -503,35 +464,12 @@ def add_clock_axis(ax, start_dt, x_max_h):
     sec.set_xlabel(f'Clock time (recording start {start_dt:%H:%M}, EDF header)', fontsize=8)
 
 
-def _hypno_rows(extra):
-    """Stage -> row (0 = W at the top ... 4 = N3), then the extra non-AASM labels below N3."""
-    rows = dict(HYPNO_Y)
-    for i, s in enumerate(extra):
-        rows[s] = 5 + i
-    return rows
-
-
 def _step_hypno(ax, labels, title, extra=(), custom_stages=()):
-    """Hypnogram as in tools 6/7 (grey line, REM red); `extra` = non-AASM labels drawn as their own rows
-    below N3, each highlighted in its custom-stage colour. REM and the extra rows at the line's own width
-    (the toolkit's discreet convention)."""
-    rows = _hypno_rows(extra)
-    y = np.array([rows.get(s, np.nan) for s in labels], dtype=float)
-    ax.step(_hours(len(y)), np.append(y, y[-1] if len(y) else np.nan), where='post',
-            color=HYPNO_LINE_COLOR, lw=1.2)
-    rem = y == HYPNO_Y['R']
-    for i in np.where(rem)[0]:
-        ax.plot(_hours(len(y))[i:i + 2], [y[i], y[i]], color=HYPNO_REM_COLOR, lw=1.2,
-                solid_capstyle='butt')
-    for s in extra:
-        for i in np.where(y == rows[s])[0]:
-            ax.plot(_hours(len(y))[i:i + 2], [y[i], y[i]], lw=1.2, solid_capstyle='butt',
-                    color=non_aasm_color(s, list(custom_stages)))
-    ax.set_yticks(list(rows.values()))
-    ax.set_yticklabels(list(rows.keys()))
-    ax.set_ylim(max(rows.values()) + 0.5, -0.5)
+    """The toolkit's hypnogram (edf_io_lib.draw_hypnogram); `extra` = the non-AASM labels drawn as their own rows below
+    N3, each in its custom-stage colour (MT and other grey)."""
+    draw_hypnogram(ax, _hours(len(labels)), labels, custom_stages=list(extra),
+                   colors={s: non_aasm_color(s, list(custom_stages)) for s in extra}, fontsize=9)
     ax.set_title(title, loc='left', fontsize=10)
-    ax.grid(axis='y', alpha=0.3)
 
 
 def plot_hypnograms(gssc, expert, file_id, custom_stages=(), start_dt=None, algo='GSSC'):
@@ -853,11 +791,7 @@ def channel_checks(path, cfg_entry, refs_by_ch, eog, context_roles=()):
                 users = [c for c, rs in refs_by_ch.items() if rs and r in rs]
                 checked[r] = 'reference of ' + ', '.join(users)
     try:
-        online, _ = RL.online_reference(path)
-        context = set((cfg_entry.get('context_channels') or {}).values())
-        pool = [ch for orig, ch in cfg_entry.get('remap', {}).items()
-                if orig not in context and orig != online and not EOG_NAME_RE.search(ch)]
-        warnings = CC.channel_quality_warnings(path, cfg_entry, pool, checked, eog)
+        warnings = CC.channel_quality_warnings(path, cfg_entry, CC.eeg_pool(path, cfg_entry), checked, eog)
         if context_roles:
             warnings += CC.context_amplitude_warnings(path, cfg_entry, context_roles)
         return warnings
@@ -865,9 +799,11 @@ def channel_checks(path, cfg_entry, refs_by_ch, eog, context_roles=()):
         return [f'channel check not done ({e})']
 
 
-def score_night_gssc(infer, edf_path, cfg_entry, wanted, one_mode, eog_mode, reference=REFERENCE_CONTRALATERAL):
+def score_night_gssc(infer, edf_path, cfg_entry, wanted, one_mode, eog_mode, reference=REFERENCE_CONTRALATERAL,
+                     progress=None):
     """The scoring part of tool 3bis's score_one: EEG `wanted` with the chosen reference, EOG as declared in
-    tool 2 (EOG mode), then GSSC. One-electrode mode never substitutes a missing electrode.
+    tool 2 (EOG mode), then GSSC. One-electrode mode never substitutes a missing electrode. `progress(done,
+    total)` (optional): after each signal combination GSSC scores.
     Raises on a fatal problem. Returns a dict (stages, onsets, probs, winner, n_comb, present, eog_names,
     reference, eog_reference, notes, checks)."""
     raw, present, ref_text, notes, refs = load_eeg_for_models(edf_path, cfg_entry, wanted, reference)
@@ -881,19 +817,11 @@ def score_night_gssc(infer, edf_path, cfg_entry, wanted, one_mode, eog_mode, ref
     eog_data, eog_names, eog_notes, eog_ref = load_eog(edf_path, cfg_entry, raw.info['sfreq'], raw.n_times,
                                                        eog_mode, reference)
     notes += eog_notes
-    stages, onsets, probs, winner, n_comb = run_gssc(infer, raw, eog_data, eog_names)
+    stages, onsets, probs, winner, n_comb = run_gssc(infer, raw, eog_data, eog_names, progress=progress)
     checks = channel_checks(edf_path, cfg_entry, refs, eog_used(cfg_entry, eog_mode) if eog_names else {})
     return {'stages': stages, 'onsets': onsets, 'probs': probs, 'winner': winner, 'n_comb': n_comb,
             'present': present, 'eog_names': eog_names, 'reference': ref_text, 'eog_reference': eog_ref,
             'notes': notes, 'checks': checks}
-
-
-def score_night(infer, edf_path, cfg_entry, wanted, one_mode, eog_mode, reference=REFERENCE_CONTRALATERAL):
-    """Tool 0's entry point (same steps as tool 3bis): score_night_gssc as a tuple
-    (stages, onsets, probs, winner, n_comb, present, eog_names, notes)."""
-    r = score_night_gssc(infer, edf_path, cfg_entry, wanted, one_mode, eog_mode, reference)
-    return (r['stages'], r['onsets'], r['probs'], r['winner'], r['n_comb'], r['present'], r['eog_names'],
-            r['notes'])
 
 
 # ---------------------------------------------------------------------------------------------------------
@@ -972,11 +900,15 @@ def read_signals(edf_path, cfg_entry, electrodes, reference, extra, eog_keys=Non
             ref_desc.startswith('contralateral') else e
         eeg[label] = data[e] - np.mean([data[r] for r in ref], axis=0) if ref else data[e]
     out_extra = {}
+    divisors = context_divisors(cfg_entry)     # tool 2's correction of an input gain, before the EOG reference
     for k, orig in extra.items():
         ch = find(orig) if orig else None
         out_extra[k] = raw.get_data(picks=[ch])[0] if ch is not None else None
         if orig and ch is None:
             notes.append(f'{k} channel {orig} not found in the recording')
+        if ch is not None and orig in divisors:
+            out_extra[k] = out_extra[k] / divisors[orig]
+            notes.append(f'{k} ({orig}) divided by {divisors[orig]:g} (tool 2)')
     for key, label in eog_keys.items():
         ref = eog_refs.get(label, [])
         if ref and out_extra.get(key) is not None and all(r in data for r in ref):
@@ -1058,14 +990,15 @@ def find_resp_channels(edf_path):
 
 
 def score_night_sleepfm(edf_path, cfg_entry, sleepfm_root, reference=REFERENCE_CONTRALATERAL, device='cpu',
-                        full_tail=False, workdir=None):
+                        full_tail=False, workdir=None, progress=None):
     """SleepFM-Clinical on one night, as Score_EDF prepared it: the AASM EEG derivations present (F3, F4, C3,
     C4, O1, O2), both EOG, chin EMG and ECG from tool 2's context channels, the respiratory channels found by
     name; filtered, 128 Hz, z-scored (sleepfm_lib). full_tail=True: the last minutes predicted with the whole
     night as context, as Score_EDF did (slower; the default uses sleepfm_lib.TAIL_CONTEXT_CHUNKS).
     Returns a dict: stages / onsets / probs per 30-s epoch from t = 0, the native 5-s table (starts_s, stops_s,
     probs_5s, source), the features + final-layer parameters for recalibration B, used (channels per modality),
-    reference, eog_reference, notes, checks."""
+    reference, eog_reference, notes, checks. `progress(done, total)` (optional): after each 5-min chunk of the
+    night."""
     import sleepfm_lib as SFM
     tail_context_chunks = None if full_tail else SFM.TAIL_CONTEXT_CHUNKS
     ctx = cfg_entry.get('context_channels') or {}
@@ -1098,7 +1031,7 @@ def score_night_sleepfm(edf_path, cfg_entry, sleepfm_root, reference=REFERENCE_C
     if not resp:
         notes.append('no respiratory channel found by name (Thoracic, Abdominal, Flux/Airflow, SpO2, Pulse)')
     r = SFM.score_signals(bas, sig['EMG'], others, sfreq, sleepfm_root, device=device,
-                          tail_context_chunks=tail_context_chunks, workdir=workdir)
+                          tail_context_chunks=tail_context_chunks, workdir=workdir, progress=progress)
     n_epochs = int(np.floor(r['stops_s'].max() / EPOCH_SEC))
     probs30 = SFM.to_epochs(r['starts_s'], r['stops_s'], r['probs'], n_epochs, EPOCH_SEC)
     stages = np.array([STAGES[i] for i in np.nanargmax(probs30, axis=1)])
@@ -1120,6 +1053,132 @@ def score_night_sleepfm(edf_path, cfg_entry, sleepfm_root, reference=REFERENCE_C
 
 
 # ---------------------------------------------------------------------------------------------------------
+# Tool 3bis's menus (Section 2): only what tool 2 declares, and what a recording lacking a chosen channel gets
+# ---------------------------------------------------------------------------------------------------------
+# The context channels each EOG choice needs (tool 2's context_channels roles)
+GSSC_EOG_ROLES = {'L − R bipolar': ('eog_left', 'eog_right'), 'L and R separately': ('eog_left', 'eog_right'),
+                  'Left only': ('eog_left',), 'Right only': ('eog_right',), 'None': ()}
+YASA_EOG_ROLES = {'Left': ('eog_left',), 'Right': ('eog_right',), 'None': ()}
+GSSC_EOG_PREFERRED = ['L − R bipolar', 'Left only', 'Right only', 'L and R separately']
+YASA_EOG_PREFERRED = ['Left', 'Right']      # YASA recommends the left EOG
+MENU_NAMES_SHOWN = 10                       # recordings named in a line, then '… (+N)'
+
+
+def _declared(cfg_entry, role):
+    return bool((cfg_entry.get('context_channels') or {}).get(role))
+
+
+def eog_counts(configs, roles_by_choice):
+    """For an EOG menu: {choice: number of recordings whose tool-2 entry declares every EOG the choice needs}.
+    configs = {recording: its tool-2 entry}."""
+    return {choice: sum(all(_declared(c, r) for r in roles) for c in configs.values())
+            for choice, roles in roles_by_choice.items()}
+
+
+def eeg_counts(configs):
+    """{electrode: number of recordings having it} (the scoring electrodes of tool 2's remap, eeg_options), in the
+    order the recordings list them."""
+    counts = {}
+    for c in configs.values():
+        for ch in eeg_options(c):
+            counts[ch] = counts.get(ch, 0) + 1
+    return counts
+
+
+def menu_options(counts, n_total, always=('None',)):
+    """(label, value) of a menu: the choices at least one recording allows, in order, '(n/N)' after one that not every
+    recording allows; the choices of `always` in any case."""
+    return [(value if n >= n_total else f'{value}  ({n}/{n_total})', value)
+            for value, n in counts.items() if n > 0 or value in always]
+
+
+def menu_default(counts, n_total, previous, preferred, always=('None',)):
+    """The value of a menu after a scan: the previous one when every recording allows it, else the first of `preferred`
+    that every recording allows, else the choice most recordings allow, else the first of `always`."""
+    if previous is not None and counts.get(previous, 0) >= n_total > 0:
+        return previous
+    for value in preferred:
+        if counts.get(value, 0) >= n_total > 0:
+            return value
+    candidates = {v: n for v, n in counts.items() if v not in always and n > 0}
+    return max(candidates, key=candidates.get) if candidates else always[0]
+
+
+def _named(ids):
+    ids = sorted(ids)
+    shown = ', '.join(ids[:MENU_NAMES_SHOWN])
+    return shown + (f', … (+{len(ids) - MENU_NAMES_SHOWN})' if len(ids) > MENU_NAMES_SHOWN else '')
+
+
+def missing_channel_lines(configs, models, gssc_eeg=(), gssc_one=False, gssc_eog='None', yasa_eeg=None,
+                          yasa_eog='None', yasa_emg=YASA_EMG_DECLARED, file_channels=None):
+    """What the recordings lacking a channel chosen in the menus get, with the rules the models already follow
+    (score_night_gssc / score_night_yasa): [(model, text)], [] when every recording has them. configs = {recording:
+    its tool-2 entry}; file_channels = {recording: channel names of its file} (YASA's chin EMG picked by hand)."""
+    lines = []
+    electrodes = {f: set(eeg_options(c)) for f, c in configs.items()}
+    if 'GSSC' in models:
+        for e in gssc_eeg:
+            lacking = [f for f in configs if e not in electrodes[f]]
+            if lacking:
+                what = 'not scored (one-electrode mode: never substituted)' if gssc_one else 'scored without it'
+                lines.append(('GSSC', f'electrode {e} absent from {len(lacking)} recording(s) ({_named(lacking)}): {what}.'))
+        roles = GSSC_EOG_ROLES.get(gssc_eog, ())
+        if roles:
+            none = [f for f, c in configs.items() if not any(_declared(c, r) for r in roles)]
+            part = [f for f, c in configs.items() if f not in none and not all(_declared(c, r) for r in roles)]
+            if part:
+                lines.append(('GSSC', f'EOG {gssc_eog}: one side not declared in tool 2 for {len(part)} recording(s) '
+                                      f'({_named(part)}): scored with the EOG declared.'))
+            if none:
+                lines.append(('GSSC', f'EOG {gssc_eog}: not declared in tool 2 for {len(none)} recording(s) '
+                                      f'({_named(none)}): scored on EEG only.'))
+    if 'YASA' in models:
+        if yasa_eeg:
+            lacking = [f for f in configs if yasa_eeg not in electrodes[f]]
+            if lacking:
+                lines.append(('YASA', f'electrode {yasa_eeg} absent from {len(lacking)} recording(s) ({_named(lacking)}): '
+                                      'not scored (never substituted).'))
+        roles = YASA_EOG_ROLES.get(yasa_eog, ())
+        lacking = [f for f, c in configs.items() if roles and not all(_declared(c, r) for r in roles)]
+        if lacking:
+            lines.append(('YASA', f'{yasa_eog.lower()} EOG not declared in tool 2 for {len(lacking)} recording(s) '
+                                  f'({_named(lacking)}): scored without EOG.'))
+        if yasa_emg == YASA_EMG_DECLARED:
+            lacking = [f for f, c in configs.items() if not _declared(c, 'emg')]
+            if lacking:
+                lines.append(('YASA', f'no chin EMG declared in tool 2 for {len(lacking)} recording(s) ({_named(lacking)}): '
+                                      'scored without EMG.'))
+        elif yasa_emg not in (None, 'None') and file_channels is not None:
+            lacking = [f for f in configs if yasa_emg not in set(file_channels.get(f, ()))]
+            if lacking:
+                lines.append(('YASA', f'channel {yasa_emg} absent from {len(lacking)} recording(s) ({_named(lacking)}): '
+                                      'scored without EMG.'))
+    return lines
+
+
+def sleepfm_channels_text(cfg_entry, file_channels=()):
+    """The channels SleepFM will read for a recording (score_night_sleepfm's choice, without reading the signal): its
+    AASM electrodes present, both EOG, chin EMG and ECG from tool 2, the respiratory channels found by name among
+    `file_channels` (the names of the file)."""
+    import sleepfm_lib as SFM
+    ctx = cfg_entry.get('context_channels') or {}
+    options = eeg_options(cfg_entry)
+    electrodes = [e for e in AASM_EEG if e in options] or options[:len(SLEEPFM_FALLBACK_BAS)]
+    lower = {n.strip().lower(): n for n in file_channels}
+    resp, used = [], set()
+    for role, aliases in SFM.RESP_ALIASES.items():
+        ch = next((lower[a.strip().lower()] for a in aliases
+                   if a.strip().lower() in lower and lower[a.strip().lower()] not in used), None)
+        if ch is not None:
+            resp.append(f'{role} = {ch}')
+            used.add(ch)
+    eog = [v for v in (ctx.get('eog_left'), ctx.get('eog_right')) if v]
+    return (f'EEG {", ".join(electrodes) or "none"}; EOG {", ".join(eog) or "none"}; chin EMG {ctx.get("emg") or "none"}; '
+            f'ECG {ctx.get("ecg") or "none"}; respiration {", ".join(resp) or "none found by name"}')
+
+
+# ---------------------------------------------------------------------------------------------------------
 # Skip check (tool 3bis Section 3): a night already scored, but with other settings than this run's
 # ---------------------------------------------------------------------------------------------------------
 def stored_reference_choice(params):
@@ -1133,11 +1192,28 @@ def stored_reference_choice(params):
     return REFERENCE_CONTRALATERAL if text.startswith('contralateral') or fell_back else REFERENCE_DECLARED
 
 
+# The context channels each model receives (tool 2's roles): the part of tool 2's context_gain that changes its input
+MODEL_CONTEXT_ROLES = {'GSSC': ('eog_left', 'eog_right'), 'YASA': ('eog_left', 'eog_right', 'emg'),
+                       'SleepFM': ('eog_left', 'eog_right', 'emg', 'ecg')}
+
+
+def model_context_gain(algo, cfg_entry):
+    """Tool 2's context_gain ({role: divide by}) on the context channels the model `algo` receives."""
+    return {role: value for role, value in context_gain(cfg_entry).items() if role in MODEL_CONTEXT_ROLES[algo]}
+
+
+def context_gain_text(block):
+    """A context_gain block in words: 'ecg 100, emg 100', or 'none'."""
+    return ', '.join(f'{role} {float(value):g}' for role, value in sorted((block or {}).items())) or 'none'
+
+
 def stored_scoring_settings(algo, params):
     """The settings a stored scoring was made with ({setting: text}), read from its _scoring_params.json, in
-    the words of tool 3bis's run_settings (the same keys and values)."""
+    the words of tool 3bis's run_settings (the same keys and values). A file without `context_gain` was made
+    without a correction (it did not exist)."""
     settings = {'reference': stored_reference_choice(params),
-                'expert hypnogram': params.get('expert_hypnogram_suffix') or 'none'}
+                'expert hypnogram': params.get('expert_hypnogram_suffix') or 'none',
+                'context channels divided by': context_gain_text(params.get('context_gain'))}
     if algo == 'GSSC':
         settings['mode'] = params.get('scoring_mode')
         settings['EEG'] = ', '.join(sorted(params.get('eeg_used') or [])) or 'none'

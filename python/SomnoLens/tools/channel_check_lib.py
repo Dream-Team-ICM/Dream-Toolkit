@@ -8,7 +8,10 @@
 - context_amplitude_warnings: an ECG or a chin EMG whose amplitude is far from the physiological range. It usually means
   an input with its own gain (an auxiliary input behind an adapter) that the file does not declare. YASA's EMG features
   are absolute amplitudes, so such a gain changes its scoring. The factor given is an order of magnitude only.
+- context_gain_advice: tool 2's line on that amplitude, from the first recordings of a channel configuration, which
+  proposes the factor its 'Divide by' field corrects (edf_io_lib.context_gain).
 
+A context channel is judged after the correction set in tool 2 (divided by its factor), and the warning says so.
 The thresholds come from physiology and were checked on EDF, Curry and BrainVision recordings (SPEC, Channel checks).
 """
 import math
@@ -17,7 +20,7 @@ import numpy as np
 from scipy import signal
 
 import recording_lib as RL
-from edf_io_lib import drop_suffix_duplicates
+from edf_io_lib import context_divisors, context_gain, drop_suffix_duplicates
 
 EPOCH_S = 30
 N_EPOCHS = 60             # epochs sampled over the recording for the EEG and EOG check
@@ -115,6 +118,11 @@ def decade(value):
     return 10.0 ** round(math.log10(value))
 
 
+def divided_text(divide_by):
+    """' after the correction set in tool 2 (divided by 100)', or '' without a correction."""
+    return f' after the correction set in tool 2 (divided by {divide_by:g})' if divide_by != 1 else ''
+
+
 # ---------------------------------------------------------------------------------------------------------
 # Reading
 # ---------------------------------------------------------------------------------------------------------
@@ -136,6 +144,16 @@ def _read(path, originals):
 # ---------------------------------------------------------------------------------------------------------
 # The checks
 # ---------------------------------------------------------------------------------------------------------
+def eeg_pool(path, cfg_entry):
+    """The EEG channels of tool 2's configuration (harmonized names) that the median channel is taken from: the remap
+    without its EOG names, the channels declared as context channels, and the online reference (a flat channel in the
+    data as recorded)."""
+    online, _ = RL.online_reference(path)
+    context = set((cfg_entry.get('context_channels') or {}).values())
+    return [ch for orig, ch in cfg_entry.get('remap', {}).items()
+            if orig not in context and orig != online and not RL.EOG_NAME_RE.search(ch)]
+
+
 def channel_quality_warnings(path, cfg_entry, pool, checked, eog=None):
     """Warnings ([] when there is nothing to say) on the channels a model receives, read as recorded.
 
@@ -145,7 +163,8 @@ def channel_quality_warnings(path, cfg_entry, pool, checked, eog=None):
     channel of the same epoch, so a movement that disturbs every channel does not count: noisy when its standard
     deviation exceeds 3 times that median on more than 20 % of the epochs, dead under 0.1 times. With fewer than 3 EEG
     channels there is no median: only a flat channel is said. The EOG, which eye movements make unlike the EEG: noisy
-    when its median standard deviation exceeds 100 uV, flat under 1 uV on more than 20 % of the epochs."""
+    when its median standard deviation exceeds 100 uV, flat under 1 uV on more than 20 % of the epochs, after the
+    correction set in tool 2 (edf_io_lib.context_gain)."""
     eog = eog or {}
     inverse = {target: orig for orig, target in cfg_entry.get('remap', {}).items()}
     eeg = [ch for ch in dict.fromkeys(list(pool) + list(checked)) if ch in inverse]
@@ -157,6 +176,10 @@ def channel_quality_warnings(path, cfg_entry, pool, checked, eog=None):
         return []
     stds = epoch_std_uV(raw, [name for _, name in columns], epochs)
     index = {key: i for i, (key, _) in enumerate(columns)}
+    divisors = context_divisors(cfg_entry)
+    for label, orig in eog.items():
+        if label in index and orig in divisors:
+            stds[:, index[label]] /= divisors[orig]
     n = len(epochs)
     shares = compared_with_median(stds, [index[ch] for ch in pool if ch in index])
 
@@ -179,56 +202,116 @@ def channel_quality_warnings(path, cfg_entry, pool, checked, eog=None):
         if label not in index:
             continue
         sd = stds[:, index[label]]
+        after = divided_text(divisors.get(orig, 1.0))
         if np.median(sd) > EOG_MAX_UV:
-            warnings.append(f'{label} ({orig}): median standard deviation of {np.median(sd):.0f} uV over {n} epochs '
+            warnings.append(f'{label} ({orig}): median standard deviation of {np.median(sd):.0f} uV over {n} epochs{after} '
                             f'(an EOG stays under {EOG_MAX_UV:g} uV): noisy')
         elif (sd < FLAT_UV).mean() > SHARE:
-            warnings.append(f'{label} ({orig}): flat on {(sd < FLAT_UV).mean():.0%} of {n} epochs (standard deviation '
-                            f'under {FLAT_UV:g} uV): disconnected?')
+            warnings.append(f'{label} ({orig}): flat on {(sd < FLAT_UV).mean():.0%} of {n} epochs{after} (standard '
+                            f'deviation under {FLAT_UV:g} uV): disconnected?')
     return warnings
+
+
+def context_amplitude(path, orig, role, divide_by=1.0):
+    """The amplitude of one context channel `orig` (`role` 'ecg' or 'emg') on 30 epochs spread over the recording, the
+    signal divided by `divide_by` first (tool 2's correction): {'ecg_mV': median R wave peak to peak, 'rate': heart rate
+    per minute} or {'emg_uV': median RMS 10-100 Hz without the mains}, with 'mains_share' and 'mains'. None when the
+    channel is not in the recording or the recording is shorter than one epoch."""
+    try:
+        raw, found = _read(path, [orig])
+    except ValueError:          # none of the channels asked for in the file (the BrainVision reader says so)
+        return None
+    if orig not in found:
+        return None
+    sfreq = raw.info['sfreq']
+    n = int(round(EPOCH_S * sfreq))
+    epochs = sampled_epochs(raw.n_times, sfreq, N_EPOCHS_CONTEXT)
+    if not len(epochs):
+        return None
+    sigs = [raw.get_data(picks=[found[orig]], start=int(e) * n, stop=int(e) * n + n)[0] * 1e6 / divide_by
+            for e in epochs]
+    if role == 'ecg':
+        values = np.array([ecg_amplitude_uV(s, sfreq) for s in sigs], dtype=float)
+        if np.isnan(values[:, 1]).all():
+            measures = {'ecg_mV': np.nan, 'rate': np.nan}
+        else:
+            measures = {'ecg_mV': np.nanmedian(values[:, 0]) / 1000, 'rate': np.nanmedian(values[:, 1])}
+    else:
+        measures = {'emg_uV': float(np.median([emg_rms_uV(s, sfreq) for s in sigs]))}
+    measures['mains_share'], measures['mains'] = mains_share(np.concatenate(sigs), sfreq)
+    return measures
 
 
 def context_amplitude_warnings(path, cfg_entry, roles=('ecg', 'emg')):
     """Warnings ([] when there is nothing to say) on tool 2's context channels `roles` ('ecg', 'emg'), from 30 epochs
-    spread over the recording. ECG: R waves outside 0.1-5 mV peak to peak, or no heart rate in 30-120 per minute (then it
-    does not look like an ECG). Chin EMG: RMS 10-100 Hz without the mains over 100 uV. Both: the mains holding more than
-    half of the power. An amplitude out of range comes with its factor to the typical value (1 mV, 5 uV), rounded to a
-    power of ten: an order of magnitude, to be confirmed on the hardware."""
+    spread over the recording, after the correction set in tool 2 (edf_io_lib.context_gain). ECG: R waves outside 0.1-5
+    mV peak to peak, or no heart rate in 30-120 per minute (then it does not look like an ECG). Chin EMG: RMS 10-100 Hz
+    without the mains over 100 uV. Both: the mains holding more than half of the power. An amplitude out of range comes
+    with its factor to the typical value (1 mV, 5 uV), rounded to a power of ten: an order of magnitude, to be confirmed
+    on the hardware."""
     ctx = cfg_entry.get('context_channels') or {}
     wanted = {role: ctx.get(role) for role in roles if ctx.get(role)}
     if not wanted:
         return []
+    gains = context_gain(cfg_entry)
     warnings = []
     for role, orig in wanted.items():
-        raw, found = _read(path, [orig])
-        if orig not in found:
+        measures = context_amplitude(path, orig, role, gains.get(role, 1.0))
+        if measures is None:
             continue
-        sfreq = raw.info['sfreq']
-        n = int(round(EPOCH_S * sfreq))
-        epochs = sampled_epochs(raw.n_times, sfreq, N_EPOCHS_CONTEXT)
-        if not len(epochs):
-            continue
-        sigs = [raw.get_data(picks=[found[orig]], start=int(e) * n, stop=int(e) * n + n)[0] * 1e6 for e in epochs]
         name = 'ECG' if role == 'ecg' else 'chin EMG'
+        after = divided_text(gains.get(role, 1.0))
         if role == 'ecg':
-            values = np.array([ecg_amplitude_uV(s, sfreq) for s in sigs], dtype=float)
-            amplitude_mV, rate = np.nanmedian(values[:, 0]) / 1000, np.nanmedian(values[:, 1])
+            amplitude_mV, rate = measures['ecg_mV'], measures['rate']
             if np.isnan(rate) or not HEART_RATE_RANGE[0] <= rate <= HEART_RATE_RANGE[1]:
                 found_rate = 'no regular beat found' if np.isnan(rate) else f'heart rate {rate:.0f} per minute'
                 warnings.append(f'{name} ({orig}): does not look like an ECG ({found_rate})')
             elif not ECG_RANGE_MV[0] <= amplitude_mV <= ECG_RANGE_MV[1]:
-                warnings.append(f'{name} ({orig}): R waves of {amplitude_mV:.3g} mV peak to peak, about '
+                warnings.append(f'{name} ({orig}): R waves of {amplitude_mV:.3g} mV peak to peak{after}, about '
                                 f'{decade(amplitude_mV / ECG_TYPICAL_MV):g} times the usual {ECG_TYPICAL_MV:g} mV '
                                 f'(expected {ECG_RANGE_MV[0]:g}-{ECG_RANGE_MV[1]:g} mV): the gain of its input may '
                                 'differ from the one the file declares (order of magnitude, to confirm on the hardware)')
         else:
-            rms = float(np.median([emg_rms_uV(s, sfreq) for s in sigs]))
+            rms = measures['emg_uV']
             if rms > EMG_MAX_UV:
-                warnings.append(f'{name} ({orig}): RMS of {rms:.0f} uV on 10-100 Hz, about {decade(rms / EMG_TYPICAL_UV):g} '
-                                f'times the usual {EMG_TYPICAL_UV:g} uV (expected up to {EMG_MAX_UV:g} uV): the gain of its '
-                                'input may differ from the one the file declares (order of magnitude, to confirm on the '
-                                'hardware)')
-        share, f0 = mains_share(np.concatenate(sigs), sfreq)
-        if share > MAINS_SHARE:
-            warnings.append(f'{name} ({orig}): the mains ({f0} Hz) holds {share:.0%} of its power on 1-100 Hz')
+                warnings.append(f'{name} ({orig}): RMS of {rms:.0f} uV on 10-100 Hz{after}, about '
+                                f'{decade(rms / EMG_TYPICAL_UV):g} times the usual {EMG_TYPICAL_UV:g} uV (expected up to '
+                                f'{EMG_MAX_UV:g} uV): the gain of its input may differ from the one the file declares '
+                                '(order of magnitude, to confirm on the hardware)')
+        if measures['mains_share'] > MAINS_SHARE:
+            warnings.append(f'{name} ({orig}): the mains ({measures["mains"]} Hz) holds {measures["mains_share"]:.0%} '
+                            'of its power on 1-100 Hz')
     return warnings
+
+
+def context_gain_advice(role, label, orig, measures, divide_by=1.0):
+    """Tool 2's line on the amplitude of one context channel of a channel configuration: (kind, text), kind 'ok', 'warn'
+    or 'info' (ui_lib.msg). `measures` = context_amplitude of the first recordings of the configuration, read as recorded
+    (None for a recording without the channel), `divide_by` = the value of its 'Divide by' field. Out of the expected
+    range, it proposes the factor that brings the median recording to the usual amplitude (a power of ten, so the gain
+    of an adapter such as BIP2AUX, 100, comes out as it is); it never sets the field itself."""
+    if role == 'ecg':
+        values = [m['ecg_mV'] / divide_by for m in measures if m is not None and np.isfinite(m['ecg_mV'])]
+        unit, expected, typical, what = 'mV', ECG_RANGE_MV, ECG_TYPICAL_MV, 'R waves of'
+        usual = f'{ECG_RANGE_MV[0]:g}-{ECG_RANGE_MV[1]:g} mV'
+    else:
+        values = [m['emg_uV'] / divide_by for m in measures if m is not None and np.isfinite(m['emg_uV'])]
+        unit, expected, typical, what = 'uV', (0.0, EMG_MAX_UV), EMG_TYPICAL_UV, 'RMS of'
+        usual = f'up to {EMG_MAX_UV:g} uV'
+    n = sum(1 for m in measures if m is not None)
+    if not values:
+        reason = 'no regular beat found' if role == 'ecg' and n else 'not in these recordings'
+        return 'info', f'{label} ({orig}): amplitude not checked ({reason}).'
+    lo, hi = min(values), max(values)
+    span = f'{lo:.3g}' if np.isclose(lo, hi, rtol=0.05) else f'{lo:.3g}-{hi:.3g}'
+    divided = f' divided by {divide_by:g}' if divide_by != 1 else ''
+    out = [v for v in values if not expected[0] <= v <= expected[1]]
+    if not out:
+        return 'ok', f'{label} ({orig}){divided}: {what} {span} {unit} in {len(values)} recording(s) (usual: {usual}).'
+    factor = decade(float(np.median(values)) / typical)
+    if factor == 1:            # out of range, yet not a power of ten away from the usual value: no factor to propose
+        return 'warn', (f'{label} ({orig}){divided}: {what} {span} {unit} in {len(out)}/{len(values)} recording(s) '
+                        f'(usual: {usual}).')
+    return 'warn', (f'{label} ({orig}){divided}: {what} {span} {unit} in {len(out)}/{len(values)} recording(s), about '
+                    f'{factor:g} times the usual {typical:g} {unit}: its input may have a gain the file does not declare '
+                    f'(an adapter such as BIP2AUX amplifies by 100). Set Divide by to {divide_by * factor:g}?')

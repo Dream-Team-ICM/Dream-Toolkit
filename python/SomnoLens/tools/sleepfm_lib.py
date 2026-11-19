@@ -262,9 +262,10 @@ def load_models(root, device='cpu'):
     return _MODELS[key]
 
 
-def run_pass(hdf5_path, models):
+def run_pass(hdf5_path, models, progress=None):
     """One SleepFM pass over a prepared file: (probabilities (steps, 5) in the order W, N1, N2, N3, R, the
-    staging head's BiLSTM output (steps, 128) = the input of its final layer, kept for recalibration B)."""
+    staging head's BiLSTM output (steps, 128) = the input of its final layer, kept for recalibration B).
+    `progress(done, total)` (optional) is called after each 5-min chunk."""
     from torch.utils.data import DataLoader
     device = models['device']
     cfg = models['base_config']
@@ -274,12 +275,14 @@ def run_pass(hdf5_path, models):
     loader = DataLoader(dataset, batch_size=1, shuffle=False, num_workers=0, collate_fn=models['collate_fn'])
     chunks = defaultdict(list)
     with torch.inference_mode():
-        for batch_data, mask_list, _, _, chunk_starts in loader:
+        for k, (batch_data, mask_list, _, _, chunk_starts) in enumerate(loader):
             for modality, values, mask in zip(cfg['modality_types'], batch_data, mask_list):
                 emb = models['base'](values.to(device, dtype=torch.float32),
                                      mask.to(device, dtype=torch.bool))[1].cpu().numpy()
                 for start, e in zip(chunk_starts, emb):
                     chunks[modality].append((int(start), e))
+            if progress is not None:
+                progress(k + 1, len(loader))
     seqs = [np.concatenate([a for _, a in sorted(chunks[m], key=lambda it: it[0])], axis=0)
             for m in cfg['modality_types']]
     steps = min(map(len, seqs))
@@ -302,11 +305,12 @@ def head_parameters(models):
     return fc.weight.detach().cpu().numpy(), fc.bias.detach().cpu().numpy()
 
 
-def score_montage(hdf5_path, models, tail_context_chunks=TAIL_CONTEXT_CHUNKS):
+def score_montage(hdf5_path, models, tail_context_chunks=TAIL_CONTEXT_CHUNKS, progress=None):
     """SleepFM on a prepared file, the last incomplete 5-min chunk covered by a second pass whose chunks end at
     the end of the recording (only its predictions after the first pass are kept, the first one clipped to
-    where the first pass stops). Returns (starts_s, stops_s, probs, features, source per step)."""
-    probs, feats = run_pass(hdf5_path, models)
+    where the first pass stops). Returns (starts_s, stops_s, probs, features, source per step). `progress`: the
+    chunks of the first pass (the tail pass holds a few)."""
+    probs, feats = run_pass(hdf5_path, models, progress=progress)
     starts = np.arange(len(probs)) * float(STEP_S)
     stops = starts + STEP_S
     source = np.array(['primary'] * len(probs), dtype=object)
@@ -350,7 +354,7 @@ def to_epochs(starts, stops, probs, n_epochs, epoch_s=30.0):
 
 
 def score_signals(bas, emg, others, sfreq, root, device='cpu', tail_context_chunks=TAIL_CONTEXT_CHUNKS,
-                  workdir=None):
+                  workdir=None, progress=None):
     """Whole SleepFM scoring of one night from its signals (see write_montage). The prepared 128-Hz file is a
     temporary file, deleted at the end. Returns a dict: starts_s, stops_s, probs (5-s), features, source,
     fc_weight, fc_bias, channels (name -> modality)."""
@@ -367,7 +371,7 @@ def score_signals(bas, emg, others, sfreq, root, device='cpu', tail_context_chun
     tmp = Path(tempfile.mkdtemp(prefix='sleepfm_', dir=workdir))
     try:
         path = write_montage(tmp / 'montage_128hz.hdf5', bas, emg, others, sfreq)
-        starts, stops, probs, feats, source = score_montage(path, models, tail_context_chunks)
+        starts, stops, probs, feats, source = score_montage(path, models, tail_context_chunks, progress=progress)
     finally:
         for f in tmp.glob('*'):
             f.unlink(missing_ok=True)

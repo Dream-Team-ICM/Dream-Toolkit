@@ -241,12 +241,15 @@ def test_tool3bis_on_brainvision_recordings(tmp_path):
         nb.set('cb_yasa', True)
         nb.click('btn_scan')
         scan = nb.value('scan_info.value')
-        emg_choices = nb.value('list(dd_yasa_emg.options)')
-        nb.set('dd_yasa_eog', 'Right')
+        emg_choices = nb.value('[v for _, v in dd_yasa_emg.options]')
+        # phase 5 ter: tool 2 declares one EOG, on the right (IO): the EOG menus offer only what it allows
+        eog_menus = nb.value('([v for _, v in dd_eog.options], dd_eog.value, [v for _, v in dd_yasa_eog.options], '
+                             'dd_yasa_eog.value)')
         nb.click('btn_run')
         text = nb.widget_text()
     assert '2 recording(s): 2 configured in tool 2' in scan, scan
-    assert 'Cz' not in emg_choices                       # the online reference is not in the files
+    assert 'Cz' not in emg_choices and 'EMG' in emg_choices        # the online reference is not in the files
+    assert eog_menus == [['Right only', 'None'], 'Right only', ['Right', 'None'], 'Right']
     assert 'Done: 4 scoring(s) done, 0 failed.' in text, text[-3000:]
     assert 'channel check: C3 (electrode): noisy' in text
     for pid in ('bv01', 'bv02'):

@@ -290,3 +290,18 @@ def test_tool8_exclude_button(chain, data_copy):
         assert 'not excluded' in nb.value('lbl_excl.value')
     reg, _ = P.load_registry(data_copy)
     assert '8_manual' not in set(reg['source'])
+
+
+@pytest.mark.tool8
+def test_tool8_report_bar_stops_turning_when_done(chain, data_copy):
+    """The report writes its last text before its bar ends: 'Done ✅', without the turning sign (phase 5 quater)."""
+    fid = ids(chain)[3]
+    with NotebookSession(pipeline.T8) as nb:
+        nb.pick('fc_data', data_copy)
+        nb.pick('fc_raw', data_copy / 'derivatives' / 'preproc_epo')
+        nb.set('dd_part', fid)
+        nb.click('btn_load')
+        nb.click('btn_run_report')
+        text = nb.value('lbl_report_step.value')
+        assert 'Done ✅' in text and nb.value('UI.SPINNER') not in text, text
+        assert nb.value('prog_report.bar_style') == 'success'

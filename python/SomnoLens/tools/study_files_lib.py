@@ -50,8 +50,9 @@ def _norm(s):
 # ---------------------------------------------------------------------------------------------------------
 # Recordings
 # ---------------------------------------------------------------------------------------------------------
-# BrainVision is found by its .vhdr, never by its .eeg: Nihon Kohden uses that extension too.
-RECORDING_SUFFIXES = ('.edf', '.vhdr')
+# BrainVision is found by its .vhdr, never by its .eeg: Nihon Kohden uses that extension too. Curry by its .cdt (its .dpo
+# and .ceo end differently). In this order of priority when two recordings have the same name.
+RECORDING_SUFFIXES = ('.edf', '.vhdr', '.cdt')
 
 
 def _recordings_on_disk(folder):
@@ -61,10 +62,15 @@ def _recordings_on_disk(folder):
 
 def list_recordings(folder):
     """Every recording under `folder` (recursive), sorted, macOS '._' shadow files excluded. The tools identify a recording
-    by its name: a .vhdr with the name of an .edf is left out (recording_name_conflicts names it)."""
+    by its name: a .vhdr with the name of an .edf, or a .cdt with the name of an .edf or a .vhdr, is left out
+    (recording_name_conflicts names it)."""
     found = _recordings_on_disk(folder)
-    edf_names = {_norm(f.stem) for f in found if f.suffix.lower() == '.edf'}
-    return [f for f in found if f.suffix.lower() == '.edf' or _norm(f.stem) not in edf_names]
+    taken, kept = set(), set()
+    for suffix in RECORDING_SUFFIXES:
+        mine = [f for f in found if f.suffix.lower() == suffix and _norm(f.stem) not in taken]
+        kept |= set(mine)
+        taken |= {_norm(f.stem) for f in mine}
+    return [f for f in found if f in kept]
 
 
 def recording_conflicts_text(folder):
@@ -72,12 +78,13 @@ def recording_conflicts_text(folder):
     conflicts = recording_name_conflicts(folder)
     if not conflicts:
         return ''
-    return (f'{len(conflicts)} recording(s) set aside, because an .edf has the same name (a recording is known by its '
-            'name): ' + ', '.join(f.name for f in conflicts))
+    return (f'{len(conflicts)} recording(s) set aside, because a recording of another format has the same name (a '
+            'recording is known by its name; .edf first, then .vhdr, then .cdt): ' + ', '.join(f.name for f in conflicts))
 
 
 def recording_name_conflicts(folder):
-    """The .vhdr files list_recordings leaves out because an .edf has the same name, to warn about at a scan."""
+    """The recordings list_recordings leaves out because one of another format has the same name, to warn about at a
+    scan."""
     kept = {_norm(f) for f in list_recordings(folder)}
     return [f for f in _recordings_on_disk(folder) if _norm(f) not in kept]
 
@@ -239,6 +246,30 @@ def select_event_suffix(suffix_counts):
     if not suffix_counts:
         return None, 0
     return min(suffix_counts.items(), key=lambda x: (-x[1], len(x[0])))
+
+
+# The event files of a study, declared in tool 4 under 'event_files' of the names registry: the companions read beside
+# a recording for the scored events (the text export, the CSV, the <recording>.XML) and for tool 5's lights (the
+# summary export), e.g. {'txt': '_ScoredEvents_Export.txt', 'csv': None, 'xml': False, 'summary': None}. Tools 4, 5, 7
+# and 0 then look only for the kinds declared, with the suffix recorded. Without a declaration every kind is looked for.
+EVENT_FILES_KEY = 'event_files'
+EVENT_FILE_KINDS = {'txt': 'TXT export', 'csv': 'CSV', 'xml': 'XML', 'summary': 'Summary export (lights)'}
+NO_EVENTS_DECLARED = 'no scored events in this study (declared in tool 4)'
+
+
+def declared_event_files(names):
+    """Tool 4's declaration, as {'txt': suffix or None, 'csv': suffix or None, 'xml': True / False, 'summary': suffix or
+    None} (None / False = the study has none of that kind), or None when the study declares nothing."""
+    value = recorded(names, EVENT_FILES_KEY)
+    if not isinstance(value, dict):
+        return None
+    return {'txt': value.get('txt') or None, 'csv': value.get('csv') or None, 'xml': bool(value.get('xml')),
+            'summary': value.get('summary') or None}
+
+
+def declares_no_events(declared):
+    """True when tool 4 declared that the study has no scored-event file (no text export, CSV or XML)."""
+    return declared is not None and not (declared['txt'] or declared['csv'] or declared['xml'])
 
 
 def output_suffix(names, key, counts, new_default, former_default):

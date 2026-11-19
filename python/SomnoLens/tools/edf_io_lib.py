@@ -1,6 +1,8 @@
 """
 Shared EDF reading helpers: header, channel types, configuration files, hypnogram, scored events,
-context channels. EDF-specific (the Curry twins have tools_curry/curry_header.py + curry_io.py).
+context channels. The signal reads (read_eeg_raw, read_context_raw, the recording start of load_events) go through
+recording_lib, so they read a BrainVision or Curry recording too; their EDF branch is the former reading. recording_lib
+imports this module, so they import it at call time.
 
 Part of the tool-0 redesign (tools/plan_tool0_redesign.md): tool 0 walks ONE participant through the whole
 pipeline and must read a recording exactly like the batch tools do, so the reading code lives here once.
@@ -315,7 +317,11 @@ def phys_bounds_for_remap(edf_path, remap):
     ({original channel name: (phys_min_uV, phys_max_uV)}, {harmonised name: original name}), the two dicts
     quality_lib.compute_channel_metrics takes for bounds_pct. Same read as tool 6 (`include=` the original
     names of the tool-2 remap). Tool 6 keeps its own copy of these lines until it reads the EDF through this
-    library (plan phase 8): its Curry generator replaces that load block."""
+    library (plan phase 8): its Curry generator replaces that load block. A BrainVision recording declares no physical
+    range: no bounds at all (so no bounds_pct), the channels known by their original names."""
+    import recording_lib   # here, not at the top: recording_lib imports this module
+    if recording_lib.file_format(edf_path) != 'edf':
+        return {}, {new: orig for orig, new in remap.items()}
     raw = mne.io.read_raw_edf(str(edf_path), preload=False, encoding='latin-1', include=list(remap.keys()),
                               verbose=False)
     extras = raw._raw_extras[0]
@@ -336,11 +342,17 @@ def read_eeg_raw(edf_path, remap):
     """Tool 7's EEG read ([load] + [B]): `include=` evaluated AT READ TIME with the original names of the
     tool-2 remap (excludes faster off-montage channels, which avoids MNE's partial-read AssertionError and
     keeps the native EEG rate), suffix duplicates dropped, channels renamed to their harmonised names, then
-    the data loaded. Returns the preloaded Raw (no re-reference, no filter)."""
-    raw = mne.io.read_raw_edf(str(edf_path), preload=False, encoding='latin-1',
-                              include=list(remap.keys()), verbose=False)
+    the data loaded. Returns the preloaded Raw (no re-reference, no filter). Any format (recording_lib.read_raw: the
+    online reference of a BrainVision recording is recreated when the remap names it)."""
+    import recording_lib   # here, not at the top: recording_lib imports this module
+    raw = recording_lib.read_raw(edf_path, include=list(remap.keys()))
     raw, _ = drop_suffix_duplicates(raw)
     raw.rename_channels(adapt_remap_dict_to_suffixes(raw, remap))
+    # every channel of the montage as EEG, as an EDF read types them (tool 7 does the same): a BrainVision reader types a
+    # channel without a position (an eye electrode on an EEG input) as misc
+    not_eeg = {ch: 'eeg' for ch, t in zip(raw.ch_names, raw.get_channel_types()) if t != 'eeg'}
+    if not_eeg:
+        raw.set_channel_types(not_eeg, on_unit_change='ignore', verbose=False)
     raw.load_data()
     return raw
 
@@ -406,20 +418,29 @@ def read_edf_start_datetime(edf_path):
         return None
 
 
-def event_companion_paths(edf_path, txt_suffix='_ScoredEvents_Export.txt', csv_suffix='_event_xml.csv'):
-    """Return (txt_path_or_None, csv_path_or_None, xml_path_or_None) for an EDF stem."""
+def read_start_datetime(path):
+    """The start of a recording of any format (recording_lib.read_start_datetime): the EDF header, the .vmrk of a
+    BrainVision recording or the .dpo of a Curry one, None when unknown or when the recording was paused (its clock no
+    longer follows the samples)."""
+    import recording_lib   # here, not at the top: recording_lib imports this module
+    return recording_lib.read_start_datetime(path)
+
+
+def event_companion_paths(edf_path, txt_suffix='_ScoredEvents_Export.txt', csv_suffix='_event_xml.csv', xml=True):
+    """Return (txt_path_or_None, csv_path_or_None, xml_path_or_None) for an EDF stem. A kind the study declares absent
+    in tool 4 (suffix None, xml=False: study_files_lib.declared_event_files) is not looked for."""
     edf_path = Path(edf_path)
-    txt = edf_path.with_name(f'{edf_path.stem}{txt_suffix}')
-    txt = txt if txt.exists() else None
-    csv = edf_path.with_name(f'{edf_path.stem}{csv_suffix}')
-    csv = csv if csv.exists() else None
-    xml = None
-    for cand in (f'{edf_path.name}.XML', f'{edf_path.name}.xml'):
+    txt = edf_path.with_name(f'{edf_path.stem}{txt_suffix}') if txt_suffix else None
+    txt = txt if txt is not None and txt.exists() else None
+    csv = edf_path.with_name(f'{edf_path.stem}{csv_suffix}') if csv_suffix else None
+    csv = csv if csv is not None and csv.exists() else None
+    xml_path = None
+    for cand in ((f'{edf_path.name}.XML', f'{edf_path.name}.xml') if xml else ()):
         p = edf_path.with_name(cand)
         if p.exists():
-            xml = p
+            xml_path = p
             break
-    return txt, csv, xml
+    return txt, csv, xml_path
 
 
 def _events_df_from_txt(txt_path, rec_start):
@@ -531,23 +552,24 @@ def augment_remap_for_manual(event_remap, events_df):
 
 
 def load_events(edf_path, txt_suffix='_ScoredEvents_Export.txt', csv_suffix='_event_xml.csv',
-                manual_suffix='_manual_events.tsv', include_manual=False):
+                manual_suffix='_manual_events.tsv', include_manual=False, xml=True):
     """Load scored events next to the EDF, TXT-first then CSV then *.edf.XML fallback.
     Returns (DataFrame Name/Start/Duration in seconds, source) with source in
     {'txt', 'csv', 'xml'}, or (None, None) when no usable event companion is found.
-    The .txt onsets need the recording-start datetime (header offsets 168/176), so a .txt present
-    without a readable start datetime is skipped in favour of the CSV/XML companions.
+    The .txt onsets need the recording-start datetime (read_start_datetime), so a .txt present
+    without a usable start datetime is skipped in favour of the CSV/XML companions.
+    A kind the study declares absent (suffix None, xml=False) is not looked for (event_companion_paths).
 
     With include_manual=True the tool-8 manual annotations ({stem}_manual_events.tsv) are APPENDED to
     whichever scored source won the priority chain (source tag e.g. 'csv+manual'), or used alone when
     there is no scored companion at all ('manual'). They are an ADDITION to the scored corpus, never an
     alternative source, so the priority chain above is untouched. Default False -> byte-identical to the
     pre-annotation tool."""
-    txt, csv, xml = event_companion_paths(edf_path, txt_suffix, csv_suffix)
+    txt, csv, xml = event_companion_paths(edf_path, txt_suffix, csv_suffix, xml)
     df, source = None, None
     # FIX #10: log exceptions instead of silently swallowing them
     if txt is not None:
-        rec_start = read_edf_start_datetime(edf_path)
+        rec_start = read_start_datetime(edf_path)
         if rec_start is not None:
             try:
                 d = _events_df_from_txt(txt, rec_start)
@@ -588,6 +610,24 @@ def load_events(edf_path, txt_suffix='_ScoredEvents_Export.txt', csv_suffix='_ev
     return df, source
 
 
+def load_event_file(path, recording_path):
+    """One scored-event file chosen by hand (tool 0's menu), read by its kind: a text export (.txt, its clock times
+    placed with the start of `recording_path`), a CSV (.csv) or a Profusion XML (.xml). Returns (DataFrame
+    Name/Start/Duration in seconds, source) like load_events, or (None, None): a .txt without a usable recording start
+    (e.g. a paused BrainVision recording), another kind of file."""
+    path = Path(path)
+    kind = path.suffix.lower()
+    df = None
+    if kind == '.txt':
+        rec_start = read_start_datetime(recording_path)
+        df = _events_df_from_txt(path, rec_start) if rec_start is not None else None
+    elif kind == '.csv':
+        df = _events_df_from_csv(path)
+    elif kind == '.xml':
+        df = _events_df_from_xml(path)
+    return (df, kind[1:]) if df is not None else (None, None)
+
+
 def load_event_remap(path):
     """Lenient loader for event_remap.json (strict parse, then repair one trailing comma
     before a closing } or ]). Returns {raw_label: canonical_label_or_None}."""
@@ -607,12 +647,39 @@ CONTEXT_ROLE_TYPE = {'eog_left': 'eog', 'eog_right': 'eog', 'emg': 'emg', 'ecg':
 CONTEXT_ROLE_LABEL = {'eog_left': 'EOG-L', 'eog_right': 'EOG-R', 'emg': 'EMG', 'ecg': 'ECG'}
 
 
-def read_context_raw(edf_path, ctx_map, eeg_sfreq):
+def context_gain(cfg_entry):
+    """Tool 2's `context_gain` block: {role: divide by}, for a context channel recorded through an input with its own gain
+    that the file does not declare (an auxiliary input behind an adapter such as BIP2AUX, gain 100, reads 100 times too
+    large). Only the roles that have a context channel and a factor other than 1 (a factor that is not a positive number
+    is ignored); {} without the block. Every tool that reads a context channel divides it by this factor first, before
+    any derivation."""
+    ctx = (cfg_entry or {}).get('context_channels') or {}
+    gains = {}
+    for role, value in ((cfg_entry or {}).get('context_gain') or {}).items():
+        try:
+            value = float(value)
+        except (TypeError, ValueError):
+            continue
+        if ctx.get(role) and value > 0 and value != 1:
+            gains[role] = value
+    return gains
+
+
+def context_divisors(cfg_entry):
+    """context_gain by channel: {name in the recording: divide by}."""
+    ctx = (cfg_entry or {}).get('context_channels') or {}
+    return {ctx[role]: value for role, value in context_gain(cfg_entry).items()}
+
+
+def read_context_raw(edf_path, ctx_map, eeg_sfreq, cfg_entry=None):
     """The declared context channels ({role: original EDF name}, tool 2's `context_channels` block), read
     like tool 7 does: include= at read time, renamed to their role labels (EOG-L / EOG-R / EMG / ECG),
     resampled to the EEG rate, then filtered for DISPLAY per role (AASM-like: EOG band-pass 0.3-35 Hz,
     EMG high-pass 10 Hz, ECG band-pass 0.5-40 Hz). Returns the Raw, or None when no declared channel is
-    in the file."""
+    in the file. Any format; given tool 2's entry `cfg_entry`, a channel is first divided by tool 2's factor
+    (context_gain), and an EOG recorded against a BrainVision online reference gets tool 2's reference, like
+    the EEG it is shown under (recording_lib.eog_reference)."""
+    import recording_lib   # here, not at the top: recording_lib imports this module
     orig_to_role = {}
     for _role in CONTEXT_ROLES:
         _orig = (ctx_map or {}).get(_role)
@@ -620,18 +687,32 @@ def read_context_raw(edf_path, ctx_map, eeg_sfreq):
             orig_to_role[_orig] = _role
     if not orig_to_role:
         return None
-    ctx_probe = mne.io.read_raw_edf(str(edf_path), preload=False, encoding='latin-1',
-                                    include=list(orig_to_role.keys()), verbose=False)
+    eog = {CONTEXT_ROLE_LABEL[r]: o for o, r in orig_to_role.items() if r in ('eog_left', 'eog_right')}
+    refs = recording_lib.eog_reference(edf_path, cfg_entry, eog, False)[0] if cfg_entry and eog else {}
+    inverse = {target: orig for orig, target in ((cfg_entry or {}).get('remap') or {}).items()}
+    ref_orig = [inverse[h] for h in dict.fromkeys(h for r in refs.values() for h in r) if h in inverse]
+    ctx_probe = recording_lib.read_raw(edf_path, include=list(orig_to_role.keys()) + ref_orig)
     ctx_probe, _ = drop_suffix_duplicates(ctx_probe)
     present = [o for o in orig_to_role if o in ctx_probe.ch_names]
     if not present:
         return None
-    ctx_raw = ctx_probe.pick(present)
+    ctx_raw = ctx_probe.pick(present + [o for o in ref_orig if o in ctx_probe.ch_names and o not in present])
     ctx_raw.load_data()
+    for orig, value in context_divisors(cfg_entry).items():
+        if orig in present:
+            ctx_raw.apply_function(lambda x, value=value: x / value, picks=[orig], channel_wise=True)
+    for label, ref in refs.items():
+        ref_present = [inverse[h] for h in ref if inverse[h] in ctx_raw.ch_names]
+        if eog[label] in present and ref_present:
+            mean_ref = ctx_raw.get_data(picks=ref_present).mean(axis=0)
+            ctx_raw.apply_function(lambda x: x - mean_ref, picks=[eog[label]], channel_wise=True)
+    references_read = [ch for ch in ctx_raw.ch_names if ch not in present]
+    if references_read:
+        ctx_raw.drop_channels(references_read)
     ctx_raw.rename_channels({o: CONTEXT_ROLE_LABEL[orig_to_role[o]] for o in present})
     ctx_raw.set_channel_types(
         {CONTEXT_ROLE_LABEL[orig_to_role[o]]: CONTEXT_ROLE_TYPE[orig_to_role[o]] for o in present},
-        verbose=False)
+        on_unit_change='ignore', verbose=False)
     if not np.isclose(ctx_raw.info['sfreq'], eeg_sfreq):
         ctx_raw.resample(eeg_sfreq, npad='auto', verbose=False)
     _nyq = ctx_raw.info['sfreq'] / 2.0
@@ -699,3 +780,53 @@ def custom_stage_style(custom_stages):
     ytick_pos = [y for _, y in ordered]
     ytick_labels = ['REM' if s == 'R' else s for s, _ in ordered]
     return stage_y, stage_colors, ytick_pos, ytick_labels
+
+
+# ---------------------------------------------------------------------------------------------------------
+# The hypnogram: one look for every hypnogram of the toolkit (SPEC *Cross-cutting -> Display conventions*). Tools 3bis,
+# 5, 6, 7, 8, 8bis, 9 and 0 draw it with draw_hypnogram; an overlay on a coloured image (tool 0's navigator, tool 3bis's
+# hypnodensity) keeps the contrasting colour it needs there.
+# ---------------------------------------------------------------------------------------------------------
+HYPNO_LINE_COLOR = '#555555'
+HYPNO_LINE_WIDTH = 1.2
+HYPNO_REM_COLOR = '#c0392b'
+
+
+def draw_hypnogram(ax, x_edges, stages, custom_stages=(), colors=None, x_axis=True, fontsize=8):
+    """Draws `stages` (one label per epoch) as the toolkit's hypnogram in `ax`: a grey step line, REM in red and each
+    custom stage in its colour at the line's own width (never bold), the stage names on the left axis (W at the top,
+    N3 at the bottom, the custom stages below it, custom_stage_style), no frame at the top and on the right.
+    `x_edges` = len(stages) + 1 edges in the figure's unit (epoch index, hours, minutes). A label that is no stage (an
+    epoch left out, an unknown label) leaves a gap. `colors` = {custom stage: colour} replacing the default ones (tool
+    3bis's MT and other, grey). `x_axis=False`: no bottom frame and no x ticks, for a strip above a panel that carries
+    the time axis (with shared axes the panel below keeps its ticks)."""
+    stage_y, stage_colors, ytick_pos, ytick_labels = custom_stage_style(list(custom_stages))
+    stage_colors.update(colors or {})
+    labels = np.array([str(s) for s in stages], dtype=object)
+    y = np.array([stage_y.get(s, np.nan) for s in labels], dtype=float)
+    x = np.asarray(x_edges, dtype=float)
+    ax.step(x, np.append(y, y[-1] if len(y) else np.nan), where='post', color=HYPNO_LINE_COLOR,
+            lw=HYPNO_LINE_WIDTH, zorder=2)
+    for stage in ['R'] + list(custom_stages):
+        colour = HYPNO_REM_COLOR if stage == 'R' else stage_colors.get(stage)
+        for i in np.flatnonzero(labels == stage):
+            ax.plot(x[i:i + 2], [stage_y[stage]] * 2, color=colour, lw=HYPNO_LINE_WIDTH, solid_capstyle='butt',
+                    zorder=3)
+    ax.set_yticks(ytick_pos)
+    ax.set_yticklabels(ytick_labels, fontsize=fontsize)
+    ax.set_ylim(min(ytick_pos) - 0.6, max(ytick_pos) + 0.6)
+    if len(x):
+        ax.set_xlim(x[0], x[-1])
+    ax.spines['top'].set_visible(False)
+    ax.spines['right'].set_visible(False)
+    if not x_axis:
+        ax.spines['bottom'].set_visible(False)
+        ax.tick_params(axis='x', which='both', bottom=False, labelbottom=False)
+
+
+# ---------------------------------------------------------------------------------------------------------
+# High-density montages: one threshold for every display library (qc_rejected_epochs_lib, preprocessing_lib,
+# spectral_lib, quality_lib). Above it the figures switch to their dense layout; at or below it they are drawn
+# as before, so a 3-6 channel PSG study is unchanged. Here because every library already imports this module.
+# ---------------------------------------------------------------------------------------------------------
+HD_CHANNEL_THRESHOLD = 12

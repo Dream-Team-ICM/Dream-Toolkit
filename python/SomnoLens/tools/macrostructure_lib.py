@@ -31,6 +31,8 @@ from edf_io_lib import (read_edf_start_datetime, event_companion_paths, _events_
                         _events_df_from_xml, _events_df_from_manual, augment_remap_for_manual, load_events,
                         load_event_remap)
 from edf_io_lib import (load_custom_stages, parse_custom_field)   # one copy, in edf_io_lib (same folder)
+from edf_io_lib import draw_hypnogram                               # the toolkit's hypnogram, one look everywhere
+import recording_lib as RL   # one way to read a recording (EDF, BrainVision)
 
 try:
     import openpyxl                     # noqa: F401  (pandas needs it to read/write .xlsx)
@@ -304,6 +306,26 @@ def read_edf_header_info(edf_path):
             'samples_per_record': samples_per_record, 'sfreq_per_ch': sfreq, 'dims': dims}
 
 
+def read_header_info(path):
+    """read_edf_header_info for a recording of any format: an EDF by its binary header (unchanged), a BrainVision or Curry
+    recording through recording_lib (one sample per data record, the channels of the file only). Raises when the
+    recording start is unknown or unusable (a BrainVision recording paused, whose clock no longer follows the samples):
+    the lights and the scored-event exports are clock times."""
+    if RL.file_format(path) == 'edf':
+        return read_edf_header_info(path)
+    header = RL.read_header(path)
+    start_dt = RL.read_start_datetime(path)
+    if start_dt is None:
+        raise ValueError('no usable recording start in the .vmrk or .dpo (no date, or the recording was paused)')
+    keep = [i for i, in_file in enumerate(header['in_file']) if in_file]
+    labels = [header['channel'][i] for i in keep]
+    sfreq = float(header['sfreq'])
+    return {'start_dt': start_dt, 'duration_s': float(header['duration_s']), 'n_data_records': int(header['n_times']),
+            'record_duration_s': 1.0 / sfreq, 'n_channels': len(labels), 'ch_names': labels,
+            'samples_per_record': [1] * len(labels), 'sfreq_per_ch': {lab: sfreq for lab in labels},
+            'dims': [header['dimension'][i] for i in keep]}
+
+
 def find_channel(ch_names, pattern):
     """First channel label matching a case-insensitive regex, or None."""
     rx = re.compile(pattern, re.IGNORECASE)
@@ -384,9 +406,9 @@ def load_lights_from_summary_txt(path, col='Luminosité'):
 
 
 def detect_lights_from_channel(edf_path, ch_name, epoch_s):
-    """Per-epoch light state from an EDF step channel (Compumedics 'Light': 1 = ON, 0 = OFF).
+    """Per-epoch light state from a step channel of the recording (Compumedics 'Light': 1 = ON, 0 = OFF).
     Only that channel is read (`include=` at read time). Returns a boolean array (True = ON)."""
-    raw = mne.io.read_raw_edf(str(edf_path), include=[ch_name], preload=True, verbose=False)
+    raw = RL.read_raw(edf_path, include=[ch_name], add_online_reference=False, preload=True)
     x = raw.get_data()[0]
     sf = raw.info['sfreq']
     n_per_epoch = int(round(epoch_s * sf))
@@ -790,7 +812,7 @@ def compute_odi(events_df, remap, tst_min, threshold_pct, xml_path, cls, off_idx
 def load_spo2_signal(edf_path, ch_name):
     """Read ONE channel (`include=` at read time) -> (values in %, sfreq). A channel stored as a
     fraction (max <= 1) is rescaled to %, which the caller reports."""
-    raw = mne.io.read_raw_edf(str(edf_path), include=[ch_name], preload=True, verbose=False)
+    raw = RL.read_raw(edf_path, include=[ch_name], add_online_reference=False, preload=True)
     x = raw.get_data()[0].astype(float)
     sf = float(raw.info['sfreq'])
     rescaled = False
@@ -902,7 +924,8 @@ def run_checks(metrics, extras, lights, n_hyp, cls, event_info):
                               f'Re-map them with tool 3 if they should be scored as a stage.'})
     if event_info.get('source') is None and event_info.get('enabled'):
         out.append({'check': 'events_source', 'status': 'info',
-                    'detail': 'no scored-event companion found - event indices are NaN'})
+                    'detail': ('no scored events in this study (declared in tool 4)' if event_info.get('declared_none')
+                               else 'no scored-event companion found') + ' - event indices are NaN'})
     if event_info.get('n_bad_onset'):
         out.append({'check': 'event_onsets_in_recording', 'status': 'warning',
                     'detail': f"{event_info['n_bad_onset']} event(s) with a missing / unreadable onset "
@@ -1387,7 +1410,7 @@ def _clock(start_dt, epoch_idx, epoch_s):
 
 
 def compute_recording(p, cfg, custom_stages, event_remap, subject, hypno_suffix, evt_txt_suffix,
-                      evt_csv_suffix, phase=None, stages=None):
+                      evt_csv_suffix, phase=None, stages=None, evt_xml=True):
     """The computation of tool 5's process_participant for one recording, moved unchanged: EDF header,
     hypnogram, lights-off / lights-on, macrostructure, scored events (+ ODI), SpO2 (T90 / T88), consistency
     checks and provenance. It writes nothing (tool 5 writes the tables, tool 0 shows them).
@@ -1395,6 +1418,7 @@ def compute_recording(p, cfg, custom_stages, event_remap, subject, hypno_suffix,
     `cfg`: tool 5's parameters (get_params); `subject`: its participant-table row or None;
     `phase(name, add)`: progress callback (tool 5's progress bar), None = silent; `stages`: a hypnogram
     to use instead of the file (tool 0: the hypnogram in use, rescorings included). A fatal step raises.
+    A kind of event file the study declares absent in tool 4 is not looked for (suffix None, evt_xml=False).
     Returns a dict: metrics, checks, provenance, lights, extras, event_info, cls, stages, header, events (the
     scored events as read, Name / Start / Duration, or None)."""
     if phase is None:
@@ -1404,7 +1428,7 @@ def compute_recording(p, cfg, custom_stages, event_remap, subject, hypno_suffix,
     epoch_s = cfg['epoch_s']
     # --- header + hypnogram -------------------------------------------------
     phase('reading the EDF header', 0)
-    header = p.get('header') or read_edf_header_info(p['edf'])
+    header = p.get('header') or read_header_info(p['edf'])
     phase('loading the hypnogram', COST_HEADER)
     if stages is None:
         if p.get('hypno') is None:
@@ -1435,11 +1459,13 @@ def compute_recording(p, cfg, custom_stages, event_remap, subject, hypno_suffix,
     phase('counting the scored events', COST_LIGHTS)
     event_info = {'enabled': cfg['events'] or cfg['odi'], 'source': None, 'n_total': 0,
                   'n_outside': 0, 'n_bad_onset': 0, 'n_unmapped': 0}
+    if not (evt_txt_suffix or evt_csv_suffix or evt_xml):
+        event_info['declared_none'] = True     # tool 4: the study has no scored-event file
     odi_rule = ''
     events_df = None                    # returned for the night figure of the per-recording report
     if cfg['events'] or cfg['odi']:
         remap = event_remap
-        events_df, source = load_events(p['edf'], evt_txt_suffix, evt_csv_suffix)
+        events_df, source = load_events(p['edf'], evt_txt_suffix, evt_csv_suffix, xml=evt_xml)
         event_info['source'] = source
         if events_df is not None:
             event_info['n_total'] = int(len(events_df))
@@ -1559,7 +1585,6 @@ def plot_night_overview(stages, custom_stages, events=None, manual=None, lights=
     `events`: events_for_display's table. `manual`: manual annotations (onset_s), drawn as triangles on their
     own row. `lights` / `extras` (compute_recording): the time in bed shaded (lights-off to lights-on, the
     window the event indices count over), sleep onset and the end of the sleep period."""
-    from quality_lib import custom_stage_style, REM_COLOR      # the toolkit's hypnogram conventions
     stages = np.asarray(stages)
     n = len(stages)
     rows = []                                                      # (label, colour, events of the row)
@@ -1573,26 +1598,18 @@ def plot_night_overview(stages, custom_stages, events=None, manual=None, lights=
     n_rows = max(1, len(rows) + (1 if has_manual else 0))
     fig, (ax0, ax1) = plt.subplots(2, 1, figsize=(13, 2.4 + 0.3 * n_rows), sharex=True,
                                    gridspec_kw={'height_ratios': [2.2, max(0.9, 0.3 * n_rows)], 'hspace': 0.08})
-    stage_y, colors, ytp, ytl = custom_stage_style(custom_stages)
     hours = np.arange(n + 1) * epoch_s / 3600
     if lights is not None:
         for ax in (ax0, ax1):
             ax.axvspan(lights['off_idx'] * epoch_s / 3600, lights['on_idx'] * epoch_s / 3600, color='#fff3cd', zorder=0,
                        label=f"in bed (lights-off / on from: {lights['source']})" if ax is ax0 else None)
-    y = np.array([stage_y.get(s, np.nan) for s in stages], dtype=float)
-    ax0.step(hours, np.append(y, y[-1] if n else np.nan), where='post', color='#555555', lw=1.1, zorder=2)
-    for st in ['R'] + list(custom_stages):
-        for i in np.where(stages == st)[0]:
-            ax0.plot(hours[i:i + 2], [stage_y[st]] * 2, color=REM_COLOR if st == 'R' else colors[st], lw=1.1,
-                     solid_capstyle='butt', zorder=3)
+    # the toolkit's hypnogram; the event rows below carry the time axis
+    draw_hypnogram(ax0, hours, stages, custom_stages, x_axis=False, fontsize=8)
     if extras and extras.get('onset_idx_abs') is not None:
         ax0.axvline(extras['onset_idx_abs'] * epoch_s / 3600, color='#2e7d32', lw=1.5, label='sleep onset')
     if extras and extras.get('last_sleep_idx_abs') is not None:
         ax0.axvline((extras['last_sleep_idx_abs'] + 1) * epoch_s / 3600, color='#6a1b9a', lw=1.5, ls='--',
                     label='end of the sleep period')
-    ax0.set_yticks(ytp)
-    ax0.set_yticklabels(ytl, fontsize=8)
-    ax0.set_ylim(min(ytp) - 0.6, max(ytp) + 0.6)
     if title:
         ax0.set_title(title, loc='left', fontsize=10)
     if lights is not None or extras:

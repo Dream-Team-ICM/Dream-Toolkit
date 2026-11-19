@@ -22,6 +22,7 @@ from specparam import SpectralModel
 from statsmodels.nonparametric.smoothers_lowess import lowess
 from edf_io_lib import (   # one copy, in edf_io_lib (same folder)
     BASE_STAGE_COLORS, CUSTOM_STAGE_PALETTE, load_custom_stages, parse_custom_field, custom_stage_style,
+    HD_CHANNEL_THRESHOLD, draw_hypnogram,
 )
 
 
@@ -253,53 +254,37 @@ def plot_rejection_heatmap(combined_matrix, ch_names, hypno_epochs, file_id, cus
     bounds = np.arange(-0.5, 8.5, 1)
     norm   = mcolors.BoundaryNorm(bounds, cmap.N)
 
-    # Hypnogram heights: W at top (4), N3 at bottom (0); custom stages stacked below N3.
-    STAGE_H, _stage_colors, _ytick_pos, _ytick_labels = custom_stage_style(custom_stages)
-    _floor = min(_ytick_pos) - 1
-    hypno_y = np.array([STAGE_H.get(s, _floor) for s in hypno_epochs])
-
     n_channels   = len(ch_names)
     n_epochs     = combined_matrix.shape[0]
     # Pair-based: fraction of (epoch x channel) cells flagged (not '>=1 bad channel per epoch',
     # which over-counts). Matches the per-stage table denominator (n_epochs * n_channels).
     pct_rejected = 100.0 * (combined_matrix > 0).mean()
 
-    fig_w = max(8, min(n_epochs / 6, 20))
-    # Fixed-ish height: rows get thinner as the montage grows (capped so a 32-channel Curry
-    # montage stays compact instead of a ~16 in tall figure). Unchanged for <=14 channels.
-    fig_h = max(3, min(0.45 * n_channels + 2.0, 8.0))
+    if n_channels > HD_CHANNEL_THRESHOLD:
+        # High-density montage: the hypnogram strip keeps a fixed height (1 in, as in tool 8bis's heatmap), each
+        # channel row 0.14 in and the width at most 14 in (the labels keep their size). At 12 channels or fewer, unchanged.
+        fig_w = max(8, min(n_epochs / 6, 14))
+        h_hyp, h_mat = 1.0, min(max(0.14 * n_channels, 0.8), 12.0)
+        fig_h, height_ratios = h_hyp + h_mat + 0.8, [h_hyp, h_mat]
+    else:
+        # Fixed-ish height: rows get thinner as the montage grows. Unchanged for <=14 channels.
+        fig_w = max(8, min(n_epochs / 6, 20))
+        fig_h, height_ratios = max(3, min(0.45 * n_channels + 2.0, 8.0)), [1.2, n_channels]
+    # The colour bar has its own column (as in tool 8's heatmap): taken from the matrix alone, it made the hypnogram wider
+    # than the epochs under it.
     fig, axes = plt.subplots(
-        2, 1, figsize=(fig_w, fig_h),
-        gridspec_kw={'height_ratios': [1.2, n_channels], 'hspace': 0.04}
+        2, 2, figsize=(fig_w, fig_h),
+        gridspec_kw={'height_ratios': height_ratios, 'width_ratios': [fig_w, 0.2], 'hspace': 0.04, 'wspace': 0.02}
     )
+    axes[0][1].set_axis_off()
 
-    # --- Hypnogram strip ---
-    ax_hyp = axes[0]
-    x_step = np.arange(n_epochs + 1)
-    y_step = np.append(hypno_y, hypno_y[-1])
-
-    # Full step line in gray
-    ax_hyp.step(x_step, y_step, where='post', color='#555555', linewidth=1.2)
-
-    # REM in red; each custom stage highlighted in its own colour (at the line's width: the toolkit's
-    # discreet convention).
-    for _s in (['R'] + list(custom_stages)):
-        _col = '#c0392b' if _s == 'R' else _stage_colors.get(_s)
-        for ei in range(n_epochs):
-            if hypno_epochs[ei] == _s:
-                ax_hyp.plot([ei, ei + 1], [STAGE_H[_s], STAGE_H[_s]],
-                            color=_col, linewidth=1.2, solid_capstyle='butt')
-
-    ax_hyp.set_yticks(_ytick_pos)
-    ax_hyp.set_yticklabels(_ytick_labels, fontsize=7)
-    ax_hyp.set_ylim(min(_ytick_pos) - 0.8, max(_ytick_pos) + 0.8)
-    ax_hyp.set_xlim(0, n_epochs)
-    ax_hyp.set_xticks([])
-    for sp in ['top', 'right', 'bottom']:
-        ax_hyp.spines[sp].set_visible(False)
+    # --- Hypnogram strip (the toolkit's hypnogram, edf_io_lib.draw_hypnogram), with the title above it ---
+    ax_hyp = axes[0][0]
+    draw_hypnogram(ax_hyp, np.arange(n_epochs + 1), hypno_epochs, custom_stages, x_axis=False, fontsize=7)
+    ax_hyp.set_title(f'{file_id}: {pct_rejected:.0f}% of flagged epochs', fontsize=11, pad=6)
 
     # --- Main heatmap ---
-    ax = axes[1]
+    ax = axes[1][0]
     im = ax.pcolormesh(
         np.arange(n_epochs + 1), np.arange(n_channels + 1),
         combined_matrix.T,  # (n_channels, n_epochs)
@@ -313,12 +298,10 @@ def plot_rejection_heatmap(combined_matrix, ch_names, hypno_epochs, file_id, cus
     for sp in ['top', 'right']:
         ax.spines[sp].set_visible(False)
 
-    cbar = fig.colorbar(im, ax=ax, orientation='vertical',
-                        fraction=0.02, pad=0.01, ticks=np.arange(len(LABELS)))
+    cbar = fig.colorbar(im, cax=axes[1][1], orientation='vertical', ticks=np.arange(len(LABELS)))
     cbar.ax.set_yticklabels(LABELS, fontsize=7)
 
-    fig.suptitle(f'{file_id}: {pct_rejected:.0f}% of flagged epochs',
-                 fontsize=11, y=1.01)
+    # The title sits on the hypnogram (as in tool 8's heatmap): a figure title floated an inch above a tall dense figure.
     fig.tight_layout()
     return fig
 
@@ -798,10 +781,11 @@ def set_bads_aside(epochs):
     all_channel_order = None
     if bad_names:
         all_channel_order = list(epochs.ch_names)
+        # event_id lists every stage code (W to R) even when a stage has no epoch (a nap without N3): MNE would refuse it
         bad_epochs = mne.EpochsArray(
             epochs.get_data(picks=bad_names),
             mne.pick_info(epochs.info, mne.pick_channels(epochs.ch_names, bad_names, ordered=True)),
-            events=epochs.events, tmin=epochs.tmin, event_id=epochs.event_id, verbose=False)
+            events=epochs.events, tmin=epochs.tmin, event_id=epochs.event_id, on_missing='ignore', verbose=False)
         epochs.drop_channels(bad_names)
     return bad_names, bad_epochs, all_channel_order
 
@@ -952,9 +936,10 @@ def settings_differences(sidecar, current):
     """What separates a participant's params sidecar from this run's settings (`current`: the sidecar's keys, methods_run
     without the event method), as (setting, recorded, this run) rows. [] when nothing does.
     A key an older sidecar does not hold is not compared, except the notch and the PSD smoothing, which did not exist
-    (absent = off), and the epoch length (absent = 30 s). A threshold counts only if its method ran on both sides. The
-    event method varies with each file's annotations: the events are compared through the types asked for. Among the
-    channels, only those the sidecar names: a reference channel has left the epochs before it is written."""
+    (absent = off), the epoch length (absent = 30 s) and tool 2's correction of the context channels (`context_gain`,
+    absent = none). A threshold counts only if its method ran on both sides. The event method varies with each file's
+    annotations: the events are compared through the types asked for. Among the channels, only those the sidecar names:
+    a reference channel has left the epochs before it is written."""
     rows = []
 
     def compare(setting, recorded, now):
@@ -978,6 +963,9 @@ def settings_differences(sidecar, current):
 
     def reference(value):
         return value if isinstance(value, str) else ', '.join(value) or 'none'
+
+    def gain(block):
+        return ', '.join(f'{role} {float(value):g}' for role, value in sorted((block or {}).items())) or 'none'
 
     compare('epoch length', f"{sidecar.get('epoch_length_s', 30):g} s", f"{current['epoch_length_s']:g} s")
     if 'resample' in sidecar:
@@ -1019,6 +1007,7 @@ def settings_differences(sidecar, current):
     if 'manual_events' in sidecar:
         compare('manual annotations', 'on' if sidecar['manual_events'] else 'off',
                 'on' if current['manual_events'] else 'off')
+    compare('context channels divided by', gain(sidecar.get('context_gain')), gain(current.get('context_gain')))
     if sidecar.get('channels'):
         named = set(sidecar['channels']) | set(sidecar.get('bad_channels') or [])
         compare('channels kept', ', '.join(sorted(sidecar['channels'])),
