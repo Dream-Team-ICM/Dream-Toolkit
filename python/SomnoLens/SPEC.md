@@ -3597,6 +3597,11 @@ the data**: groups (sub-folders, name prefixes), several recordings per particip
 companion files present per recording, and the files that break the convention. The audit lists what the current
 code assumes and where it fails on real databases; the inferred structure could then pre-fill a participant table
 for the later tools.
+A first failure, fixed on 2026-11-19: with the groups given by `participants.tsv` or by several sub-folders, the
+session step stopped the run (`count_precomp` was computed only for the groups taken from the file names). The
+counts are now computed for every organisation, and the group + session step is non-fatal (a ⚠, both columns left
+empty, the inspection goes on); `test_tool1_reads_the_groups_from_folders_or_table` covers both organisations.
+Still to audit: one folder per participant (`sub-01/`, `sub-02/`…) is read as one group per folder.
 this part could also checks the companion files (hypno, events etc), and gives warning if some are missing
 
 ### Tool 7: band-pass phase (TODO, to decide)

@@ -167,7 +167,9 @@ The chain starts from data already prepared by tools 1 to 4. Three short runs ch
 synthetic database:
 
 - **Tool 1** (header inspection): 4 files of 4 channels at 256 Hz, the Fp1 recorded with a ±50 µV range
-  reported as a too-narrow dynamic range, every header anonymous.
+  reported as a too-narrow dynamic range, every header anonymous. The same files placed in two sub-folders, then
+  in one folder with a `group` column in `participants.tsv`: both runs write the full table with the right groups
+  and a single session (both stopped before the 2026-11-19 fix).
 - **Tool 3** (hypnogram remapping): a raw hypnogram in the Compumedics style (stages coded `0` to `5`, N3
   sometimes coded `4` as in the old R&K stage 4, unscored `?` epochs) is remapped. The result must give back
   the generated AASM stages epoch by epoch, and the `?` in the middle of the night must be listed for review.

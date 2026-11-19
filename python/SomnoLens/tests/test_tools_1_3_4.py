@@ -1,7 +1,8 @@
 """Small runs of the preparation tools 1, 3 and 4 on a fresh synthetic database, with known answers.
 
     tool 1   header inspection: 4 files x 4 channels at 256 Hz, the clipped Fp1 of sim01 (physical range
-             +-50 uV) reported as a bad dynamic range, every header anonymous
+             +-50 uV) reported as a bad dynamic range, every header anonymous; groups read from two
+             sub-folders or from the group column of participants.tsv
     tool 3   hypnogram remapping: a raw Compumedics-style export (0-5 / W / R / ?) is written from the
              generated hypnogram; the remapped file must give back the AASM stages epoch by epoch, and the
              mid-night '?' must be listed for review
@@ -11,6 +12,7 @@
 Tools 0 and 2 stay at the quick level (they execute): too interactive for a useful run.
 """
 import json
+import shutil
 from pathlib import Path
 
 import numpy as np
@@ -50,6 +52,29 @@ def test_tool1_inspects_the_headers(fresh_db):
 
     anon = pd.read_csv(out / 'anonymization_check_edf.tsv', sep='\t')
     assert len(anon) == 4 and anon['header_anonymized'].all()
+
+
+@pytest.mark.tool1
+@pytest.mark.parametrize('organisation', ['subfolders', 'participants_table'])
+def test_tool1_reads_the_groups_from_folders_or_table(fresh_db, tmp_path, organisation):
+    """Groups from two sub-folders, or from the group column of participants.tsv: the session step used to stop the
+    run in both cases (UnboundLocalError on count_precomp), before the full table was written."""
+    groups = {IDS[0]: 'groupA', IDS[1]: 'groupA', IDS[2]: 'groupB', IDS[3]: 'groupB'}
+    study = tmp_path / 'study'
+    for fid, group in groups.items():
+        folder = study / group if organisation == 'subfolders' else study
+        folder.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(fresh_db / f'{fid}.edf', folder / f'{fid}.edf')
+    if organisation == 'participants_table':
+        (study / 'participants.tsv').write_text(
+            'participant_id\tgroup\n' + ''.join(f'{fid}\t{group}\n' for fid, group in groups.items()), encoding='utf-8')
+
+    with NotebookSession(T1) as nb:
+        nb.pick('chooser', study)
+        nb.click('run_button')
+    full = pd.read_csv(study / 'reports_inspection' / 'FULL_summary_table_edf.tsv', sep='\t', dtype=str)
+    assert full.groupby('subject')['group'].first().to_dict() == groups
+    assert full['session'].isna().all()          # one recording per participant: a single session
 
 
 # ----------------------------------------------------------------------------------------------- tool 3
