@@ -2,7 +2,7 @@
 
 ## Project overview
 
-**SomnoLens** is a research toolkit for sleep scientists to **inspect, harmonize, preprocess and extract measures from EEG/PSG databases**, recorded in EDF (Curry 9 `.cdt` experimental, see *Curry 9 support*), without requiring programming expertise: header inspection and anonymization, channel / hypnogram / event harmonization, automatic sleep scoring, sleep macrostructure, signal-quality overview, preprocessing with epoch flagging and rejection, spectral features. The target users are sleep researchers who work with polysomnography (PSG) data and need to perform quality control, preprocessing and feature extraction across multi-subject, multi-session datasets. The user-facing presentation (installation, quick start) is `README.md`.
+**SomnoLens** is a research toolkit for sleep scientists to **inspect, harmonize, preprocess and extract measures from EEG/PSG databases**, recorded in EDF, BrainVision or Curry 9 (see *Recording formats*), without requiring programming expertise: header inspection and anonymization, channel / hypnogram / event harmonization, automatic sleep scoring, sleep macrostructure, signal-quality overview, preprocessing with epoch flagging and rejection, spectral features. The target users are sleep researchers who work with polysomnography (PSG) data and need to perform quality control, preprocessing and feature extraction across multi-subject, multi-session datasets. The user-facing presentation (installation, quick start) is `README.md`.
 
 **Name**: SomnoLens since 2026-10-29, formerly `Inspect_EDF` (the name of its first tool; the tool-1 files `1_inspect_edf_*` keep it). The conda environment was renamed `inspect_edf` → `somnolens` at the same time. Always write "SomnoLens" next to "EEG" or "sleep": "somnolens" is a common word (sleepiness in Danish, Swedish, Norwegian). Reports written before the rename keep the former absolute paths.
 
@@ -11,6 +11,12 @@ Each tool is delivered as (see *Cross-cutting → Single delivery*):
 - **optionally a Python script** (`.py`): batch processing on full datasets (tools 1 and 8)
 
 The former code-visible Jupyter versions of tools 0–4 are archived, frozen, in `tools/jupyter_notebook/`.
+
+> **Curry twins: history.** Until 2026-11-18 a Curry 9 recording was read by separate *Curry twins* of tools 1, 2, 3, 4,
+> 6, 7, 8 and 8bis (`tools_curry/`), most of them regenerated from the EDF notebooks by `tools_curry/_make_tool*_curry.py`.
+> Phase 6 of `tools/plan_brainvision.md` removed them: every tool reads Curry itself through `tools/recording_lib.py`
+> (*Recording formats*). The mentions of a twin, of `tools_curry/` or of re-running a generator left in the sections
+> below are history: they no longer apply.
 
 ## Repository structure
 
@@ -28,7 +34,8 @@ SomnoLens/
 │   ├── 0_live_explore_1file_voila.ipynb         # One participant through the whole pipeline (Voila GUI, being rebuilt)
 │   ├── edf_io_lib.py                            # Shared EDF reading (header, channel types, hypnogram, events, context) + custom stages: tools 0, 1, 1bis, 3 and the libraries
 │   ├── brainvision_lib.py                       # BrainVision reading (.vhdr + .vmrk + .eeg), in the shape of the EDF header: every tool that reads a recording (tools/plan_brainvision.md)
-│   ├── recording_lib.py                         # One way to read a recording, EDF or BrainVision: header, channel table, start, signal, online reference, EOG reference: tools 0-7 and the libraries (edf_io_lib imports it at call time)
+│   ├── curry_lib.py                             # Curry 9 reading (.cdt + .cdt.dpo), in the shape of the EDF header (formerly tools_curry/curry_header.py + curry_io.py)
+│   ├── recording_lib.py                         # One way to read a recording, EDF, BrainVision or Curry: header, channel table, start, acquisition, signal, online reference, EOG reference: tools 0-7 and the libraries (edf_io_lib imports it at call time)
 │   ├── channel_check_lib.py                     # Checks of the channels given to a tool (noisy / dead electrode, mastoid, EOG; ECG and chin EMG amplitude): warnings only, tools 0, 3bis, 6 (comparison columns), 7 (log)
 │   ├── study_files_lib.py                       # Names registry (config_param/file_names.json), choice of the companion suffixes, where each input is found: tools 0, 2, 3, 3bis, 4, 5, 5bis, 6, 7 (no EDF reading)
 │   ├── autoscoring_lib.py                       # Tool 3bis step 1 (GSSC, YASA, SleepFM scoring + figures), shared with tool 0
@@ -37,7 +44,7 @@ SomnoLens/
 │   ├── macrostructure_lib.py                    # Tool 5's metric registry, computations + figures, shared with 5bis and 0
 │   ├── quality_lib.py                           # Tool 6's signal-quality metrics, computation + figures, shared with 0
 │   ├── preprocessing_lib.py                     # Tool 7's preprocessing, flagging, tables + figures, shared with 0 (+ 8 via qc lib)
-│   ├── autoreject_lib.py                        # Tool 8bis's decision rule, tables + figures, shared with 0 (+ the 8bis Curry twin)
+│   ├── autoreject_lib.py                        # Tool 8bis's decision rule, tables + figures, shared with 0
 │   ├── spectral_lib.py                          # Tool 9's spectral features, tables, figures + report pieces, shared with 0
 │   ├── 1_inspect_edf_voila.ipynb                # EDF parameter inspector (Voila GUI)
 │   ├── 1_inspect_edf_perdataset.py              # Batch EDF inspection per dataset
@@ -69,13 +76,6 @@ SomnoLens/
 │   │                                          # (frozen since 2026-10-08, not maintained, see "Single delivery")
 │   └── old/                                   # Versioned development notebooks (archive), incl.
 │                                              # 9_SpectralPower_&_AperiodicFit_PSG.py (tool 9's raw-EDF ancestor)
-└── tools_curry/                             # Experimental Curry 9 (.cdt) port, see "Curry 9 support" below
-    ├── curry_header.py                        # Header-only .cdt.dpo parser (Curry analogue of the EDF header parser)
-    ├── curry_io.py                            # Curry signal / hypnogram / events (text export) loaders
-    ├── {1,2,3,4,6,7}_*_curry_voila.ipynb      # Curry twins of tools 1–4, 6, 7 (Voila; tool 7 incl. the PSD smoothing)
-    ├── 8_reject_manually_curry_voila.ipynb     # Curry twin of tool 8 (3 replacements, high-density support is in the shared lib)
-    ├── 8bis_reject_automatically_curry_voila.ipynb  # Curry twin of tool 8bis (verbatim copy, 8bis is format-agnostic)
-    └── _make_tool{2,3,4,6,7,8,8bis}_curry.py  # Re-runnable generators (regenerate a twin from its EDF source)
 tests/                                         # pytest suite: the Voila notebooks driven headlessly (see "Tests")
 ├── nbdriver.py                                # runs a notebook in a real kernel, sets widgets, clicks buttons
 ├── minidb.py / synthetic.py                   # the two test databases (real local copy / generated from seeds)
@@ -155,8 +155,7 @@ Defined in `environment.yml`. Key packages:
 **Canonical working directory = the repo root (`SomnoLens/`).** Launch every tool from there (paths below
 are relative to it). This keeps one consistent cwd for the shared libraries, `config_param/*.json`, hypnogram
 lookups and outputs across the whole suite. As a safety net the tools also resolve their shared modules
-independent of cwd (the EDF tools' `tools/qc_rejected_epochs_lib.py` and the Curry tools'
-`tools_curry/curry_header.py` / `curry_io.py` are found whether Voila is launched from the repo root **or**
+independent of cwd (the shared modules of `tools/` are found whether Voila is launched from the repo root **or**
 from the tool's own folder) but the repo root is the documented, recommended launch directory.
 
 ### Study folder layout
@@ -235,18 +234,7 @@ voila tools/8bis_reject_automatically_voila.ipynb
 voila tools/9_spectral_features_voila.ipynb
 ```
 
-### Curry 9 (`.cdt`) Voila twins (run from the repo root, same as the EDF tools)
-```bash
-conda activate somnolens
-voila tools_curry/1_inspect_curry_voila.ipynb
-voila "tools_curry/2_select&remap_channels_curry_voila.ipynb"
-voila tools_curry/3_remap_hypno_curry_voila.ipynb
-voila tools_curry/4_remap_events_curry_voila.ipynb
-voila tools_curry/6_quality_overview_curry_voila.ipynb
-voila tools_curry/7_preprocessing_curry_voila.ipynb
-voila tools_curry/8_reject_manually_curry_voila.ipynb
-voila tools_curry/8bis_reject_automatically_curry_voila.ipynb
-```
+A BrainVision or Curry 9 study is opened with the same tools (*Recording formats*).
 
 ### Archived Jupyter notebooks (frozen, not maintained)
 ```bash
@@ -277,8 +265,8 @@ A plain-language description of every check, for researchers, is in **`TESTS.md`
 a test is added or changed).
 
 **Three levels** (markers declared in `pytest.ini`, `--strict-markers` refuses an unknown one):
-- **quick** (`-m quick`, ~1.5 min): unit tests (registry, selector, chain cache), Curry twins' consistency, and
-  `test_notebooks_execute.py`, which runs every `tools/*_voila.ipynb` and `tools_curry/*_voila.ipynb` top to
+- **quick** (`-m quick`, ~1.5 min): unit tests (registry, selector, chain cache, the BrainVision and Curry readers), and
+  `test_notebooks_execute.py`, which runs every `tools/*_voila.ipynb` top to
   bottom without clicking anything (no traceback, no `Import error`). The archived Jupyter notebooks (`tools/jupyter_notebook/`) are not run.
 - **standard** (`-m "not full"`, ~32 min from scratch, ~28 min with the chain reused, measured on 2026-11-06): quick + the chain on the **synthetic** database (golden
   comparison, invariants), the known-answer tests and the small runs of tools 1, 3, 4.
@@ -293,12 +281,11 @@ downstream ones; before a merge or after a change to a shared module: full). **T
 tools concerned. Selection rule: the modified tool + every tool downstream in the chain
 (5 → 5bis → 6 → 7 → 8bis → 8 → 9) + every tool importing a modified shared module
 (`participant_selection_lib` → 5 to 9, `qc_rejected_epochs_lib` → 0, 8, 8bis, 9, `edf_io_lib` → 0, 1, 1bis, 3, 3bis,
-5 to 9 (every library imports it: custom stages; + the Curry twins of tools 3, 7, 8, 8bis through it),
-`autoscoring_lib` → 0, 3bis, `sleepfm_lib` / `autoscoring_compare_lib` → 3bis, `macrostructure_lib` → 0, 5, 5bis, `quality_lib` → 0, 5, 6 (+ the tool-6 Curry twin,
-which copies it), `preprocessing_lib` → 0, 7, 8, 8bis (the last two through `qc_rejected_epochs_lib`, + the
-tool-7 Curry twin, which imports it), `autoreject_lib` → 0, 8bis (+ the 8bis Curry twin, which imports it),
-`spectral_lib` → 0, 9; `chaincache.TOOL_DEPS` lists them for tools 5 to 9); a change
-to a Curry generator or twin: quick (its notebook executes) + `test_curry_twins.py`. Tool 0 mirrors the
+5 to 9 (every library imports it: custom stages, the hypnogram), `recording_lib` / `brainvision_lib` / `curry_lib` → every tool
+that reads a recording (0 to 7, `test_brainvision_*.py`, `test_curry_*.py`),
+`autoscoring_lib` → 0, 3bis, `sleepfm_lib` / `autoscoring_compare_lib` → 3bis, `macrostructure_lib` → 0, 5, 5bis, `quality_lib` → 0, 5, 6,
+`preprocessing_lib` → 0, 7, 8, 8bis (the last two through `qc_rejected_epochs_lib`), `autoreject_lib` → 0, 8bis,
+`spectral_lib` → 0, 9; `chaincache.TOOL_DEPS` lists them for tools 5 to 9). Tool 0 mirrors the
 batch tools, so a change to a tool it mirrors also runs `tool0` (`test_tool0.py` compares them).
 
 **Chain reuse** (`tests/chaincache.py`): the chain fixture does not rerun the whole chain each session. It
@@ -423,7 +410,10 @@ test must point it at a copied `preproc_epo`.
   rescue in the navigator (`manual_rescued`) and a manual annotation re-read by tool 7 (`cb_manual_events`).
 - the exclusion-refactor invariants: `test_participant_selection_lib.py`, `test_exclusion_5bis.py`,
   `test_exclusion_tools.py`, `test_exclusion_tools_5_6.py`,
-  `test_subset_selection.py`, `test_tool9.py`, `test_curry_twins.py`; `test_chaincache.py` for the chain reuse.
+  `test_subset_selection.py`, `test_tool9.py`; `test_chaincache.py` for the chain reuse.
+- the formats: `test_brainvision_lib.py`, `test_brainvision_tools.py`, `test_brainvision_chain.py` (BrainVision, recordings
+  written by `brainvision_files.py`), `test_curry_lib.py` (quick) and `test_curry_chain.py` (tools 1, 4, 5, 6, 7, 0 on
+  Curry recordings written by `curry_files.py`), `test_edf_io_sync.py` (no copy of `edf_io_lib` comes back).
 - *Skip* and the settings (*Cross-cutting → Skip + cumulative-merge*): `test_settings_skip.py` (standard, tools 6, 7, 8bis, 8, 9, each
   scenario in a **new session** on a light copy of the chain's outputs: same settings skipped, other settings stop before
   anything is written, the three answers, what follows tool 7, a new participant made like the others),
@@ -608,28 +598,30 @@ instead of restating them. Only tool-specific deltas are kept inline.
 
   | Library | Computation of | Imported by |
   |---|---|---|
-  | `edf_io_lib` | EDF reading (header parser, channel types, hypnogram length rule, scored-event chain, context channels) and the custom stages (*Study configuration*) | 0, 1, 1bis, 3, 5, 5bis, and every library below |
-  | `study_files_lib` | no EDF reading: the names registry `config_param/file_names.json` and the choice of the companion suffixes (*Hypnogram-suffix auto-detection* below) | 0, 3, 3bis, 5, 6, 7 (+ the Curry twins of 3, 6, 7) |
+  | `edf_io_lib` | EDF reading (header parser, channel types, hypnogram length rule, scored-event chain, context channels), the custom stages (*Study configuration*) and the hypnogram (`draw_hypnogram`) | 0 to 7, 1bis, 5bis, and every library below |
+  | `recording_lib` (+ `brainvision_lib`, `curry_lib`) | one way to read a recording of any format (*Recording formats*) | 0 to 7, `edf_io_lib`, `macrostructure_lib`, `autoscoring_lib`, `channel_check_lib` |
+  | `study_files_lib` | no EDF reading: the list of the recordings, the names registry `config_param/file_names.json` and the choice of the companion suffixes (*Hypnogram-suffix auto-detection* below) | 0 to 9 |
   | `autoscoring_lib` | tool 3bis step 1 (GSSC, YASA, SleepFM scoring, EEG reference, agreement, figures) | 0, 3bis |
   | `sleepfm_lib` | SleepFM-Clinical (model download / location, input montage, inference) | `autoscoring_lib` (3bis) |
   | `autoscoring_compare_lib` | tool 3bis step 2 (Score_EDF's alignment, recalibrations, agreement, figures) | 3bis |
   | `macrostructure_lib` | tool 5 (`METRICS` registry, `compute_recording`, night report) | 0, 5, 5bis |
-  | `quality_lib` | tool 6 (channel metrics, flags, hypnospectrogram colour rule, figures) | 0, 6 (+ copied into its Curry twin) |
-  | `preprocessing_lib` | tool 7 (preprocessing, flagging methods, tables, heatmap) | 0, 7 (+ its Curry twin), `qc_rejected_epochs_lib` |
-  | `autoreject_lib` | tool 8bis (channel-first then epoch rule, decision tables) | 0, 8bis (+ its Curry twin) |
+  | `quality_lib` | tool 6 (channel metrics, flags, hypnospectrogram colour rule, figures) | 0, 6 |
+  | `preprocessing_lib` | tool 7 (preprocessing, flagging methods, tables, heatmap) | 0, 7, `qc_rejected_epochs_lib` |
+  | `autoreject_lib` | tool 8bis (channel-first then epoch rule, decision tables) | 0, 8bis |
   | `spectral_lib` | tool 9 (PSD, specparam fit, band measures, aggregates, report pieces) | 0, 9 |
   | `qc_rejected_epochs_lib` | tool 8 (montage, detail panel, recomposed decision) | 0, 8, 8bis, 9 |
   | `participant_selection_lib` | the exclusion registry and the participant selector | 5 to 9 |
-  | `ui_lib` | no computation: the look of the Voila pages (*Voila page conventions* above) | every Voila tool and Curry twin, `participant_selection_lib` |
+  | `ui_lib` | no computation: the look of the Voila pages (*Voila page conventions* above) | every Voila tool, `participant_selection_lib` |
 
   The code was moved **verbatim**; the lines lifted out of a run loop became small functions whose progress
   and log lines are callbacks (`status`, `warn`, `progress`) and whose fatal paths raise (e.g.
   `preprocessing_lib.StepFailed`). Each move was proven output-neutral by **`tests/refactor_check.py`**
   (every file the chain writes, before / after, both datasets, plus `tests/outside_chain.py` for the tools and
-  options the chain does not run): use the same check for any later move. Format-specific reading stays in the
-  notebooks where the Curry generators rewrite it; the copies of `edf_io_lib`'s functions this leaves in tools 2,
-  4, 6 and 7 (and `quality_lib`'s custom-stage helpers) are kept identical by **`tests/test_edf_io_sync.py`**
-  (moving them: *Planned modules*). `tests/chaincache.TOOL_DEPS` lists the libraries each tool of the chain
+  options the chain does not run): use the same check for any later move. Since phase 6 of
+  `tools/plan_brainvision.md` (2026-11-18) the reading blocks of tools 2, 4, 6 and 7 and `quality_lib`'s custom-stage
+  helpers import `edf_io_lib` (they were copies the Curry generators rewrote; proven output-neutral by
+  `refactor_check`); **`tests/test_edf_io_sync.py`** checks that no copy comes back and that the few kept on purpose (tool
+  1bis's `detect_encoding`, tool 7's `load_events`) stay identical. `tests/chaincache.TOOL_DEPS` lists the libraries each tool of the chain
   imports, so a library edit reruns the right part of the chain. The details of each library are in its tool's
   section (*Shared library* paragraph).
 - **Custom EDF header parser + sampling-frequency derivation**: EDF headers are read with a hand-written
@@ -638,9 +630,8 @@ instead of restating them. Only tool-specific deltas are kept inline.
   *number of samples per data record*, not the rate, the two coincide only when `duration_data_record == 1 s`).
   Kept as a string to preserve `sorted(set(...))` grouping. **One copy, in `tools/edf_io_lib.py`** (tool 1's
   parser plus tool 0's optional `fallback_encoding`, off by default), imported by tool 1 (Voila and both batch
-  scripts, phase 8 of the tool-0 redesign) and tool 0; tool 2 keeps a copy (its Curry generator rewrites that
-  block) and tool 1bis its `detect_encoding` (plus its own short reader of the identity fields), **kept identical
-  by `tests/test_edf_io_sync.py`**. (Tool 1 carries the worked EDF+ examples.) Trap kept as is in every copy: the
+  scripts, phase 8 of the tool-0 redesign), tool 0 and tool 2 (an import since phase 6); tool 1bis keeps its
+  `detect_encoding` (plus its own short reader of the identity fields), **kept identical by `tests/test_edf_io_sync.py`**. (Tool 1 carries the worked EDF+ examples.) Trap kept as is in every copy: the
   per-channel `reserved` list overwrites the global 44-byte `reserved` field (EDF+C / EDF+D), so the parser
   never returns the EDF+ type.
 - **MNE EDF signal loading pattern**: when actual signal is needed, load with
@@ -3463,177 +3454,54 @@ input layout is covered by the test suite (*How to run → Tests*), whose centra
 epochs of the kept channels, every per-file and database table equals what the former clean-epo route
 produced (thirds excepted), and that *Re-aggregate only* after a decision change equals a full run.
 
-## Curry 9 (`.cdt`) support: experimental
+## Recording formats
 
-**Status**: an exploratory port of a subset of the EDF tools to Neuroscan **Curry 9** recordings,
-living in a **separate `tools_curry/` folder**. It shares the same `config_param/*.json` conventions
-and output layout as the EDF tools (a project is assumed to be *either* EDF *or* Curry, never mixed).
-The main line of the toolkit remains EDF-first. This section exists so the adaptation can be **reused
-and extended later** without re-deriving the Curry-specific deltas. The EDF tools are untouched.
+Every tool reads three formats through **`tools/recording_lib.py`** (`file_format`, `read_header`, `channel_table`,
+`read_start_datetime`, `read_acquisition`, `read_raw`, `online_reference`, `flat_online_reference`, `eog_reference`), and
+`study_files_lib.list_recordings` finds the recordings (recursive, by extension, `RECORDING_SUFFIXES = ('.edf', '.vhdr',
+'.cdt')`; a name in two formats keeps the first of that order, the others are named at the scan by
+`recording_conflicts_text`). A study holds one format. **A rule is deduced from the data, never from the format**: no
+declared range → no `bounds_pct` and the ±500 µV display cap; DC-coupled → tool 6's high-pass ticked; an online
+reference stated → recreated, left out when it would stay flat.
 
-### What a Curry 9 recording looks like
+| | EDF | BrainVision | Curry 9 |
+|---|---|---|---|
+| Found by | `.edf` | `.vhdr` (never `.eeg`: Nihon Kohden uses it too) | `.cdt` (its `.cdt.dpo` beside it) |
+| Header | `edf_io_lib.read_edf_header_custom` | `brainvision_lib.read_vhdr_header` | `curry_lib.read_cdt_header` (the `.dpo` text, the signal not read) |
+| Channel type | transducer field or name | name, then EEG for what MNE types EEG (position, or µV) | name, then EEG for the EEG group of the `.dpo` |
+| Start | header bytes 168 / 176 | `New Segment` of the `.vmrk` (None when paused) | `StartYear` … `StartMillisec` of the `.dpo`, to the millisecond |
+| Physical range | yes | none | none (float samples) |
+| Filters | `prefiltering` field | the `[Comment]` (optional) | not stated: tool 6's high-pass stays unticked |
+| Impedances | none | the `[Comment]` | the `.dpo` (Ohm → kΩ, last measure; every EEG channel listed, an auxiliary input only with a measure) |
+| Online reference | none stated | the `[Comment]`: recreated (MNE's method) | none stated |
+| Signal | `read_raw_edf(include=)` + the `-0`/`-1` suffix helpers | `read_raw_brainvision`, markers removed | `read_raw_curry`, the `.ceo` markers removed, `include` in the order of the file |
+| Positions | none | `[Coordinates]` | `SENSORS` of the `.dpo` (EEG group), kept into the `.fif` (tool 8's topomaps) |
 
-Each recording is a small directory of sibling files sharing one stem (e.g. `y_S005`):
+**Curry 9 in detail** (`tools/curry_lib.py`, formerly `tools_curry/curry_header.py` + `curry_io.py`). A recording is a
+set of sibling files sharing one stem: `{stem}.cdt` (float32, one sample of every channel after the other, multi-GB),
+`{stem}.cdt.dpo` (plain text of named blocks: `NAME START` … `NAME END` for `key = value` pairs, `NAME START_LIST` …
+`NAME END_LIST` for lists: `DATA_PARAMETERS`, `DEVICE_PARAMETERS` then `DEVICE_PARAMETERS_OTHERS` (the EEG group, then the
+others: EOG, EMG, ECG, sensors), `LABELS` / `LABELS_OTHERS`, `SENSORS`, `IMPEDANCE_VALUES`), `{stem}.cdt.ceo` (native
+markers, ignored for now: *Task triggers*), and the companions of any format (`{stem}_Hypnogram_Export.txt`,
+`{stem}_ScoredEvents_Export.txt`: the TXT-first event chain converts its clock times against the start of the `.dpo`).
+MNE needs **`curryreader`** (pip, in `environment.yml`), which reads the whole file once to open it (about 15 s for 7 GB),
+then MNE reads lazily: hence the hand-written parser for what needs no signal. Impedance sentinels: `-1` not measured,
+`-2` disabled. No patient field (tool 1's anonymization check does not apply; the `.dpo` still holds the recording date).
+Tool 1 reports Curry in its section 1.3 with BrainVision (`format` column of `recording_notes.tsv`, `impedance_flags.tsv`).
 
-| File | Role |
-|---|---|
-| `{stem}.cdt` | binary signal (float32, multi-GB: a full night of 44 ch @ 1024 Hz ≈ 5 GB) |
-| `{stem}.cdt.dpo` | **plain-text** parameter sidecar (~7 kB): channel labels, sampling rate, start datetime, per-channel impedances, 3-D sensor positions |
-| `{stem}.cdt.ceo` | native events (binary, **not** used: see events below) |
-| `{stem}_Hypnogram_Export.txt` | one stage label per 30 s epoch (same format as the EDF hypnograms) |
-| `{stem}_ScoredEvents_Export.txt` | scored events, comma-separated text export (often French labels). **Encoding varies between exports**, UTF-16 (with BOM) on some, plain UTF-8/ANSI on others: `load_events_curry()` sniffs the BOM (`\xff\xfe`/`\xfe\xff` → UTF-16, else UTF-8 with `errors="replace"`). Never assume UTF-16 |
-
-Unlike Compumedics EDF, Curry uses a **single global sampling rate** for all channels, stores signal as
-**float** (no digital→physical scaling, so no EDF physical bounds), never appends MNE `-0`/`-1` duplicate
-suffixes, and carries **real electrode positions**.
-
-### Shared Curry modules (`tools_curry/`, the analogue of the EDF header parser)
-
-- **`curry_header.py` (header-only `.cdt.dpo` parser)** (the Curry counterpart of the custom EDF header
-  parser, **never** reads the `.cdt` signal). `read_curry_header(cdt_path)` returns a dict with `sfreq`,
-  `n_samples`, `n_epochs_30s`, `start_datetime`, `data_unit`, EEG vs "other" channel groups
-  (`eeg_group_size` / `ch_labels` from the `LABELS` block vs `LABELS_OTHERS`), `sensor_xyz` (3-D positions,
-  mm), and raw impedances. `get_impedance_summary(hdr)` returns per-channel kΩ values, **the file stores
-  impedances in Ohms, divide by 1000**. Sentinels `-1` = not measured, `-2` = disabled. Motivation:
-  `mne.io.read_raw_curry(preload=False)` is **not** header-only (it takes ~15 s because `curryreader` loads
-  the whole signal) and exposes **no impedances**, so a dedicated parser is required for tools that only
-  need metadata (tool 1).
-- **`curry_io.py` (signal / hypnogram / events loading)**:
-  - `read_curry_signal(cdt_path, include=None, preload=False)`, thin wrapper over `mne.io.read_raw_curry`.
-    Channel selection is a plain `raw.pick(include)` (no include-at-read trick needed, single global rate).
-  - `load_hypnogram_curry(txt_path)`: identical format to the EDF hypnograms.
-  - `load_events_curry(txt_path, rec_start_dt)`: parses the UTF-16 export into a `Name/Start/Duration`
-    (seconds) DataFrame. The export gives **clock times** (`HH:MM:SS`), converted to seconds-from-start via
-    the header start datetime, with **midnight rollover** (an event > 1 h *before* the recording start is on
-    the next calendar day). Two parsing gotchas handled: single-digit hours after midnight
-    (`0:05:11`: `datetime.time.fromisoformat` rejects these, so split manually) and `M:SS[.s]` durations.
-  - `rec_start_from_header(hdr)`: builds the recording-start `datetime` used by `load_events_curry`.
-
-### Recipe: adapting an EDF tool to Curry
-
-Each Curry tool is generated from its EDF twin by a small, re-runnable `tools_curry/_make_toolN_curry.py`
-script. `_make_tool{2,4,6,7}_curry.py` do **parsed-JSON edits** (join the cell source, string-replace,
-re-split, validated by `json.load` + `ast.parse` of every code cell), so their patterns are ordinary Python
-source with real newlines and quotes.
-
-> **`_make_tool3_curry.py` is the exception: it string-replaces the RAW notebook JSON.** In raw JSON a
-> newline is the two characters `\n` and a quote is `\"`, so **every pattern in it must be a plain,
-> escape-free substring**: a pattern containing a real newline or a bare `"` silently never matches and is
-> reported only as a `⚠ NOT FOUND` line. Always check the run prints **5/5 replacements applied**: a lower
-> count means a replacement was skipped and EDF wording leaked into the twin. (Such a miss was found in
-> Jul 2026: the "No EDF files" → "No .cdt files" pattern had never matched, and the twin on disk carried a
-> hand-edit that regeneration reverted.)
-
-The recurring deltas:
-
-1. **Discovery**: `rglob('*.edf')` → `rglob('*.cdt')` (match bare `f.suffix == '.cdt'`, exclude `._*`).
-2. **Header reads** → `read_curry_header()`. Classify channels by the `.dpo` **EEG group** (authoritative)
-   instead of EDF transducer type / name regex.
-3. **Signal loading**: replace the EDF `read_raw_edf(preload=False, include=list(remap.keys()))` +
-   `drop_suffix_duplicates` + `adapt_remap_dict_to_suffixes` pattern with
-   `read_raw_curry(preload=False)` → `raw.pick(montage)` → `raw.rename_channels(remap)` →
-   drop deselected → `load_data()`. The two MNE suffix helpers are **removed** (no `-0`/`-1` in Curry).
-4. **Drop EDF-only concepts**: no physical bounds → remove `get_phys_bounds_uV`, the `bounds_pct` metric,
-   its threshold widget, and its report/summary columns (tool 6). No `patient_id`/`recording_id` header
-   fields → **no anonymizer** (tool 1bis has no Curry twin for now).
-5. **Events**: the EDF tool 4 now reads the same `*_ScoredEvents_Export.txt` format (among TXT/CSV/XML).
-   The Curry twin swaps that three-source `load_events()` for a wrapper over `load_events_curry`
-   (single source, recording start from the `.cdt.dpo` header instead of the EDF header), keeping the
-   **same call signature** so downstream scan/rejection code is untouched. Because there is only one event
-   source, the 1bis consistency check is **removed**, and so are the EDF-only helpers it replaced
-   (`read_edf_start_datetime`, `load_events_from_txt/csv/xml`, `_canon_events`) and the extra `TXT suffix`
-   widget (Curry keeps a single suffix field). Suffix auto-detection scans `.txt` files whose name contains
-   `event`. The **French label mapping** (`FRENCH_EVENT_RULES` / `suggest_canonical`) is format-agnostic and
-   passes through **unchanged**, so the twin gets it for free.
-6. **User-facing strings** (English per project rule) and re-runnable generators only. All format-agnostic
-   logic (skip/cumulative-merge, custom stages, `plot_hypnospectrogram`, rejection methods + heatmap +
-   `METHOD_ORDER`, the tool-7 `_preprocessing_params.json` sidecar read by tool 8) is copied **unchanged**.
-
-### Tools ported (per-tool deltas beyond the recipe)
-
-- **Tool 1: Inspect** (`1_inspect_curry_voila.ipynb`, purpose-built, not generated): per-channel summary from
-  `read_curry_header` (no signal read). Adds an **impedance check** with an editable **kΩ threshold**
-  (default 20 kΩ). Outputs to `reports_inspection_curry/`: `FULL_summary_table_curry.tsv`,
-  `impedance_flags_curry.tsv`, `failed_cdt_read.tsv`.
-- **Tool 2: Channel selection & remap**: channel mask is `channel_group == 'EEG'` from the `.dpo`. Section 6
-  loads via `read_raw_curry`. Same channel configuration output.
-- **Tool 3: Hypnogram remap**: discovery only (`.edf`→`.cdt`). The `_Hypnogram_Export.txt` companion and remap
-  logic are unchanged.
-- **Tool 4: Event harmonization**: events from `*_ScoredEvents_Export.txt`. §1bis removed. Same
-  `config_param/event_remap.json` output (consumed by tool 7). The `FRENCH_EVENT_RULES` suggestion layer
-  (shared with the EDF tool) now pre-fills the common French raw labels (e.g. `Micro-éveil 1 ARO SPONT`
-  → `arousal_spontaneous`, `Hypopnée obstructive` → `hypopnea`, `Ronflement` → `snore`). Unusual labels
-  still need a manual choice.
-- **Tool 6: Quality overview**: drops `bounds_pct` and `get_phys_bounds_uV`. Keeps flat/std/n_peaks/percentiles/
-  histograms/PSD/time-series/hypnospectrogram. Same `reports_quality_overview/` outputs (minus the bounds
-  column). Memory note: EEG channels are picked before `load_data()` to avoid holding the full multi-GB file.
-  Since the tool-0 redesign (phase 4) the EDF notebook imports `tools/quality_lib.py`: the generator **copies
-  the library into the twin's cell 1** in place of `from quality_lib import (...)` and applies its `bounds_pct`
-  removals and the ±500 µV display cap to that copy (the twin stays standalone, no tools/ import). Its new
-  Curry load block sets `phys_bounds_by_name, final_to_orig = {}, {}` (unused once `bounds_pct` is stripped,
-  kept for `compute_channel_metrics`' signature). Checked at the move: every definition of the former twin is
-  AST-identical in the new one, only `run_analysis` changed, as in the EDF notebook.
-- **Tool 7: Preprocessing + epoch rejection**: Curry load block (recipe step 3). Event-based rejection reads the
-  scored events via the **shared TXT-first / CSV / XML** `load_events` chain (the twin swaps only
-  `read_edf_start_datetime` for a `.cdt`-header read, the `_events_df_from_txt/csv/xml` parsers + dispatcher
-  and the two suffix widgets pass through, so a Curry `_event_xml.csv` is picked up too). All rejection
-  methods, per-stage summaries, `_all-epo.fif`,
-  `_epoch_rejection.tsv`, `_rejection_summary.tsv`, and the `_preprocessing_params.json` sidecar are
-  identical to tool 7, so **tool 8 (QC of rejected epochs) works on Curry outputs unchanged**. The generator's
-  `OLD_LOAD` / `NEW_LOAD` pair carries the **bad-channel lines** (deselected channels kept as `bads`): any
-  edit to that block of the EDF notebook must be mirrored there. The participant selector, the per-participant
-  editor and the registry code pass through unchanged (the shared module is found from `tools_curry/` via the
-  `cwd/../tools` probe). The twins of tools 6, 7, 8, 8bis are checked by `tests/test_curry_twins.py` (every
-  cell parses, the EDF original's new features are present: re-run the generator when it fails).
-  - **PSD smoothing (built into tool 7, see §7)**: format-agnostic and passes through `_make_tool7_curry.py`
-    unchanged **except** the cell-1 import anchor: the added `lowess` import shifted the specparam anchor
-    the generator string-matches, so the generator now includes it in the anchor. Re-run the generator after
-    editing the EDF notebook. (The former dedicated `_make_tool7_curry_SSmatch.py` and the standalone SSmatch
-    twins were deleted when the feature was folded in.)
-  - **Per-channel rejection (memory), shared EDF + Curry**: `compute_rejection_masks` receives the
-    `epochs` object and reads the signal **one channel at a time** for the time-domain methods
-    (`epochs.get_data(picks=[ci])[:, 0, :] * 1e6`) instead of materialising a full `epochs.get_data() * 1e6`
-    array (which would be a 3rd full copy after `raw._data` and `epochs._data`, ~3× ~9.5 GiB for 32 ch @
-    1024 Hz, enough to overflow RAM). With `del raw` right after epoching this drops the sustained
-    rejection-time peak from ~3× to ~1× (~9.8 GiB). **Formulas are unchanged**, so the per-(epoch, channel)
-    masks, and therefore every output (`.fif` metadata, `_epoch_rejection.tsv`, `_rejection_summary.tsv`,
-    heatmap) and tool-8 compatibility, are **byte-identical** to the former full-array version (verified
-    end-to-end: the sha256 of each output file matches on the test EDFs, old vs new). The transient epoching
-    peak stays ~2× (`raw._data` + `epochs._data` coexist during the copy). For extreme density without enough
-    RAM the built-in **resample** is the lever (÷4). This now lives in the **EDF source** (`tools/7_preprocessing_voila.ipynb`)
-    and is format-agnostic, so it **passes through into the Curry twin unchanged**: the generator no longer
-    injects it.
-  - **Progress feedback (shared EDF + Curry)**: the per-participant **pipeline bar** (`progress_step` + the
-    4-segment `build_step_legend`, see tool 7 above) and the `_rej_progress` callback that animates its
-    *Reject* segment (per channel for the time-domain pass, per epoch for the 1/f fit, filling
-    `[_reject_base, _reject_base + COST_REJECT]`) both live in the **EDF source** and are inherited by the
-    twin unchanged, so EDF and Curry share the exact same two-bar layout and animation: a slow high-density
-    participant is never mistaken for a crash in either. The generator adds **no** separate rejection sub-bar.
-- **Tool 8: Manual epoch rejection**: format-agnostic, so the twin is the EDF notebook with **3 replacements**
-  (H1, one prose sentence, the shared-library import probe), see §8 *Curry twin of tool 8*. This is where
-  the toolkit's **high-density** support lands in practice: a Curry montage is 32–64 EEG channels, and the
-  adaptations (montage geometry, `Channels` filter, PSD envelope, filtered metric table, **topomaps** from
-  the `.cdt` DigMontage, channel triage, flagging heatmap, 1/f subsample/parallel) all live in the shared
-  `tools/qc_rejected_epochs_lib.py` keyed on the channel count: **nothing Curry-specific is injected**, and
-  a sparse EDF montage renders byte-identically. Smoke-tested end-to-end on `o_S007` (32 ch, 1314 epochs).
-- **Tool 8bis: Automatic epoch rejection**: verbatim copy + retitle (see §8bis).
-
-### Environment
-
-Curry support requires **MNE ≥ 1.12** (`environment.yml` pins `mne=1.12.*`) plus **`curryreader`** (pip-only,
-under the `pip:` block). These were bumped for Curry. The EDF tools continue to run on the same environment.
-
-### Not ported / known limitations
-
-- **Tool 1bis (anonymizer)**: no equivalent: the `.cdt.dpo` has no patient-name field to scrub (revisit if
-  a PII field is found in other exports).
-- **Tools 0, 5, 9**: not ported.
-- **Electrode positions**: no longer unused: the `.cdt` `DigMontage` **survives tool 7 into the
-  `_all-epo.fif`** (verified on `o_S007`: 32 channels + 3 fiducials, every `loc` finite and non-zero), and
-  **tool 8's detail panel now draws topomaps** from it (see *Cross-cutting → High-density montage support*).
-  Still unused elsewhere: geometry-based bad-channel **interpolation** (8bis drops channels instead) and
-  spatial re-referencing: future enhancements.
-- **French event vocabulary**: see tool 4 caveat above.
+**The Curry twins, removed** (phase 6 of `tools/plan_brainvision.md`, 2026-11-18). Tools 1, 2, 3, 4, 6, 7, 8 and 8bis had
+Curry twins in `tools_curry/`, most regenerated from the EDF notebooks by string replacement (`_make_tool*_curry.py`),
+frozen from phase 2. Before their removal, their reading was compared with the new reader on the two Curry recordings
+of `tools/test_data_curry` (44 channels each, 32 EEG): the same channels, EEG group, sampling rate and length, start to
+the millisecond, impedances, channel types, electrode positions, `meas_date`, signal (24 windows of 30 s per night,
+difference 0), channel picking, hypnograms and scored events (569 and 131, onset difference 0). The deliberate
+differences: the native markers of the `.ceo` (95 and 147) are no longer carried (as for BrainVision); tool 6's high-pass
+is no longer ticked by default (the `.dpo` states no filter: the rule of the data); tool 1 writes `reports_inspection/`
+under the names of the other formats (no more `reports_inspection_curry/` nor `_curry` suffixes; nothing is renamed in
+an existing study); `include` keeps the order of the file. Tools 0, 3bis, 5 and 9, which had no twin, now read Curry
+too. The tests write Curry recordings by hand (`tests/curry_files.py`): `test_curry_lib.py` (quick: header, impedances,
+start, signal read back, `recording_lib`, the list of recordings) and `test_curry_chain.py` (standard: tools 1, 4, 5, 6,
+7, 0).
 
 ## Planned modules (in development)
 
@@ -3654,8 +3522,9 @@ a section below. Update this list when an item is done.
    hypnograms*, *Simulated recording generator in tool 0*, *Task triggers*.
 5. Between larger jobs: *English everywhere*, *Tools 1 to 4: one code cell per section*.
 6. After the extraction: *Clean-up before distribution*, *Distribution and licensing*, the installation tutorial.
-7. Long term: *EDF reading of tools 2, 4, 6, 7 through `edf_io_lib`*, *A Curry twin of tool 0*, *Tool 0: interactive
-   canvas for the epoch explorer*, *Event-epoch visualizer (Phase B)*, tool 8's per-(epoch, channel) override.
+7. Long term: *Tool 0: interactive canvas for the epoch explorer*, *Event-epoch visualizer (Phase B)*, tool 8's
+   per-(epoch, channel) override. (*EDF reading of tools 2, 4, 6, 7 through `edf_io_lib`* and *A Curry twin of tool 0*
+   were closed by phase 6 of `tools/plan_brainvision.md`: *Recording formats*.)
 
 Still to check by hand, not covered by the tests: a real participant table through tools 5 and 9.
 
@@ -3669,10 +3538,9 @@ same way. The plan, with what was measured on real recordings, is `tools/plan_br
 tools 1, 2, 3, 6 (phase 2), tool 3bis with the channel checks and tool 6's comparison with the median channel (phase 3),
 tools 4, 5, 7, 0 and 8bis (phase 4), a flat online reference left out and the event files declared in tool 4 (phase 4 bis),
 the high-density display of tools 0, 6, 7, 8, 9 (phase 5), the two rounds of the user's visual inspection (phases 5 bis and
-5 ter). Left: the removal of the Curry twins (phase 6), a *Stop* button beside *Run* (phase 6 bis, `jupyter-ui-poll`), the
-report folders numbered after their tool (phase 6 ter), then the documentation (phase 7). **The Curry twins are frozen until
-their removal (phase 6)**: their notebooks stay as they are and their generators are no longer re-run (their match strings no
-longer apply), so a fix to an EDF tool does not reach them.
+5 ter, 5 quater) and the removal of the Curry twins (phase 6, 2026-11-18: Curry read by `recording_lib` through `curry_lib`,
+*Recording formats*). Left: a *Stop* button beside *Run* (phase 6 bis, `jupyter-ui-poll`), the report folders numbered after
+their tool (phase 6 ter), then the documentation (phase 7).
 
 ### Interpolation of the dropped channels (TODO, asked on 2026-11-17)
 
@@ -3715,18 +3583,6 @@ output-folder suffix (e.g. `reports_quality_overview_hp0.5`), pre-filled from th
 optional output folder. To decide: whether the suffix is free text or derived from the preparation, and who reads
 which folder: tool 7 picks `quality_summary.tsv` through a file chooser (any folder works), but tool 0 looks for
 `reports_quality_overview/` by a hard-coded path.
-
-### EDF reading of tools 2, 4, 6, 7 through `edf_io_lib` (TODO, needs a user test on Curry data)
-
-Left out of the tool-0 redesign's phase 8 (user decision, 2026-10-14: reduced scope + a sync test). Tool 2's header
-parser, tool 4's event loaders, tool 6's load block (suffix helpers, physical bounds) and tool 7's event chain /
-start datetime / suffix detection are still copies of `edf_io_lib`'s functions, kept identical by
-`tests/test_edf_io_sync.py`. Moving them means: the format-specific readers (recording start datetime, companion
-files: `.edf` vs `.cdt`) passed to the library's functions as arguments, and the four Curry generators
-(`_make_tool{2,4,6,7}_curry.py`) rewritten so the twins pass their Curry readers and find `tools/`. Tool 4 reads only
-the event names (no start datetime): its loader needs a decision (a `.txt` with no readable start datetime is read
-by tool 4, skipped by the library). **No test runs a Curry twin on a recording**: the four twins must be checked by
-the user in Voila on Curry data before the change is committed.
 
 ### Database organisation inferred by tool 1 (TODO, audit first)
 
@@ -3800,12 +3656,6 @@ the montage without a redraw, and **annotations drawn with the mouse** (written 
 matplotlib figures; click events and pan / zoom; occasionally flaky under Voila, harder to snapshot) or Plotly
 (fully interactive, shape drawing; heavy, slower first render on dense montages). Constraints: usable under Voila,
 navigation as fast as now (keep the static PNG as a fallback toggle), the backend added to `environment.yml`.
-
-### A Curry twin of tool 0 (TODO)
-
-Tool 0 reads the EDF through `edf_io_lib`; a Curry version needs the Curry readers (header, start datetime,
-companions) of `tools_curry/curry_header.py` / `curry_io.py` behind the same functions, and is best done after the
-*EDF reading of tools 2, 4, 6, 7 through `edf_io_lib`* item above (same reader-as-argument design).
 
 ### Slow-wave and spindle extraction (TODO)
 

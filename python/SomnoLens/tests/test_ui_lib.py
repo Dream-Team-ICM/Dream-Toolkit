@@ -12,8 +12,8 @@ import ui_lib as UI  # noqa: E402
 
 pytestmark = pytest.mark.quick
 
-# Every Voila page: the EDF tools and their Curry twins
-PAGES = sorted(ROOT.glob('tools/*_voila.ipynb')) + sorted(ROOT.glob('tools_curry/*_voila.ipynb'))
+# Every Voila page (one per tool, whatever the format of the recordings)
+PAGES = sorted(ROOT.glob('tools/*_voila.ipynb'))
 
 
 def cells(page):
@@ -288,7 +288,7 @@ def test_details_open_shows_it_can_be_opened():
 
 
 def test_there_are_pages():
-    assert len(PAGES) >= 20, [p.name for p in PAGES]
+    assert len(PAGES) >= 14, [p.name for p in PAGES]     # one page per tool (the Curry twins are gone: phase 6)
 
 
 @pytest.mark.parametrize('page', PAGES, ids=lambda p: p.name)
@@ -298,8 +298,7 @@ def test_page_follows_the_conventions(page):
     assert found[0][0] == 'markdown' and found[0][1].startswith('# Tool '), 'the page must open on its "# Tool N: ..." title'
     assert re.search(r'^\s*import ui_lib as UI\b', code, re.M), 'the page must import ui_lib as UI'
     assert not re.search(r"button_style\s*=\s*['\"]info['\"]", code), "no 'info' button style: use UI.button and a role"
-    if 'tools_curry' not in page.parts:      # the twins are frozen until their removal (plan_brainvision, phase 6)
-        assert 'IntProgress' not in code, 'a progress bar comes from UI.progress_bar / UI.phase_bar (they line up)'
+    assert 'IntProgress' not in code, 'a progress bar comes from UI.progress_bar / UI.phase_bar (they line up)'
     for kind, text in found:
         if kind == 'markdown':
             assert '<details>' not in text, 'a Details block opens with UI.details_open (it shows it can be opened)'

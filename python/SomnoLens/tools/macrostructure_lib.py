@@ -307,7 +307,7 @@ def read_edf_header_info(edf_path):
 
 
 def read_header_info(path):
-    """read_edf_header_info for a recording of any format: an EDF by its binary header (unchanged), a BrainVision
+    """read_edf_header_info for a recording of any format: an EDF by its binary header (unchanged), a BrainVision or Curry
     recording through recording_lib (one sample per data record, the channels of the file only). Raises when the
     recording start is unknown or unusable (a BrainVision recording paused, whose clock no longer follows the samples):
     the lights and the scored-event exports are clock times."""
@@ -316,7 +316,7 @@ def read_header_info(path):
     header = RL.read_header(path)
     start_dt = RL.read_start_datetime(path)
     if start_dt is None:
-        raise ValueError('no usable recording start in the .vmrk (no date, or the recording was paused)')
+        raise ValueError('no usable recording start in the .vmrk or .dpo (no date, or the recording was paused)')
     keep = [i for i, in_file in enumerate(header['in_file']) if in_file]
     labels = [header['channel'][i] for i in keep]
     sfreq = float(header['sfreq'])

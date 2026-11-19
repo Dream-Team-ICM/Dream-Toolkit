@@ -1,7 +1,8 @@
 """One way to read a recording, whatever its format: the tools call these functions and the extension of the file decides.
 
 The EDF branch is exactly the reading the tools already do, so an EDF study gives the same results. A study may hold
-only one format: study_files_lib.list_recordings finds the recordings.
+only one format: study_files_lib.list_recordings finds the recordings. Three formats: EDF (.edf), BrainVision (.vhdr,
+brainvision_lib) and Curry 9 (.cdt, curry_lib).
 
 Also here, because it depends on how the channels were recorded: the reference an EOG gets (eog_reference), with the
 names of tool 2's configuration it relies on (EOG names, mastoids).
@@ -13,25 +14,42 @@ import mne
 import pandas as pd
 
 import brainvision_lib
-from brainvision_lib import channels_on_online_reference, read_raw_bv, read_vhdr_header, read_vmrk_info
+import curry_lib
+from brainvision_lib import (channels_on_online_reference, read_raw_bv, read_vhdr_acquisition, read_vhdr_header,
+                             read_vmrk_info)
 from edf_io_lib import read_edf_header_custom, read_edf_start_datetime
+
+FORMAT_NAMES = {'edf': 'EDF', 'brainvision': 'BrainVision', 'curry': 'Curry'}   # for the messages of the tools
 
 
 def file_format(path):
-    """'edf' or 'brainvision', from the extension of the file. Raises for anything else."""
+    """'edf', 'brainvision' or 'curry', from the extension of the file. Raises for anything else."""
     suffix = Path(path).suffix.lower()
     if suffix == '.edf':
         return 'edf'
     if suffix == '.vhdr':
         return 'brainvision'
-    raise ValueError(f'{Path(path).name}: not a recording format the toolkit reads (.edf, .vhdr)')
+    if suffix == '.cdt':
+        return 'curry'
+    raise ValueError(f'{Path(path).name}: not a recording format the toolkit reads (.edf, .vhdr, .cdt)')
 
 
 def read_header(path, fallback_encoding=None):
     """The header of a recording, without its signal, in the shape of edf_io_lib.read_edf_header_custom."""
-    if file_format(path) == 'edf':
+    fmt = file_format(path)
+    if fmt == 'edf':
         return read_edf_header_custom(path, fallback_encoding=fallback_encoding)
+    if fmt == 'curry':
+        return curry_lib.read_cdt_header(path)
     return read_vhdr_header(path)
+
+
+def read_acquisition(path, keep_labels=None):
+    """What tool 6 (and tool 0's step 5) show of a recording that is not an EDF: (sampling frequency text, high-pass text,
+    dc_coupled), restricted to `keep_labels` when given. dc_coupled ticks their high-pass by default."""
+    if file_format(path) == 'curry':
+        return curry_lib.read_cdt_acquisition(path, keep_labels)
+    return read_vhdr_acquisition(path, keep_labels)
 
 
 def channel_table(header):
@@ -43,9 +61,12 @@ def channel_table(header):
 def read_start_datetime(path):
     """The start of the recording as a naive datetime, or None when the file does not give it. None too for a BrainVision
     recording that was paused (several 'New Segment' markers): after a pause its samples no longer follow the clock, so
-    clock times (scored-event exports, clock axes) cannot be placed on it."""
-    if file_format(path) == 'edf':
+    clock times (scored-event exports, clock axes) cannot be placed on it. A Curry start keeps its milliseconds."""
+    fmt = file_format(path)
+    if fmt == 'edf':
         return read_edf_start_datetime(path)
+    if fmt == 'curry':
+        return curry_lib.read_cdt_start_datetime(path)
     info = read_vmrk_info(path)
     return info['start_datetime'] if info['n_segments'] <= 1 else None
 
@@ -53,15 +74,18 @@ def read_start_datetime(path):
 def read_raw(path, include=None, add_online_reference=True, preload=False):
     """A recording as an MNE Raw. `include` = the channels to keep, the names absent from the file being ignored.
     add_online_reference concerns BrainVision only (brainvision_lib.read_raw_bv)."""
-    if file_format(path) == 'edf':
+    fmt = file_format(path)
+    if fmt == 'edf':
         return mne.io.read_raw_edf(str(path), preload=preload, encoding='latin-1', include=include, verbose=False)
+    if fmt == 'curry':
+        return curry_lib.read_raw_cdt(path, include=include, preload=preload)
     return read_raw_bv(path, include=include, add_online_reference=add_online_reference, preload=preload)
 
 
 def online_reference(path):
-    """(online reference, [channels recorded against it]) when the recording says so, else (None, []). An EDF header does
-    not say which reference its channels were recorded against: (None, []), and an EDF is used as it is."""
-    if file_format(path) == 'edf':
+    """(online reference, [channels recorded against it]) when the recording says so, else (None, []). Neither an EDF
+    header nor a Curry .dpo says which reference the channels were recorded against: (None, []), used as they are."""
+    if file_format(path) in ('edf', 'curry'):
         return None, []
     return channels_on_online_reference(path)
 

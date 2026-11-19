@@ -2,16 +2,11 @@
 
 Moved verbatim from tool 6 (its shared-function cell, and the computation lines of its run loop): tool 6 and
 tool 0's step 5 call the same code, so they give the same numbers by construction. Edit here, never in a
-notebook. The Curry twin of tool 6 does not import this file: tools_curry/_make_tool6_curry.py copies it into
-the twin and strips the EDF physical-range metric (bounds_pct) from that copy, so re-run the generator after
-any edit here.
+notebook.
 
 Format-agnostic: everything works on an already-loaded mne Raw (µV = get_data() * 1e6). Reading the recording
-(EDF here, Curry in the twin) stays in the notebooks.
+(EDF, BrainVision, Curry: recording_lib) stays in the notebooks.
 """
-import json
-from pathlib import Path
-
 import matplotlib
 import matplotlib.pyplot as plt
 import mne
@@ -436,53 +431,12 @@ METRIC_INTERPRETATIONS = {
 
 
 # --- Custom (non-AASM) sleep stages -------------------------------------------
-# Projects may intentionally keep labels outside the AASM set (W/N1/N2/N3/R). They are
-# declared in config_param/custom_stages.json (written by 3_remap_hypno) and recognised
-# here so the hypnospectrogram and per-stage tables include them.
-BASE_STAGE_COLORS = {'W': '#969696', 'N1': '#9e9ac8', 'N2': '#807dba', 'N3': '#6a51a3', 'R': '#c994c7'}
-# Distinct, non-red palette for custom stages (red is reserved for REM on the hypnogram).
-CUSTOM_STAGE_PALETTE = ['#8dd3c7', '#ffffb3', '#bebada', '#80b1d3', '#fdb462', '#b3de69', '#fccde5', '#d9d9d9']
-
-
-def load_custom_stages(folder):
-    """Read config_param/custom_stages.json; return list of kept non-AASM labels ([] if absent/unreadable)."""
-    if not folder:
-        return []
-    path = Path(folder) / 'config_param' / 'custom_stages.json'
-    if not path.exists():
-        return []
-    try:
-        with open(path, encoding='utf-8') as f:
-            data = json.load(f)
-        stages = data.get('custom_stages', []) if isinstance(data, dict) else []
-        return [str(s) for s in stages]
-    except Exception:
-        return []
-
-
-def parse_custom_field(text):
-    """Parse the comma-separated 'Custom stages' field into a clean, de-duplicated list."""
-    seen = []
-    for tok in str(text).split(','):
-        tok = tok.strip()
-        if tok and tok not in seen:
-            seen.append(tok)
-    return seen
-
-
-def custom_stage_style(custom_stages):
-    """Stage -> y-position, stage -> colour, and axis ticks for AASM + custom stages.
-    AASM keeps YASA heights (W top ... N3 bottom); custom stages stack below N3 (-1, -2, ...)
-    in declaration order with auto-assigned colours. Returns (stage_y, stage_colors, ytick_pos, ytick_labels)."""
-    stage_y = {'W': 4, 'R': 3, 'N1': 2, 'N2': 1, 'N3': 0}
-    stage_colors = dict(BASE_STAGE_COLORS)
-    for i, cs in enumerate(custom_stages):
-        stage_y[cs] = -1 - i
-        stage_colors[cs] = CUSTOM_STAGE_PALETTE[i % len(CUSTOM_STAGE_PALETTE)]
-    ordered = sorted(stage_y.items(), key=lambda kv: kv[1])
-    ytick_pos = [y for _, y in ordered]
-    ytick_labels = ['REM' if s == 'R' else s for s, _ in ordered]
-    return stage_y, stage_colors, ytick_pos, ytick_labels
+# Projects may intentionally keep labels outside the AASM set (W/N1/N2/N3/R). They are declared in
+# config_param/custom_stages.json (written by 3_remap_hypno) and recognised so the hypnospectrogram and per-stage
+# tables include them. One copy of the helpers, in edf_io_lib (this module kept its own for the Curry generator of tool
+# 6, gone in phase 6 of tools/plan_brainvision.md); imported here, tool 6 still finds them in this module.
+from edf_io_lib import (BASE_STAGE_COLORS, CUSTOM_STAGE_PALETTE, custom_stage_style, load_custom_stages,  # noqa: E402
+                        parse_custom_field)
 
 
 def compute_hypnospectrogram_sxx(sig_uV, sf, fmin=0.5, fmax=40):

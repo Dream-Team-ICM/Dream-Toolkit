@@ -31,7 +31,7 @@ The "what to do / what not to break" reminders, grouped by theme. Each points to
   **per channel configuration**, the non-EEG *context* channels (`eog_left`, `eog_right`, `emg`, `ecg`)
   via a dataframe-based `detect_context_channels(df_sub)` (same *transducer-type OR name* convention, but on
   the header scan, **not** the raw-based `detect_channel_types`). It **must tolerate a missing `transducer_type`
-  column** so the generated Curry twin still works (name-only there). Auto-detected into editable dropdowns
+  column** (name-only then). Auto-detected into editable dropdowns
   (`(none)` if absent), fanned out to participants like `remap`/`ref_channels`, and saved in an **additive,
   optional** `context_channels` block of the channel configuration (`channel_config.json`; a study keeps
   `remap_reref_persubject.json`, **`study_files_lib.find_input`** finds either) (**omitted when empty** → JSONs
@@ -39,21 +39,24 @@ The "what to do / what not to break" reminders, grouped by theme. Each points to
   tool 8's per-epoch inspector) load these channels on demand. Tool 2's **Divide by** (an input gain the file does not
   declare, e.g. BIP2AUX ×100) is a second additive block, `context_gain` (`{role: factor}`, omitted when all 1): **every
   reader of a context channel divides it first, before any derivation** (`edf_io_lib.context_gain` / `context_divisors`;
-  `read_context_raw`, `autoscoring_lib`, `channel_check_lib` already do), and records the factor it applied. → SPEC §2. The Curry
-  twin is **regenerated** via `tools_curry/_make_tool2_curry.py` (new code passes through, no generator
-  edit needed). Re-run it after editing the EDF Voila.
+  `read_context_raw`, `autoscoring_lib`, `channel_check_lib` already do), and records the factor it applied. → SPEC §2.
 - **`get_phys_bounds_uV`**: scale MNE's physical bounds by `units[ch]*1e6`, otherwise mV channels
   (Compumedics EOG/EMG/ECG) falsely flag ~100 % `bounds_pct`. In `edf_io_lib` (`get_phys_bounds_uV` +
-  `phys_bounds_for_remap`, tool 0's step 5); tool 6's load block keeps a copy, checked by `tests/test_edf_io_sync.py`.
+  `phys_bounds_for_remap`, tool 0's step 5); tool 6 imports it.
 - **Shared computation libraries (`tools/*_lib.py`)**: the batch tools' computation lives in libraries that the
   batch notebook and tool 0 both import (`edf_io_lib` = EDF reading + custom stages, `autoscoring_lib` 3bis,
   `macrostructure_lib` 5, `quality_lib` 6, `preprocessing_lib` 7, `autoreject_lib` 8bis, `spectral_lib` 9,
   `qc_rejected_epochs_lib` 8): **edit the library, never the notebook**, and tool 0 never re-implements a
   computation. Moving code into a library = verbatim, proven output-neutral with `tests/refactor_check.py` (save
   before / compare after: every file of the chain, + `tests/outside_chain.py`). `tests/test_tool0.py` compares
-  each tool-0 step with the batch tool it mirrors. The reading blocks the Curry generators rewrite (tools 2, 4, 6,
-  7) stay copies of `edf_io_lib`'s, kept identical by **`tests/test_edf_io_sync.py`**: edit both, then re-run the
-  generator. → SPEC *Cross-cutting → Shared computation libraries* + §0 + *Tests*.
+  each tool-0 step with the batch tool it mirrors. The reading blocks of tools 2, 4, 6, 7 import `edf_io_lib` (since
+  phase 6 of `tools/plan_brainvision.md`); the few copies left on purpose are kept identical by
+  **`tests/test_edf_io_sync.py`**. → SPEC *Cross-cutting → Shared computation libraries* + §0 + *Tests*.
+- **Three recording formats, one reader (`tools/recording_lib.py`)**: EDF (`.edf`), BrainVision (`.vhdr`,
+  `brainvision_lib`) and Curry 9 (`.cdt` + `.cdt.dpo`, `curry_lib`). Every tool reads a recording through it
+  (`read_header`, `read_raw`, `read_start_datetime`, `read_acquisition`), and `study_files_lib.list_recordings` finds
+  them. A rule is deduced from the data, never from the format (no declared range → no `bounds_pct`, ±500 µV cap;
+  DC-coupled → tool 6's high-pass ticked). → SPEC *Recording formats*.
 
 **Shared conventions** (→ SPEC *Cross-cutting procedures*)
 - **Rejected data is computed, flagged, left out of the outputs** (→ SPEC *Cross-cutting → Rejected-data
@@ -103,7 +106,7 @@ The "what to do / what not to break" reminders, grouped by theme. Each points to
   sourcing → Declared event files*.
 - **Scored events (`load_events`)**: tool 4 reads three Compumedics companions **TXT-first**: the
   `*_ScoredEvents_Export.txt` text export (French, UTF-16-or-UTF-8, no header, clock-time, parsed inline like
-  `curry_io._parse_events_txt`), then `*_event_xml.csv`, then the `<ScoredEvents>` of `*.edf.XML`. The scan
+  `edf_io_lib._events_df_from_txt`), then `*_event_xml.csv`, then the `<ScoredEvents>` of `*.edf.XML`. The scan
   needs **only names** (Start/Duration left NaN, no EDF-header read). `read_edf_start_datetime` (header
   offsets 168/176) converts `.txt` clock times to seconds **only** in the 1bis check, which compares the
   primary text source vs XML **language-robustly**: `_canon_events` normalizes names to the canonical vocab
@@ -111,14 +114,11 @@ The "what to do / what not to break" reminders, grouped by theme. Each points to
   **within ±`tol` s** (editable `Match tol (s)`, default 1, 0=strict, same-label pass then any-label pass)
   classifying them as matched / cooccur-difflabel (paired in time, different name: cross-language
   discovery aid, or two distinct events within tol) / only-in-one-source. French
-  labels get `FRENCH_EVENT_RULES`/`suggest_canonical` (shared verbatim with the Curry twin). **Tool 7 joins
+  labels get `FRENCH_EVENT_RULES`/`suggest_canonical`. **Tool 7 joins
   the same TXT-first / CSV / XML `load_events`** but returns a DataFrame and (because it flags epochs by
-  event **onset**, not just names) **reads the EDF start datetime to convert `.txt` clock times to real
-  `Start` seconds** (two suffix widgets: Event TXT + Event CSV). Its Curry twin mirrors the whole chain,
-  swapping only `read_edf_start_datetime` for a `.cdt`-header read, so `_make_tool7_curry.py`'s match
-  strings (`OLD_STARTDT`, the cell-4 detection loop vars) must track any edit to tool 7's event section.
-  Re-run the generator. **Tool 0 imports tool 5's copy of the chain from `edf_io_lib`**. Re-run
-  `tools_curry/_make_tool4_curry.py` after editing the EDF Voila.
+  event **onset**, not just names) **reads the recording start (`read_start_datetime`, any format: EDF header, `.vmrk`,
+  `.dpo` to the millisecond) to convert `.txt` clock times to real `Start` seconds** (two suffix widgets: Event TXT +
+  Event CSV). **Tools 0 and 5 import the chain from `edf_io_lib`**, tool 7 imports it but keeps its own XML parser.
   Labels harmonized to canonical via `config_param/event_remap.json`. → SPEC *Cross-cutting → Event sourcing* + §4.
 - **Manual annotations (`{id}_manual_events.tsv`, tool 8)**: events added by hand in tool 8's navigator go
   **beside the recording**, next to the scored companions (an annotation belongs to the *recording*, not to
@@ -127,25 +127,24 @@ The "what to do / what not to break" reminders, grouped by theme. Each points to
   ticked (**off by default** → byte-identical). Their labels are already canonical, so
   `augment_remap_for_manual` identity-maps **only** the rows tagged `Source='manual'` (an unmapped *scored*
   label must stay unmapped). Tool 0's explorer writes the same file (`source = manual_tool0`); tool 4
-  untouched. Re-run both Curry generators. → SPEC *Cross-cutting →
-  Event sourcing → Manual annotations* + §8.
+  untouched. → SPEC *Cross-cutting → Event sourcing → Manual annotations* + §8.
 - **Per-event-type persistence (tool 7 → 8bis/8)**: when event flagging runs on a file that has events, tool 7
   writes two **optional/additive** sidecars beside `_epoch_channel_rejection.tsv`: `{id}_event_epoch_flags.tsv`
   (per-epoch `evt_<type>` flags, for 8bis event sub-selection) and `{id}_event_counts.tsv` (raw `n_events` per
   type, for 8bis's per-event participant-exclusion threshold). It **also** adds the same `evt_<type>` columns to
   the `.fif` epoch metadata (so tool 8's inspector names the culprit event). All three derive from
   `event_type_masks` (`build_event_epoch_flags`/`build_event_counts`). **No events → nothing written, outputs
-  byte-identical**. Format-agnostic → pass through the Curry generator (re-run `_make_tool7_curry.py`).
+  byte-identical**.
 - **Rejection-method palette = single source in `qc_rejected_epochs_lib.HEATMAP_COLORS`** (CVD-validated,
   index 0 `none` dark, `multiple` cyan, `CTX_COLOR` deliberately outside the six method hues). Duplicated
   **verbatim** in tool 7's `plot_rejection_heatmap`. 8bis and tool 0 import the lib. Six
   categories can't be told apart by colour alone → always ship a legend / method-coloured labels. Changing
-  it changes rendered PNGs. Re-run the Curry generators. → SPEC *Cross-cutting → Rejection-method colour palette*.
+  it changes rendered PNGs. → SPEC *Cross-cutting → Rejection-method colour palette*.
 - **Event onsets (tool 7 → tool 8)**: tool 7 persists `{file_id}_event_onsets.tsv` (`type`, `onset_s`,
   `duration_s`) so tool 8 can mark event onsets *inside* an epoch without reloading the raw. It is a
   **montage companion** → written **beside the `.fif` in `derivatives/preproc_epo/`** (like `_context-epo.fif`),
-  **not** in `reports_preproc/` (tool 8 never reads the reports tree). Optional/additive. Passes
-  through the Curry generator. → SPEC *Cross-cutting → Event-onset sidecar* + §7.
+  **not** in `reports_preproc/` (tool 8 never reads the reports tree). Optional/additive. → SPEC *Cross-cutting →
+  Event-onset sidecar* + §7.
 - **High-density montages (32–64 ch) = channel-count-keyed, never format-keyed**: one threshold,
   `HD_CHANNEL_THRESHOLD` (12, in `edf_io_lib`, re-exported by `qc_rejected_epochs_lib`), for every display library
   (qc, preprocessing, spectral, quality: tools 0, 6, 7, 8, 9), each adaptation **inert at or below it**, so the 3–6
@@ -169,40 +168,40 @@ The "what to do / what not to break" reminders, grouped by theme. Each points to
   clinical display scales*.
 - **Custom (non-AASM) sleep stages**: declared once in `config_param/custom_stages.json` (written only by
   `3_remap_hypno`, read by tools 6/7/8). Its helpers (`load_custom_stages`, `parse_custom_field`,
-  `custom_stage_style`) have one copy, in `edf_io_lib` (tool 3 and the libraries import it; `quality_lib`'s copy is
-  checked by `tests/test_edf_io_sync.py`). Tools 6/8 use a custom `plot_hypnospectrogram()` because
+  `custom_stage_style`) have one copy, in `edf_io_lib` (tool 3 and the libraries import it). Tools 6/8 use a custom
+  `plot_hypnospectrogram()` because
   YASA's plotting hard-rejects non-AASM labels. Reading the JSON is non-fatal.
 - **Flat/dead-epoch colour scaling (`plot_hypnospectrogram()`)**: exclude near-zero (dead-epoch) columns
   from the vmin/vmax percentiles and render them grey, **then cap the colour span
   (`vmin = max(vmin, vmax − 45)`)** so a continuum of partly-flat/clipped low-power epochs can't drag
   `vmin` and squeeze the sleep structure into a few colours (clean channels span < 45 dB → untouched). One
   function, `quality_lib.spectrogram_colour_scale`, colours **every** hypnospectrogram (tool 6, tool 0's step 5
-  and explorer navigator; the Curry twin gets a copy). → SPEC *Cross-cutting → Flat/dead-epoch colour scaling*.
+  and explorer navigator). → SPEC *Cross-cutting → Flat/dead-epoch colour scaling*.
 - **Display conventions = one style everywhere** (2026-10-13): REM in red **at the hypnogram line's own
-  width** (never bold; custom stages too) on every hypnogram (tools 0, 3bis, 5, 6, 7, 8, 8bis + twins); every
+  width** (never bold; custom stages too) on every hypnogram (tools 0, 3bis, 5, 6, 7, 8, 8bis, 9); every
   hypnospectrogram in `viridis` with a colour scale `dB (µV²/Hz)`; scored events coloured by family
   (`macrostructure_lib.EVENT_COLORS`). **Every hypnogram is drawn by `edf_io_lib.draw_hypnogram`** (2026-11-18; only
   an overlay on a coloured image keeps its contrasting colour). A new figure follows them. → SPEC *Cross-cutting →
   Display conventions*.
-- **Time-series display cap for DC-coupled data**: DC sources (Curry `.cdt`, any DC export with no
-  clipping) → cap the shared amplitude limit at `y_lim = min(max_p999, 500.0)` (`DISPLAY_YLIM_UV = 500.0`),
-  never a fixed window. Currently **Curry-only**. EDF tools keep the uncapped autoscale on purpose (full
-  range helps spot export clipping). Extend to any future DC-source tool.
+- **Time-series display cap for data without a declared range**: a format that declares no physical range
+  (BrainVision, Curry: often DC, never clipped) → cap the shared amplitude limit at `y_lim = min(max_p999, 500.0)`
+  (`DISPLAY_YLIM_UV = 500.0`), never a fixed window. EDF keeps the uncapped autoscale on purpose (full range helps spot
+  export clipping).
 - **Distribution `n_peaks` histogram = robust-clipped**: in tool 6 (`quality_lib`) the histogram feeding the Savitzky-Golay
-  curve + `find_peaks` is bounded to robust percentiles (`HIST_CLIP_PCT`, **uniform EDF + Curry**) so rare
+  curve + `find_peaks` is bounded to robust percentiles (`HIST_CLIP_PCT`, **every format**) so rare
   extremes don't over-smooth the curve into a dome/flat line on DC data. `hist_extreme_pct` stays on a
-  **separate full-range** histogram (only `n_peaks` changes, now more sensitive). Passes through the Curry
-  generator unchanged. → SPEC §6 *Distribution histogram (robust range for peak detection)*.
+  **separate full-range** histogram (only `n_peaks` changes, now more sensitive). → SPEC §6 *Distribution histogram
+  (robust range for peak detection)*.
 - **Checkbox-revealed widgets**: a parameter box shown/hidden by a checkbox must derive its **initial**
   `display` from that checkbox (`display='' if cb.value else 'none'`), never hard-code `'none'`: the
-  `observe` handler only fires on a *change*, so a pre-ticked checkbox would leave its box hidden (as it did
-  in the Curry twin of tool 6, where `hp_check` defaults ON). Applies to tools 6 & 7. Use it for any new one.
+  `observe` handler only fires on a *change*, so a pre-ticked checkbox would leave its box hidden (as it did once
+  for tool 6's `hp_check`, ticked for a DC-coupled recording). Applies to tools 6 & 7. Use it for any new one.
 - **Single delivery = the Voila app**: every user-facing tool is one code-hidden Voila notebook
   (`tools/*_voila.ipynb`), the only version maintained. Some add a batch `.py` (tools 1, 8). The former
   code-visible Jupyter versions of tools 0–4 are **archived, frozen** in `tools/jupyter_notebook/` (since
   2026-10-08): never edit or sync them, never create a Jupyter version for a new tool. Outputs are TSV
   (machine) + HTML (human). → SPEC *Cross-cutting → Single delivery*.
-- **Voila page conventions = `tools/ui_lib.py`** (imported as `UI` by every page and Curry twin): intro template
+- **Voila page conventions = `tools/ui_lib.py`** (imported as `UI` by every page): intro template
   + References, `section_html` / `subsection_html` (continuous numbering), message colours, buttons by role
   (`run` / `save` green, `read` blue = **Scan** as the entry button, `caution`, `helper`), widths, **every progress bar**
   (`progress_bar`, and `phase_bar` for a pipeline bar with its legend of steps: never an `IntProgress` in a page). **A bar
@@ -268,19 +267,19 @@ The "what to do / what not to break" reminders, grouped by theme. Each points to
   methods' thresholds share that deeper indent so they stay aligned (Variant A, layout-only). `compute_rejection_masks`
   reads the signal **one channel at a
   time** from `epochs` (+ `del raw` after epoching) to bound memory on dense montages. The formulas are unchanged, so
-  every output is **byte-identical** to the former full-array version, and the code is format-agnostic (EDF
-  source, passes through to the Curry twin). Keep the formulas in sync with tool 8's `qc_rejected_epochs_lib.py`.
-  **Tool 7's computation = `tools/preprocessing_lib.py`** (shared with tool 0's step 6; the Curry twin imports it):
+  every output is **byte-identical** to the former full-array version, and the code is format-agnostic. Keep the
+  formulas in sync with tool 8's `qc_rejected_epochs_lib.py`.
+  **Tool 7's computation = `tools/preprocessing_lib.py`** (shared with tool 0's step 6):
   edit the library, never the notebook. Its fatal steps raise `StepFailed(reason, message)` (the former
-  `preprocessing_failed.tsv` reasons). The EDF reading, the `[H]` companion and the saves stay in the notebook (the
-  Curry generator rewrites them). → SPEC §7 *Shared library*.
+  `preprocessing_failed.tsv` reasons). The reading (through `recording_lib`), the `[H]` companion and the saves stay in
+  the notebook. → SPEC §7 *Shared library*.
   **Configurable epoch length** (`dd_epoch_len`, divisors of 30 ≥ 5 s, **default 30 = classic**): the 30 s
   hypnogram is validated/trimmed at 30 s then **expanded** (`np.repeat(expert_hypno, 30 // epoch_sec)`) so each
   sub-epoch inherits its parent stage. `make_fixed_length_epochs(duration=epoch_sec)`, event mask + context
   companion + Welch window (`min(4, epoch_sec)·sf`) all take `epoch_sec`, sidecar gains `epoch_length_s`
   (30 when absent). Event flagging stays onset-only with an **amber warning** when ≠ 30 s. Thread `epoch_sec`
-  consistently across tool 7 → context companion → sidecar → tools 8/8bis/`qc_rejected_epochs_lib` (re-run the
-  Curry generator). → SPEC §7 *Epoching (configurable epoch length)*.
+  consistently across tool 7 → context companion → sidecar → tools 8/8bis/`qc_rejected_epochs_lib`. → SPEC §7
+  *Epoching (configurable epoch length)*.
   **Output location**: tool 7 writes its `.fif`/sidecar/context under **`derivatives/preproc_epo/<subtree>/`**
   (+ the suffix of a later run; sibling of tool 8's `rejection_manual/` and 8bis's `rejection_auto/`), and deletes stale
   same-id copies at the old `derivatives/<subtree>/` location on reprocess (first run only). A former `derivatives/raw_epo/` is renamed once
@@ -291,7 +290,7 @@ The "what to do / what not to break" reminders, grouped by theme. Each points to
   **Deselected channels are kept as `bads`** (→ SPEC §7): in the `.fif` and the sidecar (`bad_channels`),
   out of the average reference and of the flagging (dropped right after epoching, put back at save), but
   **re-referenced by hand** (MNE leaves bads in their original reference). Every tool-7 table stays
-  byte-identical. The Curry generator's `OLD_LOAD`/`NEW_LOAD` carries these lines: mirror any edit there.
+  byte-identical.
 - **Context-channels companion (`7_preprocessing` block `[H]`, → tool 8)**: when the participant's
   `sub_config` carries a tool-2 `context_channels` block, tool 7 reads **only** those declared EOG/EMG/ECG
   channels from the raw EDF, renames them to role labels (`EOG-L`/`EOG-R`/`EMG`/`ECG`), sets MNE channel
@@ -302,7 +301,7 @@ The "what to do / what not to break" reminders, grouped by theme. Each points to
   `{file_id}_context-epo.fif`. **Optional + non-fatal**: no `context_channels` → no companion written, all
   other outputs byte-identical. Since 2026-11-12 the block calls `edf_io_lib.read_context_raw` (the same lines, any
   format; given `sub_config`, an EOG recorded against a BrainVision online reference gets tool 2's reference): edit it
-  there. (The Curry generator's replacement no longer applies: the twins are frozen.)
+  there.
 - **Manually reject flagged epochs (`8_reject_manually*`)**: reads tool-7 `{file_id}_all-epo.fif`
   (+ optional params JSON), **never reloads the raw EDF**, **never modifies tool-7 outputs**. **Section 1 =
   the study folder; the run of tool 7 is found from it** (like 8bis, the reports folder paired by name is optional here).
@@ -345,9 +344,7 @@ The "what to do / what not to break" reminders, grouped by theme. Each points to
   (`deriv_root.parent/…`, beside `reports_preproc/`).
 - **Automatic epoch rejection (`8bis_reject_automatically_voila`)**: **flagging → rejection** decision tool
   (naming scheme: 7 flag → 8 manual → 8bis auto, where 8 and 8bis are alternatives). Voila app. It reads only
-  format-agnostic `.fif` + `{file_id}_epoch_channel_rejection.tsv` (both identical from Curry tool 7), so its
-  **Curry twin is a verbatim copy**: `tools_curry/_make_tool8bis_curry.py` re-copies + retitles (no
-  EDF-specific code to swap). Re-run it after editing the EDF notebook. **Channel-first then epoch**
+  format-agnostic `.fif` + `{file_id}_epoch_channel_rejection.tsv`. **Channel-first then epoch**
   (`auto_reject_decision`): drop a channel flagged in
   > `channel_pct` of in-scope epochs, then reject an in-scope epoch flagged in > `epoch_pct` of the *remaining
   good* channels (both default 20 %, editable). The stage checkboxes are **reference stages** (channel
@@ -360,10 +357,8 @@ The "what to do / what not to break" reminders, grouped by theme. Each points to
   (per-type epoch flags, absent → fall back to `flag_event`) and `_event_counts.tsv` (raw counts). A ticked
   type over its threshold **excludes the whole participant** (registry `8bis_auto`, like all-channels-dropped /
   all-epochs-rejected; a re-run replaces these rows). Provenance columns
-  `methods_used`/`event_types_used`/`excluded`/`exclude_reason`. Run tally gains `excluded`. Still format-agnostic → **Curry twin stays a
-  verbatim copy** (re-run `_make_tool8bis_curry.py`). **The decision rule, its tables and figures =
-  `tools/autoreject_lib.py`** (shared with tool 0's step 7; the twin imports it through the qc-lib probe): edit the
-  library, never the notebook. → SPEC §8bis *Shared library*. **Section 1 = the study folder, the run of tool 7 found from it (preprocessed-epochs + reports paired by name, a menu with several runs) + a Scan button**:
+  `methods_used`/`event_types_used`/`excluded`/`exclude_reason`. Run tally gains `excluded`. **The decision rule, its
+  tables and figures = `tools/autoreject_lib.py`** (shared with tool 0's step 7): edit the library, never the notebook. → SPEC §8bis *Shared library*. **Section 1 = the study folder, the run of tool 7 found from it (preprocessed-epochs + reports paired by name, a menu with several runs) + a Scan button**:
   *not* one root scanned recursively, so
   renamed/versioned tool-7 runs (`preproc_epo_v2`, `reports_preproc_v2`) stay apart. **Data/reports split**:
   `_epoch_decision.tsv` + `_channel_decision.tsv` → **`rejection_auto/`** (`raw_root.parent/…`, beside the raw
@@ -393,32 +388,16 @@ The "what to do / what not to break" reminders, grouped by theme. Each points to
   `sfreq`, so recordings at different rates stop being comparable). → SPEC *Cross-cutting → PSD units and
   log guards*.
 
-**Curry twins** (→ SPEC *Curry 9 support*)
-- **Frozen until their removal (`tools/plan_brainvision.md`, phases 2 to 6, since 2026-11-06)**: the notebooks stay as they are,
-  and every "re-run the generator" of this file is suspended (their match strings no longer apply). A read of a recording in a
-  tool goes through `tools/recording_lib.py`.
-- **Tool 8's twin = 3 replacements** (`_make_tool8_curry.py`): H1, one prose sentence, and the
-  **shared-library import probe** (the EDF notebook probes only `cwd`/`cwd/tools`, which does not resolve
-  from `tools_curry/`). Nothing Curry-specific is injected: the high-density support is inherited from the
-  shared lib. Re-run the generator after editing the EDF notebook. It asserts `3/3` and that no `.edf` /
-  `raw EDF` / `read_raw_edf` string survives.
-- **Generated, not hand-edited**: `tools_curry/_make_tool{6,7}_curry.py` regenerate the Curry notebooks
-  from the EDF originals by string replacement. Edit the EDF notebook, then **re-run the generator**. New
-  code passes through automatically **unless** it sits inside a block the generator string-matches or
-  wholesale-replaces (e.g. tool 7's Curry load block, event loader, or `[H]` context reader), in which case
-  the change must be mirrored in the generator. (`8bis` is the exception: format-agnostic, so
-  `_make_tool8bis_curry.py` is a **verbatim copy + retitle**.)
+**Recording formats and launch** (→ SPEC *Recording formats*)
+- **No twin per format** (the Curry twins, their generators and `tools_curry/` were removed on 2026-11-18, phase 6 of
+  `tools/plan_brainvision.md`): one notebook per tool reads EDF, BrainVision and Curry through `tools/recording_lib.py`.
+  A format-specific need goes into the reader (`brainvision_lib`, `curry_lib`), never into a copy of a tool.
 - **Tool 6's computation = `tools/quality_lib.py`** (shared with tool 0's step 5): edit the library, never the
-  notebook. The Curry twin does **not** import it: `_make_tool6_curry.py` **copies the library into the twin's
-  cell 1** in place of the import, then strips `bounds_pct` and adds the ±500 µV cap on that copy (its match
-  strings target the library's text): re-run the generator after editing the lib too. → SPEC §6 + *Curry 9*.
+  notebook. → SPEC §6.
 - **Canonical launch cwd = repo root, and shared-module imports must be cwd-independent**: every tool is run
   from `SomnoLens/` (see SPEC *How to run*), but the shared-module import must still resolve from either
-  cwd. The Curry twins (1,2,4,6,7) probe `cwd`, `cwd/tools_curry`, `dirname(cwd)/tools_curry` for
-  `curry_header.py`. 8bis (EDF + Curry) probes the `tools/` variants for `qc_rejected_epochs_lib.py`. This
-  block lives in the **generators** (except tool 1 = hand-edited, no generator): fix it there and
-  **re-run the generator**, never the old `os.path.dirname(os.path.abspath('__file__'))` (= cwd only,
-  breaks from the repo root).
+  cwd: each page probes `cwd`, `cwd/tools` and `dirname(cwd)/tools`, never the old
+  `os.path.dirname(os.path.abspath('__file__'))` (= cwd only, breaks from the repo root).
 
 ## Working agreements
 

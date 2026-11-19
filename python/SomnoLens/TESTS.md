@@ -49,7 +49,7 @@ Not every change needs every test. The suite has three levels, from the fastest 
 
 | Level | What it runs | Duration | When |
 |---|---|---|---|
-| **Quick** | small checks of the shared code, and every Voila notebook (EDF tools and Curry twins) opened and run from top to bottom without clicking anything | about 2 min | a change that touches no tool's results (a test, a text, a Curry generator) |
+| **Quick** | small checks of the shared code, and every Voila notebook opened and run from top to bottom without clicking anything | about 2 min | a change that touches no tool's results (a test, a text) |
 | **Standard** | quick + the full chain on the synthetic nights (comparison with the reference run, every check below) + the known answers + tools 1, 3, 4 | about 32 min (28 when the chain is reused, measured on 2026-11-06) | a change to a tool |
 | **Full** | standard + the chain on the real nights + the parameter variants | about 1 h 20 (measured on 2026-11-06) | before merging a branch, or after a change to code shared by several tools |
 
@@ -362,8 +362,8 @@ repository.
 
 | Area | What is checked |
 |---|---|
-| Every Voila notebook | Opens and runs from top to bottom without error, EDF tools and Curry twins (quick level) |
-| Page look | Every Voila page and Curry twin takes its look from the shared style module (title, section lines, button styles), so no page drifts back to its own style (quick level) |
+| Every Voila notebook | Opens and runs from top to bottom without error (quick level) |
+| Page look | Every Voila page takes its look from the shared style module (title, section lines, button styles), so no page drifts back to its own style (quick level) |
 | Inputs found | With the study folder only, each tool finds its files and says where each comes from, the new and the recorded names are followed, a file chosen by hand wins and a wrong one is said on its line, Scan or Run refuses when a required file is missing, the Advanced box says when a default was changed; the runs of tool 7 come with a menu and their own reports, tool 9 pre-chooses the most recent decision and offers none; on the chain's study, the files found are the ones the chain picks by hand |
 | Suffix menus | The menu of the suffixes found lists each one with its number of recordings, follows its text field both ways (the field is what the tool reads), shows the field for a suffix typed by hand ("Other suffix…"), names the recordings that miss the chosen suffix and empties itself for another folder (quick level) |
 | Every tool | No Python error appears in any tool's output during the chain |
@@ -380,8 +380,8 @@ repository.
 | Registry details | Ids match regardless of case; no temporary file is left behind; rewriting the same decisions does not touch the file (their dates stay); the orange "registry changed" box compares what the tables say with the registry: a decision of the run shows it, a decision on another run or a decision lifted since then does not |
 | Several runs of tool 7 | Each run reads tool 5bis's decisions and its own; a decision on one run leaves the other's alone; on empty files: tool 7's line of the run, *New version* under Skip, the suffix proposed, typed, refused or already taken, who is already processed followed without a new Scan; tools 8, 8bis and 9 pre-choose the most recent run, tool 9 only its decisions. On the synthetic database (full level): a `_v2` of tool 7 then 8bis, 8 and 9 on it, each writing its own folders, the first run untouched and unaware of its exclusion |
 | Hypnogram choice | When the study folder is picked, tools 3, 3bis, 5, 6 and 7 pre-choose the right hypnogram even with the toolkit's own hypnograms beside the recordings (tool 3bis's automatic ones, tool 0's rescored one): tool 3 the raw export, the others the remapped one; participants 1 and 10 are not mixed up; a name a tool recorded in `config_param/file_names.json` is followed; a study keeps its output names (shorter names for new studies only); only automatic hypnograms present = nothing pre-chosen; the names file keeps the other tools' entries and is never overwritten when unreadable |
-| Curry versions | The Curry twins of tools 6, 7, 8 and 8bis are valid Python and contain the new features of their EDF original (they are generated, not run, see below) |
-| Shared EDF reading | The copies of the shared reading functions that some tools still carry (tools 2, 4, 6 and 7, whose Curry versions rewrite them; the custom-stage helpers of the quality library) are the same code as the shared library's: a copy edited alone fails this check, which names it (quick level) |
+| Curry recordings | Curry 9 recordings written by the tests (a `.cdt` and its `.cdt.dpo`, invented values): the header, the impedances in kOhm, the start to the millisecond and the signal read back as written (quick level); tools 1, 4, 5, 6, 7 and 0 on a small Curry nap study (standard level) |
+| Shared EDF reading | Tools 2, 4, 6 and 7 and the quality library import the shared reading functions instead of keeping copies (the Curry twins that rewrote those copies are gone): a copy that comes back fails this check, and the two kept on purpose stay the same code as the shared library's (quick level) |
 | Tool 0 | On every participant, loading gives exactly tool 7's epochs, sleep stages, EEG channels and scored events; a hypnogram the detection misses (renamed, in another folder) loads through "Other file…" with the same stages; the EOG / EMG traces are tool 7's, sample for sample; the header step flags the ±50 µV Fp1 like tool 1 and shows one channel table per detected type; the scoring step counts every scored event under its tool-4 label; its automatic scoring (read from tool 3bis's files, or redone in tool 0) gives tool 3bis's stages, probabilities and kappa; its macrostructure step gives tool 5's value for every metric and the same lights-off / lights-on source, on every participant; its signal-quality step gives tool 6's value for every metric of every channel, over the whole night and per sleep stage, and the same flagged channels, on every participant; its preprocessing step gives tool 7's flag for every epoch and channel and the same per-epoch information, on every participant, and then shows that signal in the explorer; its decision step gives tool 8bis's epoch table, channel table and decision record, on every participant, and reads tool 8's and 8bis's tables back unchanged; its spectral step gives every per-participant table of tool 9, on every participant; rescoring and annotations write only their documented files (the annotation in tool 8's format, read back by tool 7's event reading; the rescored hypnogram's name in `config_param/file_names.json`) and touch nothing else in the study |
 
 ## What the tests do not check
@@ -390,8 +390,9 @@ repository.
   looks at them: layout, colours and figure readability still need a human eye in Voila.
 - **Figures.** Only the tables behind them are compared (except around a move of code into a shared library,
   where the before / after check of section 10 compares the figures too).
-- **Curry recordings.** The Curry twins are checked for consistency with their EDF original and opened in a
-  kernel (quick level), but never run on a recording (the Curry test data is 17 GB).
+- **Real Curry recordings.** The tools run on Curry recordings written by the tests, not on the two real ones (17 GB).
+  Those were read once, by hand, with the former Curry twins' code and with the new reader: the same channels, signal,
+  positions, start, impedances, hypnograms and events (phase 6 of `tools/plan_brainvision.md`).
 - **Tool 2** on an EDF study is only opened (too interactive for a useful run; section 12 goes through its page on BrainVision),
   **tool 1bis** checks itself. Tool 0 is
   checked step by step as its steps are built (tool-0 redesign).

@@ -1,8 +1,8 @@
 """
 Shared EDF reading helpers: header, channel types, configuration files, hypnogram, scored events,
 context channels. The signal reads (read_eeg_raw, read_context_raw, the recording start of load_events) go through
-recording_lib, so they read a BrainVision recording too; their EDF branch is the former reading. recording_lib imports
-this module, so they import it at call time. (The Curry twins have tools_curry/curry_header.py + curry_io.py.)
+recording_lib, so they read a BrainVision or Curry recording too; their EDF branch is the former reading. recording_lib
+imports this module, so they import it at call time.
 
 Part of the tool-0 redesign (tools/plan_tool0_redesign.md): tool 0 walks ONE participant through the whole
 pipeline and must read a recording exactly like the batch tools do, so the reading code lives here once.
@@ -419,8 +419,9 @@ def read_edf_start_datetime(edf_path):
 
 
 def read_start_datetime(path):
-    """The start of a recording of any format (recording_lib.read_start_datetime): the EDF header, or the .vmrk of a
-    BrainVision recording, None when unknown or when the recording was paused (its clock no longer follows the samples)."""
+    """The start of a recording of any format (recording_lib.read_start_datetime): the EDF header, the .vmrk of a
+    BrainVision recording or the .dpo of a Curry one, None when unknown or when the recording was paused (its clock no
+    longer follows the samples)."""
     import recording_lib   # here, not at the top: recording_lib imports this module
     return recording_lib.read_start_datetime(path)
 

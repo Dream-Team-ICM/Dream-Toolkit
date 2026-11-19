@@ -6,8 +6,8 @@ scores sleep automatically, computes the sleep macrostructure, reviews signal qu
 rejects artefacted epochs, then extracts spectral features.
 
 It is written for **sleep researchers**: every tool is a point-and-click app in the web browser
-([Voila](https://voila.readthedocs.io/)), no programming is needed. Recordings are read in **EDF**, the most common
-format in clinical settings. Twins of some tools for **Curry 9** (`.cdt`) recordings are experimental.
+([Voila](https://voila.readthedocs.io/)), no programming is needed. Recordings are read in **EDF** (the most common
+format in clinical settings), **BrainVision** and **Curry 9** (see *Recording formats* below).
 
 SomnoLens is part of the [Dream-Toolkit](../../README.md) repository. It was called `Inspect_EDF` until October
 2026, after its first tool.
@@ -39,10 +39,11 @@ in the tables, and left out of the group statistics and figures only.
 Every tool writes **tables** (TSV, for analysis) and **HTML reports** (to read). A "Skip already processed" option
 lets a tool run again on a growing database without redoing the participants already done.
 
-### Curry 9 (experimental)
+### Recording formats
 
-`tools_curry/` holds Curry twins of tools 1, 2, 3, 4, 6, 7, 8 and 8bis, most of them generated from the EDF tools.
-No test runs them on Curry recordings yet: check their outputs.
+Every tool reads three formats: **EDF** (`.edf`), **BrainVision** (`.vhdr` + `.vmrk` + `.eeg`) and **Curry 9** (`.cdt` +
+`.cdt.dpo`). A study holds one format; the tools find the recordings by their extension in every subfolder of the
+study folder.
 
 ## Installation
 

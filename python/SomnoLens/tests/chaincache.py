@@ -37,7 +37,7 @@ LIB_QUAL, LIB_PREP = TOOLS / 'quality_lib.py', TOOLS / 'preprocessing_lib.py'
 LIB_AR, LIB_SPEC = TOOLS / 'autoreject_lib.py', TOOLS / 'spectral_lib.py'
 LIB_UI = TOOLS / 'ui_lib.py'                 # the look of the Voila pages (every tool imports it)
 LIB_SF = TOOLS / 'study_files_lib.py'        # the names registry and the choice of the companion files
-LIB_RECORDING = [TOOLS / 'recording_lib.py', TOOLS / 'brainvision_lib.py']   # one way to read a recording
+LIB_RECORDING = [TOOLS / 'recording_lib.py', TOOLS / 'brainvision_lib.py', TOOLS / 'curry_lib.py']   # one way to read a recording
 LIB_CHECK = TOOLS / 'channel_check_lib.py'   # the channel checks (tool 6's comparison with the other channels)
 TOOL_DEPS = {
     '5': [TOOLS / '5_compute_sleep_macrostructure_voila.ipynb', LIB_PSL, LIB_MACRO, LIB_EIO, LIB_QUAL, LIB_UI,

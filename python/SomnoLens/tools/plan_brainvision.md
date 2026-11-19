@@ -1,8 +1,8 @@
 # Plan : format BrainVision (.vhdr, .vmrk, .eeg) et une seule version de chaque outil
 
 **Statut** : version 3 du 2026-11-06, confirmée. Phases 1 à 5, 4 ter, 5 bis et 5 ter faites et commitées (5 ter avec la
-correction A + B de l'outil 0). Phase 5 quater (troisième inspection visuelle) confirmée et codée le 2026-11-18. Restent ensuite la
-phase 6 (jumeaux Curry), les phases 6 bis (bouton Stop) et 6 ter (numérotation des dossiers de rapports), puis la phase 7.
+correction A + B de l'outil 0) et 5 quater. Phase 6 (suppression des jumeaux Curry) faite le 2026-11-19 (tests quick, standard et full passés). Restent les
+phases 6 bis (bouton Stop) et 6 ter (numérotation des dossiers de rapports), puis la phase 7.
 Chaque phase est validée avant la suivante.
 **Objectif immédiat** : pouvoir inspecter ces données et faire l'autoscoring (phases 1 à 3). Le reste de la chaîne suit
 (phase 4), puis l'affichage haute densité (phase 5) et la suppression des jumeaux Curry (phase 6).
@@ -980,6 +980,31 @@ imports, la comparaison sur Curry, les suppressions et la documentation, les tes
    `curry_lib`, ou je le supprime ?
 
 - **Tests proposés** : quick et standard à chaque étape, full à la fin, plus la comparaison sur Curry.
+
+**Réponses (2026-11-18)** : 1. le plus économe pour moi si le résultat est le même ; 2. la règle des données (high-pass décoché) ;
+3. `inspect_curry.py` supprimé.
+
+**Fait le 2026-11-18, précisions apportées en faisant** :
+- **Validation plus économe, même résultat** : au lieu de faire tourner les jumeaux gelés pendant des heures, la lecture des jumeaux
+  (`curry_header`, `curry_io`) a été comparée à celle du nouveau lecteur sur les deux enregistrements réels, en lecture seule, sans
+  copie (script hors dépôt, sorties : oui/non, nombres, écarts maximaux). Identiques : canaux (44, dont 32 EEG), groupes, fréquence
+  et longueur, heure de début à la milliseconde, impédances, types, positions, `meas_date`, signal (24 fenêtres de 30 s par nuit,
+  écart 0), sélection de canaux, hypnogrammes, événements (569 et 131, écart de début 0). Tout ce qui suit la lecture est le code
+  partagé des outils, déjà testé en EDF et BrainVision.
+- **Différences voulues** : les marqueurs natifs du `.ceo` ne sont plus portés (comme BrainVision) ; le high-pass de l'outil 6 n'est
+  plus coché ; l'outil 1 écrit sous les noms des autres formats ; `include` garde l'ordre du fichier.
+- **L'heure de début Curry garde ses millisecondes** (comme le jumeau) : les débuts d'événements de l'export texte sont donc les mêmes
+  qu'avant. BrainVision reste tronqué à la seconde.
+- **Impédances** : tous les canaux EEG sont listés (un jamais mesuré est signalé), une entrée auxiliaire seulement avec une mesure (elles
+  ne le sont presque jamais : sinon signalées à chaque enregistrement).
+- **Outil 1** : les textes nomment les formats présents (*BrainVision*, *Curry*), donc une étude BrainVision garde ses messages ;
+  colonne `format` dans `recording_notes.tsv`.
+- **`recording_lib.read_acquisition`** remplace l'appel direct à `read_vhdr_acquisition` des outils 6 et 0 ; `FORMAT_NAMES` nomme le
+  format dans les messages ; la liste des enregistrements garde `.edf`, puis `.vhdr`, puis `.cdt` pour un même nom.
+- **Copies remplacées par des imports** : outils 2, 4, 6, 7 et `quality_lib`. L'outil 7 garde son analyseur XML (sans colonne
+  Desaturation) et le `load_events` qui l'appelle ; `test_edf_io_sync.py` vérifie qu'aucune copie ne revient.
+- **Tests** : `tests/curry_files.py` écrit des enregistrements Curry (MNE les ouvre) ; `test_curry_lib.py` (quick, 6 tests) et
+  `test_curry_chain.py` (1 quick, 6 standard : outils 1, 4, 5, 6, 7, 0) passent.
 
 ### Phase 6 bis : bouton Stop (demandé le 2026-11-17, à détailler)
 
