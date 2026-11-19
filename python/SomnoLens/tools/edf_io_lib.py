@@ -449,7 +449,6 @@ def _events_df_from_txt(txt_path, rec_start):
         HH:MM:SS , epoch# , stage_FR , event_label_FR , M:SS[.s] , - , - , position
     Encoding varies (UTF-16 with BOM on some exports, UTF-8/ANSI on others) -> the BOM is sniffed.
     Clock times are converted to seconds-from-recording-start (with midnight rollover) using rec_start."""
-    # FIX #8: use Path.read_bytes() to avoid file handle leak
     raw = Path(txt_path).read_bytes()
     if raw[:2] in (b'\xff\xfe', b'\xfe\xff'):
         text = raw.decode('utf-16')
@@ -552,13 +551,17 @@ def augment_remap_for_manual(event_remap, events_df):
 
 
 def load_events(edf_path, txt_suffix='_ScoredEvents_Export.txt', csv_suffix='_event_xml.csv',
-                manual_suffix='_manual_events.tsv', include_manual=False, xml=True):
+                manual_suffix='_manual_events.tsv', include_manual=False, xml=True, warn=None):
     """Load scored events next to the EDF, TXT-first then CSV then *.edf.XML fallback.
     Returns (DataFrame Name/Start/Duration in seconds, source) with source in
     {'txt', 'csv', 'xml'}, or (None, None) when no usable event companion is found.
     The .txt onsets need the recording-start datetime (read_start_datetime), so a .txt present
     without a usable start datetime is skipped in favour of the CSV/XML companions.
     A kind the study declares absent (suffix None, xml=False) is not looked for (event_companion_paths).
+
+    A companion found but not used (unreadable, no event in it, a .txt without a recording start) is never
+    skipped silently: one line per recording names the file, why, and what was read instead, given to
+    `warn` (a tool's log) or, without it, to the logging module. Nothing is said when every file found is read.
 
     With include_manual=True the tool-8 manual annotations ({stem}_manual_events.tsv) are APPENDED to
     whichever scored source won the priority chain (source tag e.g. 'csv+manual'), or used alone when
@@ -567,33 +570,43 @@ def load_events(edf_path, txt_suffix='_ScoredEvents_Export.txt', csv_suffix='_ev
     pre-annotation tool."""
     txt, csv, xml = event_companion_paths(edf_path, txt_suffix, csv_suffix, xml)
     df, source = None, None
-    # FIX #10: log exceptions instead of silently swallowing them
+    skipped = []   # one '<file> <why>' per companion found but not used
     if txt is not None:
         rec_start = read_start_datetime(edf_path)
-        if rec_start is not None:
+        if rec_start is None:
+            skipped.append(f'{txt.name} not read: the recording start is unknown (or the recording was paused)')
+        else:
             try:
                 d = _events_df_from_txt(txt, rec_start)
                 if d is not None:
                     df, source = d, 'txt'
+                else:
+                    skipped.append(f'{txt.name}: no event line in the expected format')
             except Exception as exc:
-                import logging
-                logging.getLogger(__name__).warning("TXT event parsing failed for %s: %s", edf_path, exc)
+                skipped.append(f'{txt.name} unreadable ({type(exc).__name__}: {exc})')
     if df is None and csv is not None:
         try:
             d = _events_df_from_csv(csv)
             if d is not None:
                 df, source = d, 'csv'
+            else:
+                skipped.append(f'{csv.name}: no Name / Start / Duration columns')
         except Exception as exc:
-            import logging
-            logging.getLogger(__name__).warning("CSV event parsing failed for %s: %s", edf_path, exc)
+            skipped.append(f'{csv.name} unreadable ({type(exc).__name__}: {exc})')
     if df is None and xml is not None:
         try:
             d = _events_df_from_xml(xml)
             if d is not None:
                 df, source = d, 'xml'
+            else:
+                skipped.append(f'{xml.name}: no <ScoredEvent>')
         except Exception as exc:
-            import logging
-            logging.getLogger(__name__).warning("XML event parsing failed for %s: %s", edf_path, exc)
+            skipped.append(f'{xml.name} unreadable ({type(exc).__name__}: {exc})')
+    message = ''
+    if skipped:
+        used = {'txt': txt, 'csv': csv, 'xml': xml}.get(source)
+        message = '; '.join(skipped) + (f': events read from {used.name} instead' if used is not None
+                                        else ': no scored event read')
     if include_manual:
         # Tool-8 annotations are ADDED to whatever the chain above found (never a replacement).
         manual_path = Path(edf_path).with_name(f'{Path(edf_path).stem}{manual_suffix}')
@@ -603,8 +616,16 @@ def load_events(edf_path, txt_suffix='_ScoredEvents_Export.txt', csv_suffix='_ev
                 if m is not None:
                     df = m if df is None else pd.concat([df, m], ignore_index=True)
                     source = 'manual' if source is None else f'{source}+manual'
-            except Exception:
-                pass  # a broken annotation file must never cost us the scored events
+            except Exception as exc:
+                # a broken annotation file must never cost us the scored events
+                manual_msg = (f'{manual_path.name} unreadable ({type(exc).__name__}: {exc}): '
+                              f'the manual annotations are left out')
+                message = f'{message}; {manual_msg}' if message else manual_msg
+    if message:
+        if warn is None:
+            import logging
+            warn = logging.getLogger(__name__).warning
+        warn(message)
     if df is None:
         return None, None
     return df, source

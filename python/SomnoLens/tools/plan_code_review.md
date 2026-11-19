@@ -1,6 +1,8 @@
 # Plan : revue de code du 2026-10-24 (points #10, #8 / #16, #20)
 
-**Statut** : version 1 du 2026-11-19, à confirmer.
+**Statut** : version 1 du 2026-11-19, confirmée. Phases 1 à 3 et documentation faites le 2026-11-19 : quick + standard
+des outils 0, 4, 5, 7 passés sur les données synthétiques (397 tests), `refactor_check` identique sur les 155 fichiers de
+la chaîne synthétique. Reste : la chaîne réelle, lancée par l'utilisateur.
 **Source** : SPEC.md, *Planned modules → Code review of 2026-10-24* (point 1 de *Order of the TODOs*), d'après
 `python/Score_EDF/DreamToolkit_Claude_Report.md`. Le #11 a été vérifié le 2026-10-28 : rien à changer.
 
