@@ -3502,7 +3502,7 @@ interpolated value, and never for a montage without positions (an EDF PSG).
 
 Anticipation, no study has one yet: a clinical recording with a low-density montage is often exported with its channels
 already derived, the name saying it (`C3-M2`, `EEG F3-A2`, `E1-M2`, `Fp1-C3`, `C3-O1`). Plan: `tools/plan_bipolar_montages.md`
-(draft, questions to answer). What the code does today (checked on the name functions, no recording):
+(questions answered on 2026-11-19). What the code does today (checked on the name functions, no recording):
 - Works: tools 1 and 2 type these names as EEG and find the context channels; tool 2's re-reference is *None* by default
   and tool 7 follows it; tools 6 to 9 work channel by channel (at 12 channels or fewer the high-density path stays inert).
 - Tool 3bis, contralateral mastoid: `electrode_side` reads the last digit (`C3-M2` taken as a right electrode). Without a
@@ -3512,7 +3512,8 @@ already derived, the name saying it (`C3-M2`, `EEG F3-A2`, `E1-M2`, `Fp1-C3`, `C
 - Tool 2 accepts *Average* or *Custom* on derived channels without a warning. Tool 0 pre-ticks `E1-M2` as EEG.
 
 The rule planned: two channels are subtracted only when they share the same reference part (both plain, or both `-B`),
-read on the original names; a channel no reference can be subtracted from is used as recorded and said. Every referential
+read on the original names; a channel no reference can be subtracted from is used as recorded and said. Tool 3bis still
+offers a bipolar or ipsilateral derivation, after the contralateral-mastoid ones, tagged and warned. Every referential
 study stays byte-identical. Left for a real clinical file: its channel names, tool 7's µV thresholds on short bipolar
 derivations, the models' scoring on bipolar chains.
 

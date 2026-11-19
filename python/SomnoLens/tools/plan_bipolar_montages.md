@@ -1,6 +1,6 @@
 # Plan: recordings exported with derived (bipolar) channels
 
-Status: **draft, to confirm** (2026-11-19). Anticipation: no study has such a recording yet. SPEC.md, *Planned modules →
+Status: **questions answered (2026-11-19), not implemented**: waiting for its place in the TODO order. Anticipation: no study has such a recording yet. SPEC.md, *Planned modules →
 Recordings exported with derived channels (bipolar montages)*, points here.
 
 ## 1. Context
@@ -87,7 +87,14 @@ recognised.
 - Menus: the GSSC consensus ticks, the GSSC / YASA defaults and SleepFM's choice compare the electrode part `A`,
   preferring a contralateral-mastoid derivation (`C3-M2` before `C3-O1`). SleepFM gets `C3:M2` (a name it knows); a
   bipolar `C3-O1` takes a generic name as today (`SLEEPFM_FALLBACK_BAS`).
-- `eeg_options` leaves out a name whose electrode part is an eye (`E1-M2`) (*Q4* for the bipolar EEG ones).
+- `eeg_options` leaves out a name whose electrode part is an eye (`E1-M2`). The bipolar and ipsilateral derivations stay
+  offered, after the contralateral-mastoid ones (*Q4*), **with warnings**:
+  - tagged in the GSSC / YASA menus and the consensus checkboxes: `Fp1-C3 (bipolar)`, `C3-M1 (ipsilateral)` (the label
+    only, the value stays the channel name, like the `(n/N)` tag of `menu_options`);
+  - an amber line under the pickers when one is chosen (`missing_channel_lines`, shown by `refresh_channel_lines`): *Fp1-C3
+    is a bipolar derivation, not the contralateral-mastoid derivation the models learnt (C3-M2, C4-M1): the scoring may be
+    less reliable*;
+  - the note at run, in the notes and the report (above).
 - Skip with other settings (*Cross-cutting → Skip*): nothing new is recorded (the reference description already is), no
   change to `settings_differences`.
 - **Every referential study stays byte-identical** (no derived name → the former code path).
@@ -114,7 +121,7 @@ recognised.
 - Quick (`tool3bis`, `tool0`, `tool2`):
   - `split_derivation` / `reference_part` / `can_subtract` on the names of section 3, the common reference in the name
     included.
-  - `electrode_side`, `contralateral_refs`, `eeg_options`, menu defaults with derived names.
+  - `electrode_side`, `contralateral_refs`, `eeg_options`, menu defaults, tags and warning lines with derived names.
   - A small EDF written by `edfio` with `C3-M2`, `C4-M1`, `O1-M2`, `E1-M2`, `E2-M1`, `Chin1-Chin2` (+ a variant that also
     keeps `M1` / `M2`, + a `X-Cz` common-reference variant): the signals given to GSSC, YASA and SleepFM checked value by
     value (as recorded for the derived ones, subtracted for the common-reference variant), the notes and `eeg_reference`.
@@ -126,17 +133,16 @@ recognised.
 
 Level proposed when implementing: **standard** on `tool2`, `tool3bis`, `tool0` + refactor_check. To confirm then.
 
-## 6. Questions (recommendation first)
+## 6. Decisions (answered on 2026-11-19)
 
 - **Q1**: tool 3bis with *As declared in tool 2*, a reference that `can_subtract` refuses: **not applied, said in the
-  notes** (recommended, the subtraction would be wrong whatever tool 2 says, and tool 2 now warns) / follow tool 2.
-  Tool 7 keeps following tool 2 (its gate is tool 2's warning).
-- **Q2**: an ipsilateral-mastoid or electrode-electrode derivation given to the models: **used as recorded with a note**
-  (recommended) / left out of the menus.
-- **Q3**: tool 2 with *Average* / *Custom* on derived channels: **a warning** (recommended, a study may have a reason) /
-  Save refused.
-- **Q4**: a bipolar EEG derivation (`Fp1-C3`) in the 3bis menus: **offered, after the contralateral-mastoid ones**
-  (recommended) / not offered.
+  notes** (the subtraction would be wrong whatever tool 2 says, and tool 2 now warns). Tool 7 keeps following tool 2 (its
+  gate is tool 2's warning).
+- **Q2**: an ipsilateral-mastoid or electrode-electrode derivation given to the models: **used as recorded with a note**.
+- **Q3**: tool 2 with *Average* / *Custom* on derived channels: **a warning**, Save not refused (a study may have a reason).
+- **Q4**: a bipolar EEG derivation (`Fp1-C3`, and an ipsilateral `C3-M1`) in the 3bis menus: **offered, after the
+  contralateral-mastoid ones, with warnings saying it**: tagged in the menus, an amber line under the pickers when one is
+  chosen, the note at run and in the report (Phase 2).
 
 ## 7. Later, with a real clinical file
 
