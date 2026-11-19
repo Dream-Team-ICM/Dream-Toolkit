@@ -1,9 +1,11 @@
 """Tool 9 after step 4: every epoch and channel computed from tool 7's *_all-epo.fif + the decision tables.
 
-1. The central check of the refactor: on the kept epochs of the kept channels, every value equals what the
-   former route (tool 9 on the clean-epo written by 8bis) produced: the golden snapshot.
-2. Every epoch / channel is in the tables, with the decision columns; excluded participants flagged.
-3. 'Re-aggregate only' after a decision change equals a full recomputation with that decision.
+1. Every epoch / channel is in the tables, with the decision columns; excluded participants flagged.
+2. 'Re-aggregate only' after a decision change equals a full recomputation with that decision.
+
+Its values are compared to the golden by test_pipeline.py. The former check against the route before the exclusion
+refactor (tool 9 on the clean-epo written by 8bis, equal on the kept epochs of the kept channels) retired with that
+golden on 2026-11-19: see the git history.
 """
 import json
 import shutil
@@ -22,68 +24,15 @@ pytestmark = pytest.mark.tool9
 
 EPOCH_TABLES = ['bandpower_epoch', 'aperiodic_epoch', 'periodic_peaks']
 STAGE_TABLES = ['spectral_stage', 'aperiodic_stage', 'psd_stage']
-SORT_KEYS = ['file_id', 'stage', 'band', 'third', 'channel', 'freq_hz', 'epoch_idx', 'peak_idx']
 
 
 def tsv(path):
     return pd.read_csv(path, sep='\t', dtype={'file_id': str})
 
 
-def sort(df):
-    keys = [k for k in SORT_KEYS if k in df.columns]
-    return df.sort_values(keys, kind='stable').reset_index(drop=True)
-
-
-# Power minus the aperiodic fit, in dB: a difference of two nearly equal numbers (often ~0.01 dB), so the
-# floating-point noise of the specparam fit, which changes with the BLAS library (OpenBLAS -> MKL when
-# pytorch was installed for tool 3bis), exceeds the relative tolerance. 1e-5 dB is far below anything meaningful.
-AP_REMOVED_ATOL_DB = 1e-5
-
-
 def same(new, old, ignore=('source',), atol=1e-9):
-    cols = [c for c in old.columns if c not in ignore]
-    # 'in', not endswith: the per-stage tables aggregate it as e.g. power_ap_removed_db_from_log_median
-    ap_cols = [c for c in cols if '_ap_removed_db' in c]
-    other_cols = [c for c in cols if c not in ap_cols]
-    new, old = new.reset_index(drop=True), old.reset_index(drop=True)
-    diffs = snapshot.compare_tables(new[other_cols], old[other_cols], atol=atol)
-    if ap_cols and len(new) == len(old):                  # a row-count change is already reported above
-        diffs += snapshot.compare_tables(new[ap_cols], old[ap_cols], atol=AP_REMOVED_ATOL_DB)
-    return diffs
-
-
-# 8bis's default reference stages = the former scope of its decision (the golden clean-epo held only
-# these): since the decision covers every epoch, the W/N1 epochs it keeps are new rows, left out here.
-GOLDEN_SCOPE = ['N2', 'N3', 'R']
-
-
-def kept_rows(df):
-    """The rows the former clean-epo route had: kept epochs (in scope, not rejected) of kept channels,
-    in the stages the former 8bis decision covered."""
-    keep = ~df['channel_dropped'].fillna(False).astype(bool)
-    if 'in_scope' in df.columns:
-        keep &= df['in_scope'].astype(bool) & ~df['rejected'].astype(bool)
-    if 'stage' in df.columns:
-        keep &= df['stage'].astype(str).isin(GOLDEN_SCOPE)
-    return df[keep]
-
-
-def test_tool9_reproduces_the_clean_epochs_route(chain, golden):
-    data, feat = chain['data'], 'derivatives/features_spectral'
-    for fid in minidb.PARTICIPANTS[chain['dataset']]:
-        for name in EPOCH_TABLES + STAGE_TABLES:
-            old = snapshot._read_table(golden / feat / f'{fid}_{name}.tsv.gz')
-            new = tsv(data / feat / f'{fid}_{name}.tsv')
-            # 'third' changed on purpose: the night thirds now span the WHOLE night
-            diffs = same(kept_rows(new), old, ignore=('source', 'third'))
-            assert not diffs, f'{fid}_{name}: ' + '; '.join(diffs)
-    for name in ['global_spectral_stage', 'global_aperiodic_stage', 'global_psd_stage']:
-        old = snapshot._read_table(golden / 'reports_features_spectral' / f'{name}.tsv.gz')
-        new = tsv(data / 'reports_features_spectral' / f'{name}.tsv')
-        if 'n_epochs' in old.columns and name != 'global_psd_stage':
-            old = old[old['n_epochs'] > 0]           # the former NaN padding of the dropped channels
-        diffs = same(sort(kept_rows(new)), sort(old))
-        assert not diffs, f'{name}: ' + '; '.join(diffs)
+    # the power minus the aperiodic fit gets its own tolerance there (snapshot.AP_REMOVED_ATOL_DB)
+    return snapshot.compare_tables(new.reset_index(drop=True), old.reset_index(drop=True), atol=atol, ignore=ignore)
 
 
 def test_tool9_computes_every_epoch_and_channel(chain):

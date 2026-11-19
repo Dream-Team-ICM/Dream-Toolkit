@@ -75,24 +75,24 @@ Adding a column or a file is allowed, so a new feature does not break the compar
 the existing numbers alone. Two runs of the chain on the same data and the same installation were checked to
 give byte-identical results, so any difference is real, not noise. Changing the math library underneath numpy
 (as when pytorch was installed for tool 3bis) can move the last digits of fitted values, which is why numbers
-are compared to within one part in a million.
+are compared to within one part in a million. The power left once tool 9 removes the 1/f background
+(`*_ap_removed_db`, per epoch and in the per-stage summaries such as `*_ap_removed_db_from_log_median`) is compared
+to within 0.00001 dB instead: it is the difference of two nearly equal numbers, often around 0.01 dB, so the last
+digits of the 1/f fit weigh heavily on it.
 
-When a change is *meant* to move numbers (for example the per-stage summary of tool 7 now leaves the
-excluded participants out), that output is listed as an intended change and gets its own dedicated test
-instead.
+When a change is *meant* to move numbers, that output is listed as an intended change and gets its own dedicated
+test instead, or, once the change is checked, the reference run is taken again.
 
-### 2. Tool 9 gives the same features as before the exclusion refactor
+### 2. The reference run was taken again on 2026-11-19
 
-Tool 9 used to read a cleaned copy of the epochs (only the kept ones). It now reads every epoch and joins
-the keep/reject decision of tool 8 / 8bis. The test takes the new results, keeps only the kept epochs of the
-kept channels, and compares them with the reference run made with the old method: every per-epoch table,
-every per-stage table and every database table must give **the same values**. This is the proof that the
-new way of working changed the organisation of the data, not the science.
-
-(One deliberate difference is excluded from the comparison: the night thirds now span the whole night
-instead of the kept epochs only. And the power left once the 1/f background is removed (`*_ap_removed_db`,
-per epoch and in the per-stage summaries such as `*_ap_removed_db_from_log_median`) is compared to within 0.00001 dB rather than one part in a million: it is the difference of two nearly equal
-numbers, often around 0.01 dB, so the last digits of the 1/f fit weigh heavily on it.)
+Until then the reference run dated from before the exclusion refactor, and three tests compared the new results with
+what the former method gave: tool 9 on the kept epochs of the kept channels against its former run on a cleaned copy
+of the epochs, the decision tables of tools 8 and 8bis against those cleaned copies, and tool 6 against its values
+before the 50-ms flat rule. They proved that the refactor changed the organisation of the data, not the science.
+When tool 7's band-pass became one zero-phase pass, the reference run was taken again with the current tools, and
+these three comparisons retired with the former run (they remain in the project's history). The rules they relied on
+are still checked: tool 8bis's decision rule on every epoch (`test_exclusion_tools.py`), the 50-ms flat rule
+(`test_quality_lib.py`), tool 9's every epoch and channel and its re-aggregation (`test_tool9.py`).
 
 ### 3. A deselected channel is referenced like the others
 
@@ -248,6 +248,11 @@ case, on a light copy of the test chain's outputs. It checks, for each of the fo
 Tool 7's editor is checked too: a channel unticked by hand comes back unticked, and the reference channel stays ticked, without
 which a reprocessing would change the reference.
 
+A study processed before tool 7's band-pass became one zero-phase pass (2026-11-19) has sidecars without a phase: the run asks
+(*0.1-50 Hz, zero-double → 0.1-50 Hz, zero*), *Use the recorded settings* says the former phase is no longer offered, and the
+question comes back. `test_preprocessing_lib.py` (quick) checks the comparison and that tool 7's band-pass gives exactly MNE's
+zero-phase filter, not the former one.
+
 ### 12. BrainVision recordings
 
 A BrainVision recording is three files (`.vhdr`, `.vmrk`, `.eeg`). The tests write such recordings themselves, with invented
@@ -354,8 +359,8 @@ In standard, `test_exclusion_tools.py` builds tool 8's report and checks it ends
 Tool 6's comparison of each channel with the median channel of the same epoch (`test_quality_lib.py`): a channel 10 times larger
 than the others is said in its own columns, never as a flag, so tool 7 unticks nothing more. Its flat measure counts only what
 holds still for 50 ms: a quiet channel at a high sampling rate is not flat, a 6-s flat stretch is, at any rate. Since this changed
-the flat values on purpose, `test_pipeline.py` compares tool 6 with the golden on everything else: only the flat values and, where
-they crossed the threshold, that one reason may move, and the channels tool 7 unticks stay the same.
+the flat values on purpose, `test_pipeline.py` compared tool 6 with the former reference run on everything else (only the flat
+values and that one reason moved, the channels tool 7 unticks stayed the same), until that run was taken again on 2026-11-19.
 
 These tests do not replace a look at real data: at each phase the tools were also run on real recordings, which never enter the
 repository.
@@ -374,8 +379,8 @@ repository.
 | Tool 5 | One report per recording (the night with its scored events, the metrics, the checks), each linked from the database report; a recording whose report is missing counts as not processed: it is the only one run again |
 | Tool 6 | The quality tables flag the excluded participants; `dataset_overview.html` counts only the others and names the excluded one; the excluded participant's report shows the banner |
 | Tool 7 | Deselected channels are in the `.fif` (marked bad) and in the settings file, absent from the flagging tables; the per-stage summary is pooled over the non-excluded participants only; a manual exclusion needs a reason; a re-run with nobody to process still refreshes the tables |
-| Tool 8bis | The decision tables keep exactly the epochs and channels the former cleaned copy held; tool-7 deselected channels are recorded as dropped; an event-count threshold excludes a participant, a re-run without it lifts the exclusion; with *Skip* ticked, a participant decided with the same settings is skipped and one decided with another threshold is decided again |
-| Tool 8 | The decision tables match the former cleaned copy; the *Exclude* / *Remove my exclusion* button writes and deletes the decision |
+| Tool 8bis | Every epoch is decided, by one rule (rejected when more than 20 % of the good channels flag it), and the reference-stage counts are those of the reference stages; tool-7 deselected channels are recorded as dropped; an event-count threshold excludes a participant, a re-run without it lifts the exclusion; with *Skip* ticked, a participant decided with the same settings is skipped and one decided with another threshold is decided again |
+| Tool 8 | The decision tables cover every epoch and every channel of the epochs; the *Exclude* / *Remove my exclusion* button writes and deletes the decision |
 | Tool 9 | Every epoch × channel is in the tables with the right decision flags; dropped channels are still computed; the per-epoch spectrum file exists; night-third counts (rejected, out of scope, % rejected) are those of each stage × third cell |
 | The settings of *Skip* | Each comparison, record and fingerprint on small examples: both values reported, older records compared only on what they hold, the most frequent set at equal count (`test_quality_lib.py`, `test_preprocessing_lib.py`, `test_autoreject_settings.py`, `test_spectral_settings.py`, `test_study_files_lib.py`) |
 | Participant selector | Skip applies in both modes; a subset with already-processed participants shows the warning; the add box only offers participants not yet selected; pasted and clicked ids switch to subset mode; unknown ids are refused; a rescan drops vanished ids |

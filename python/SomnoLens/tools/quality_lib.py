@@ -1129,10 +1129,10 @@ def display_limits(ch_metrics, ch_flags, cap_uV=None):
 
 
 def compute_channel_spectrograms(raw, sf, file_id, hypno_vec, warn=print, on_channel=None):
-    """Each channel's dB hypnospectrogram (display band-pass 0.1-40 Hz, 30 s multitaper windows, float32),
-    computed once for the per-channel figures and the across-channel median. Nothing without a valid
-    hypnogram vector. `on_channel(ci, ch, done)` is called before (done False) and after (done True) each
-    channel. Returns (ch_sxx, sxx_f, sxx_t)."""
+    """Each channel's dB hypnospectrogram (display band-pass 0.1-40 Hz, zero phase like tool 7's band-pass, 30 s
+    multitaper windows, float32), computed once for the per-channel figures and the across-channel median.
+    Nothing without a valid hypnogram vector. `on_channel(ci, ch, done)` is called before (done False) and
+    after (done True) each channel. Returns (ch_sxx, sxx_f, sxx_t)."""
     # --- Spectrograms: computed once here, used twice ---
     # Each channel's dB spectrogram is needed both for its own report figure and for the
     # across-channel median in the Overview. The median needs every channel at once, so the
@@ -1151,7 +1151,7 @@ def compute_channel_spectrograms(raw, sf, file_id, hypno_vec, warn=print, on_cha
                 _sig = raw.get_data(picks=[ci])[0] * 1e6
                 _sig_filt = mne.filter.filter_data(
                     _sig[np.newaxis, :], sfreq=sf, l_freq=0.1, h_freq=40,
-                    method='fir', phase='zero-double', fir_window='hamming', verbose=False
+                    method='fir', phase='zero', fir_window='hamming', verbose=False
                 )[0]
                 del _sig
                 sxx_f, sxx_t, _sxx = compute_hypnospectrogram_sxx(

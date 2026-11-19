@@ -414,9 +414,10 @@ test must point it at a copied `preproc_epo`.
   `read_edf_header_custom`'s (code review #20).
 - *Skip* and the settings (*Cross-cutting → Skip + cumulative-merge*): `test_settings_skip.py` (standard, tools 6, 7, 8bis, 8, 9, each
   scenario in a **new session** on a light copy of the chain's outputs: same settings skipped, other settings stop before
-  anything is written, the three answers, what follows tool 7, a new participant made like the others),
-  `test_quality_lib.py`, `test_preprocessing_lib.py`, `test_autoreject_settings.py`, `test_spectral_settings.py` and
-  `test_study_files_lib.py` (quick: the comparisons, the records, the fingerprint).
+  anything is written, the three answers, what follows tool 7, a new participant made like the others, a study whose
+  band-pass ran twice before 2026-11-19), `test_quality_lib.py`, `test_preprocessing_lib.py` (+ tool 7's band-pass equal to
+  MNE's zero-phase filter), `test_autoreject_settings.py`, `test_spectral_settings.py` and `test_study_files_lib.py` (quick:
+  the comparisons, the records, the fingerprint).
 - `refactor_check.py` (a script, not a test) + `test_refactor_check.py` (quick): the **before / after check**
   of the tool-0 redesign, which moves code into shared libraries. `save <label>` copies every output of the
   chain folders (`%TEMP%/dtk_tests/<dataset>/data`, recordings excluded) to `%TEMP%/dtk_refactor/<label>/`;
@@ -464,8 +465,13 @@ bursts; every recording uses the M2 reference of a clinical montage):
 A golden snapshot (TSV/JSON outputs gzipped with a fixed timestamp, `.fif` summarised as channels + bads +
 metadata, run paths replaced by `<DATA>`) is taken with `make_golden.py` **on trusted code only, before a
 change**. `test_pipeline.py` compares every tool's outputs to it (added columns/files allowed, a removed
-column/file or a changed value fails, naming the first differing value); intended changes are listed in
-`INTENDED_CHANGES` / `EXPECTED_MISSING` and each has its own dedicated test.
+column/file or a changed value fails, naming the first differing value; tool 9's `*_ap_removed_db` columns within
+1e-5 dB, `snapshot.AP_REMOVED_ATOL_DB`); intended changes are listed in `INTENDED_CHANGES` / `EXPECTED_MISSING` and
+each has its own dedicated test. **`make_golden.py` replaces the whole folder** (`snapshot.take`): copy the real golden
+aside first (not versioned). Both goldens were taken again on 2026-11-19 (tool 7's band-pass phase, measured first with
+`refactor_check`): until then they dated from before the exclusion refactor, and three checks compared with that
+former content (the clean-epo copies of tools 8 / 8bis, tool 9's former route, tool 6 before the 50-ms flat rule); they
+retired with it (git history), and `INTENDED_CHANGES` / `EXPECTED_MISSING` are empty.
 
 ## Cross-cutting procedures (shared across tools)
 
@@ -2442,7 +2448,7 @@ a value keeps it, `Missing value excludes` behaves, and the notebook executes cl
 ### 6. Quality overview (`6_quality_overview_voila.ipynb`)
 
 *(Stable tool: formerly “Phase 1” of the preprocessing pipeline.)*
-Implemented as `tools/6_quality_overview_voila.ipynb`. Produces one `mne.Report` HTML per participant. For each EEG channel: signal amplitude histogram with Savitzky-Golay smooth + peak detection, time series, metrics table, and a YASA hypnospectrogram (0.1–40 Hz bandpass applied per-channel just before plotting). Flags suspect channels for priority inspection. At the end of each run, generates `dataset_overview.html`: a single-page dataset-level summary with statistics and distribution plots per electrode, consumed by Phase 2 to identify channels to exclude.
+Implemented as `tools/6_quality_overview_voila.ipynb`. Produces one `mne.Report` HTML per participant. For each EEG channel: signal amplitude histogram with Savitzky-Golay smooth + peak detection, time series, metrics table, and a YASA hypnospectrogram (0.1–40 Hz bandpass applied per-channel just before plotting, zero phase like tool 7's since 2026-11-19: figures only). Flags suspect channels for priority inspection. At the end of each run, generates `dataset_overview.html`: a single-page dataset-level summary with statistics and distribution plots per electrode, consumed by Phase 2 to identify channels to exclude.
 
 **BrainVision recordings (2026-11-06)**: three rules, deduced from what the recording says and not from its format, so Curry will
 follow them without anything of its own.
@@ -2603,7 +2609,7 @@ clean channels of a BrainVision recording at 3.5-5.6 %, a quiet synthetic mastoi
 flagged (the 30-min flat segment 7.4 %, the dead channels 41-98 %, the quantization 99.6 %), the false alerts go to 0-1.7 %; on the
 local EDF, 4 channels at 3.7-7.1 % lose the flag (no still stretch of 50 ms). The clipped Fp1 of the synthetic chain goes from 4.9 to
 1.9 % and stays flagged by `bounds_pct` / `hist_extreme_pct`, so the `exclude` decision, and tool 7, are unchanged on the test chain
-(`test_pipeline.py::test_tool6_matches_golden_but_the_flat_rule`). A study processed before keeps its former values while Skip
+(checked against the former golden until it was taken again on 2026-11-19; the rule itself: `test_quality_lib.py`). A study processed before keeps its former values while Skip
 keeps its tables: untick Skip to reprocess it. `bounds_pct` = fraction of samples within 0.5 µV of the EDF physical_min/max header limits, reconstructed in µV by `get_phys_bounds_uV()`. **Unit handling**: MNE keeps `_raw_extras['physical_max']`/`['offsets']` in each channel's *native* EDF physical unit (µV, mV, V…), not in µV, whereas the signal is read as `raw.get_data() * 1e6` (always µV). `get_phys_bounds_uV()` therefore multiplies both bounds by `extras['units'][ch_idx] * 1e6` (MNE's native-unit→volts factor: `1e-6` µV, `1e-3` mV, `1.0` V) so the comparison is unit-consistent. This is essential for non-EEG channels: Compumedics EOG/EMG/ECG are declared in **mV** (e.g. `physical_max = 1.0 mV`), so without the conversion they are compared against a 1.0 µV bound (1000× too small) and `bounds_pct` flags ~98–100 % of a perfectly healthy signal. EEG channels (declared in µV) are unaffected. `hist_extreme_pct` = fraction of samples in the outermost histogram bins (computed on a **full-range** histogram, independent of the percentile-clipped histogram that feeds the Savitzky-Golay curve + peak detection, see *Distribution histogram (robust range for peak detection)* above). **Kurtosis is intentionally NOT used as a flagging criterion**: normal PSG EEG has physiologically high kurtosis (spindles, K-complexes produce values of 100–500), making it unreliable without per-subject normalization. `p99_abs_uV` and `p999_abs_uV` (99th and 99.9th percentile of |amplitude|) are recorded as informational metrics in `quality_summary.tsv` but are not currently used for flagging. They are useful for cross-channel and cross-dataset amplitude comparison.
 
 **`dataset_overview.html` (dataset-level summary)**: generated at the end of every run from the full cumulative `quality_summary.tsv` (reflects all participants processed to date, not just the current run) **minus the excluded participants** (exclusion registry): they stay in the TSV tables (`participant_excluded = True`) but are left out of every statistic and figure of the overview, whose header names them with their reason (`generate_dataset_overview(..., excluded=)`). Contains two levels:
@@ -2763,11 +2769,25 @@ The two tools then differ only in what follows:
 1. **Resampling**: `raw.resample(target_freq, npad='auto')`. Target frequency chosen by user. Applied **before** filtering. `raw.resample` already anti-aliases (FFT method), so resampling first introduces no aliasing. The order is chosen because filtering the already-downsampled signal runs on far fewer samples (faster), not to prevent aliasing (both steps are linear, so the order does not change the result). Step is skipped if checkbox is unchecked.
 2. **Re-referencing**, applied as specified in JSON config per participant: `'average'` → common average reference (over the good channels). `[list]` → subtract listed channel(s) then drop them (a deselected one is not used). Empty → no re-referencing. The bad (deselected) channels get the same reference signal subtracted (see above).
 3. **Notch filter** *(optional, **ON by default**)*: removes power-line noise via `raw.notch_filter(freqs=notch_freq_val)` using **MNE's default method** (FIR, `method=` is left unset). Single editable frequency (`cb_notch` / `txt_notch_freq`, default **50 Hz**). Applied **after re-referencing, before the bandpass** ("notch then band-pass" convention). **Fatal** on failure (like the bandpass step). Defaults ON because a power-line notch is the norm for most databases. Untick `cb_notch` to reproduce the former byte-identical no-notch output. The frequency box's initial visibility follows `cb_notch.value` (checkbox-revealed-widgets rule), so the pre-ticked box shows correctly.
-4. **Bandpass filter**: FIR zero-double-pass Hamming window, defaults `l_freq=0.1 Hz, h_freq=50 Hz`. Applied via `raw.filter(..., method='fir', phase='zero-double', fir_window='hamming', fir_design='firwin')`.
+4. **Bandpass filter**: FIR Hamming window applied once, zero phase (MNE's default), defaults `l_freq=0.1 Hz, h_freq=50 Hz`. Applied via `raw.filter(..., method='fir', phase=BANDPASS_PHASE, fir_window='hamming', fir_design='firwin')`, `preprocessing_lib.BANDPASS_PHASE = 'zero'`.
 
 Section 2.1 states each filter's method in a grey help line under it (band-pass: FIR, Hamming, `firwin`, automatic
-length, forward then backward; notch: FIR with MNE's `notch_filter` defaults, zero phase). The two phases differ
-(`zero-double` vs MNE's current default `zero`): see *Planned modules → Tool 7: band-pass phase*.
+length, applied once, zero phase; notch: FIR with MNE's `notch_filter` defaults, zero phase), and the report's parameter
+table names the phase.
+
+**The band-pass phase (changed on 2026-11-19)**: until then the band-pass ran with `phase='zero-double'` (forward then
+backward: the designed filter applied twice, its magnitude response squared), MNE's default before MNE 0.13. It now runs
+once with `phase='zero'`, like the notch and every other filter of the toolkit (tool 6's display filter followed, §6), with
+no choice on the page. At the defaults (0.1–50 Hz, 256 or 512 Hz, 33 s filter) the two differ by less than 0.1 dB between
+0.15 and 48 Hz (the 1/f fit band, the slow waves, every band of tool 9). Only the transition bands move: −23 dB instead
+of −45 dB at 0.02 Hz (a very slow drift is attenuated about half as much in dB: for a DC-coupled recording with a large
+drift, the lever is `l_freq`), −6 instead of −12 dB at 56 Hz, and an impulse response half as long (a shorter edge effect
+at the start and end of the night). Measured on the test chains (`refactor_check`): on the synthetic nights no flag
+changes and tool 9 moves by less than 0.03 dB; on the real nights 0.5–1.5 % more (epoch, channel) pairs are flagged,
+spread over the night and almost only added (gradient +10 to +30 pairs a night: more of 50–64 Hz passes; amplitude +8 to
++13: more infra-slow drift; 1/f +6 to +8), and tool 8bis rejects 2 to 4 more epochs a night. **A study processed before is reprocessed once**: its sidecars hold no phase (=
+`zero-double`), so with *Skip* ticked the run asks (answer *Reprocess*), and *Use the recorded settings* cannot put the
+former phase back (named: *no longer offered, reprocess these participants*). Tools 8bis and 9 see the fingerprint change.
 
 **Epoching (configurable epoch length)**: epochs are created with `mne.make_fixed_length_epochs(raw, duration=epoch_sec)`. `epoch_sec` is user-selectable via a Section-2 **`Epoch length`** dropdown (`dd_epoch_len`) offering the **divisors of 30 ≥ 5 s** (`30 (classic, default) / 15 / 10 / 6 / 5`) so the classic 30 s scored epoch re-cuts into a whole number of sub-epochs and the 4 s Welch window used by the 1/f fit still fits. The hypnogram is scored at 30 s (one label per 30 s epoch): the 30 s length validation/trim against the recording is **unchanged**, then each 30 s label is **expanded** to fill its sub-epochs (`hypno_sub = np.repeat(expert_hypno, epoch_factor)` with `epoch_factor = 30 // epoch_sec`) so each sub-epoch simply inherits its parent 30 s stage (no re-scoring, no interpolation). All flagging/summary/plot code keys on `hypno_epochs`/`n_epochs` generically, so it adapts automatically. The Welch window is `n_per_seg = int(min(4, epoch_sec) * sf)` (byte-identical to `4·sf` for every allowed size). Amplitude p-p thresholds stay the **same absolute µV** across sizes (artefact p-p does not scale with window length). Default 30 s keeps every output byte-identical to the pre-feature tool. Sleep stage assigned to each epoch from the (expanded) hypnogram. Epochs at the tail beyond the hypnogram length are discarded.
 
@@ -2903,7 +2923,8 @@ the editor, except for a participant modified in this session (`start_channels`)
 (`7_manual` + suffix) belongs to the run: one that holds for every run goes in tool 5bis.
 
 **Skip and the settings (2026-11-06, *Cross-cutting → Skip + cumulative-merge*)**: `preprocessing_lib.settings_differences(sidecar,
-current)` compares the sidecar with the page: `epoch_length_s` (absent = 30), `resample` and `filter` (the values asked for),
+current)` compares the sidecar with the page: `epoch_length_s` (absent = 30), `resample` and `filter` (the values asked for,
+the band-pass with its phase: absent = `zero-double`, see *The band-pass phase* above),
 `notch` and `psd_smoothing` (absent = off: they did not exist), the methods (`methods_run` without `event`, which varies with
 each file's annotations: the events are compared through `event_rejection`), the thresholds only if their method ran on both
 sides (the 1/f ones, the fit range and the smoothing with the 1/f method; amplitude: only the stages both sides know, a custom
@@ -2923,7 +2944,7 @@ chosen only (a run `_v2` raised a false alert), without those about to be made a
 
 **Outputs per participant**: the `.fif` + its params sidecar + the optional context companion under `<output_folder>/derivatives/preproc_epo/<edf_subtree>/` (a **sibling of the `rejection_manual/`** decision tables written by tool 8 and **`rejection_auto/`** written by tool 8bis, so the epochs and their decisions sit side by side under `derivatives/`). The per-file TSV/HTML reports under `<output_folder>/reports_preproc/<edf_subtree>/`, **both mirror the EDF subfolder tree** (as `6_quality_overview` does for `reports_quality_overview/<edf_subtree>/`, an EDF sitting in the data-folder root has `<edf_subtree> == '.'` so its reports collapse back to the flat root, keeping subfolder-less datasets byte-identical to the pre-mirror tool). The skip-checks and the global-table rebuild therefore search **recursively** (`reports_dir.rglob(...)`), so a report written in a subfolder is still found. When a file previously processed by the old **flat** layout is reprocessed into its subfolder, tool 7 first deletes any stale **root-level** copies of that file_id's three report files (only when `<edf_subtree> != '.'`) so the globbed globals never double-count it:
 - `{file_id}_all-epo.fif`, all epochs **and every montage channel** (the deselected ones included, listed in `info['bads']`, never flagged) with `epochs.metadata` DataFrame (columns: `epoch_idx`, `stage`, `reject_flag`, `reject_method`, `flag_amplitude`, `flag_flat`, `flag_gradient`, `flag_1f_error`, `flag_1f_r2`, plus `flag_event` **when event flagging ran**, and one `evt_<canonical>` bool per canonical event type **when event flagging ran**, a per-epoch flag naming *which* event type flagged the epoch, since `flag_event` is only the OR, read by **tool 8**'s per-epoch inspector to show the culprit event(s)). The `flag_<method>` columns are **per-epoch "any channel" booleans** (the naive epoch-level decision, read by tool 8). The full per-(epoch, channel) mask **is** now persisted separately, in `{file_id}_epoch_channel_rejection.tsv` (below). The per-epoch/per-stage TSVs and `global_rejection_by_stage.tsv` gain the matching `flag_event` / `event` entries the same way: additively, so event-free runs stay byte-compatible with earlier outputs.
-- `{file_id}_preprocessing_params.json`: `channels` (the flagged ones) + the additive `bad_channels` (deselected: in the `.fif` marked bad, never flagged) + the resampling / notch / bandpass filter settings (the notch as an additive `notch: {applied, freq_hz}` key, provenance only) + the additive `epoch_length_s` (the selected epoch length, **30 assumed when absent**, so older sidecars stay compatible) + the per-stage rejection thresholds actually used (amplitude p-p per stage, flat, gradient, 1/f MAE/R²) + `methods_run` + the optional additive `psd_smoothing` block (see above, omitted-safe on older sidecars) + the additive `manual_events`, `reference` (tool 2's `ref_channels`) and `hypnogram_file`, for the Skip check. Read back by **tool 8** (QC of rejected epochs) to draw threshold reference lines, recompute per-channel margins, label the epoch length (`qc_rejected_epochs_lib.load_params → info['epoch_length_s']`), and honour the PSD smoothing when recomputing PSDs (`info['psd_smoothing']`). Written non-fatally.
+- `{file_id}_preprocessing_params.json`: `channels` (the flagged ones) + the additive `bad_channels` (deselected: in the `.fif` marked bad, never flagged) + the resampling / notch / bandpass filter settings (the notch as an additive `notch: {applied, freq_hz}` key, provenance only; the band-pass's additive `filter.phase`, `zero` since 2026-11-19, absent = `zero-double`) + the additive `epoch_length_s` (the selected epoch length, **30 assumed when absent**, so older sidecars stay compatible) + the per-stage rejection thresholds actually used (amplitude p-p per stage, flat, gradient, 1/f MAE/R²) + `methods_run` + the optional additive `psd_smoothing` block (see above, omitted-safe on older sidecars) + the additive `manual_events`, `reference` (tool 2's `ref_channels`) and `hypnogram_file`, for the Skip check. Read back by **tool 8** (QC of rejected epochs) to draw threshold reference lines, recompute per-channel margins, label the epoch length (`qc_rejected_epochs_lib.load_params → info['epoch_length_s']`), and honour the PSD smoothing when recomputing PSDs (`info['psd_smoothing']`). Written non-fatally.
 
   *Why `preproc_epo`*: these epochs are **preprocessed** (re-referenced, notch, band-pass, optional resampling) and all kept: nothing is rejected in them (the decisions are tables in `rejection_manual/` / `rejection_auto/`). The folder was called `raw_epo/` ("before rejection") when tools 8/8bis still wrote `clean-epo.fif` files; the reports folder was `reports_preprocessing/`.
 
@@ -3428,9 +3449,10 @@ black line, instead of pale boxes. The hypnogram of the clean epochs is the tool
 exercise the heterogeneous-channel path, with 73's sidecar deliberately absent): 3 participants in ~33 s,
 exponent N3 2.72 > N2 2.29 > R 2.25 > W 0.80 and a sigma fold-change of ~6 over the 1/f floor in N2, i.e.
 the expected physiology. That fixture predates the decision tables (it holds `clean_epo_auto`); the current
-input layout is covered by the test suite (*How to run → Tests*), whose central check is that, on the kept
-epochs of the kept channels, every per-file and database table equals what the former clean-epo route
-produced (thirds excepted), and that *Re-aggregate only* after a decision change equals a full run.
+input layout is covered by the test suite (*How to run → Tests*): every table against the golden, and *Re-aggregate
+only* after a decision change equal to a full run. Its central check of the exclusion refactor (on the kept epochs of
+the kept channels, every per-file and database table equal to what the former clean-epo route produced, thirds excepted)
+retired with the former golden on 2026-11-19, once proven (git history).
 
 ## Recording formats
 
@@ -3493,9 +3515,9 @@ Modules still in development. The quality-overview (6), preprocessing (7) and QC
 What can silently give a wrong result comes first, then what forces a full reprocess, then the features. Each item is
 a section below. Update this list when an item is done.
 
-1. **Next: *Tool 7: band-pass phase* and *Lighter conda environments*** (the version refresh goes with the split,
-   decided on 2026-10-29), together, between two studies: every output is reprocessed. Before item 2: slow waves sit
-   near the low cut-off of the band-pass.
+1. **In progress (`tools/plan_bandpass_and_envs.md`): *Lighter conda environments*** (the version refresh goes with the
+   split, decided on 2026-10-29), between two studies: every output is reprocessed. Tool 7's band-pass phase, the other
+   half of this item, was settled on 2026-11-19 (phase 1 of the plan: `zero`, §7 *The band-pass phase*).
 2. *Slow-wave and spindle extraction*. The licence waits for it.
 3. Features: *Database organisation inferred by tool 1*, *Tool 6: keep a raw run and a prepared run side by side*,
    *Tool 2: richer context channels*, *Tool 3bis: follow-ups of the Score_EDF port*, *Standalone comparison of
@@ -3603,15 +3625,6 @@ counts are now computed for every organisation, and the group + session step is 
 empty, the inspection goes on); `test_tool1_reads_the_groups_from_folders_or_table` covers both organisations.
 Still to audit: one folder per participant (`sub-01/`, `sub-02/`…) is read as one group per folder.
 this part could also checks the companion files (hypno, events etc), and gives warning if some are missing
-
-### Tool 7: band-pass phase (TODO, to decide)
-
-Tool 7's band-pass runs with `phase='zero-double'` (forward then backward: the designed filter is applied twice,
-so its magnitude response is squared and its attenuation doubled), MNE's default before MNE 0.13. Its notch uses
-MNE's current default, `phase='zero'` (one zero-phase pass of a filter designed for it). Decide whether the
-band-pass should switch to `zero` (user request, 2026-11-02, to decide later). It would change every tool-7 output
-(and so the outputs of tools 8, 8bis and 9): an intended-change golden, a reprocess note, tool 0's step 6 kept in
-line. Until then Section 2.1 states each filter's method in grey (§7).
 
 ### Tools 1 to 4: one code cell per section (TODO, maintenance)
 

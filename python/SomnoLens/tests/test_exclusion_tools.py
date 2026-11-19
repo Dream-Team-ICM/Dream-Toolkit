@@ -4,7 +4,7 @@ Tool 7  - deselected channels are kept in the .fif (marked bad), re-referenced l
           flagged; manual exclusion; exclusion columns + a per-stage summary over the non-excluded only.
           Re-referencing is checked EXACTLY through a property of linear processing: any common
           reference cancels out in a bipolar derivation (Fp1 - C3), and filtering is linear.
-Tool 8bis - epoch / channel decision tables, equal to the former clean .fif (golden); automatic exclusions in the
+Tool 8bis - epoch / channel decision tables, every epoch decided by one rule; automatic exclusions in the
           registry (and lifted again by a re-run).
 Tool 8  - decision tables; the Exclude / Remove button.
 """
@@ -20,7 +20,6 @@ import pytest
 
 import minidb
 import pipeline
-import snapshot
 from nbdriver import NotebookSession
 from pipeline import select_subset
 
@@ -155,48 +154,35 @@ def test_tool7_chain_stage_summary_leaves_out_the_5bis_exclusion(chain):
 
 
 # =====================================================================================  tool 8bis
-def golden_clean(golden, fid, kind):
-    """The clean-epo the tools wrote BEFORE the refactor (golden snapshot): kept epoch indices + channels."""
-    base = golden / 'derivatives' / kind / f'{fid}_clean-epo.fif'
-    meta = snapshot._read_table(str(base) + '.metadata.tsv.gz')
-    summary = json.loads(Path(str(base) + '.summary.json').read_text(encoding='utf-8'))
-    return meta['epoch_idx'].astype(int).tolist(), summary['ch_names']
-
-
 @pytest.mark.tool8bis
-def test_tool8bis_decision_tables_match_the_clean_epochs(chain, golden):
-    """INTENDED CHANGE (decisions cover every epoch): on the reference stages the decision tables keep
-    exactly the epochs and channels the former clean-epo held (golden), and their `_ref` counts are the
-    former in-scope counts; every other epoch is now decided too, by the same rule (rejected when more
-    than 20 % of the good channels flag it, from tool 7's per-(epoch, channel) flags)."""
+def test_tool8bis_decision_tables_cover_every_epoch(chain):
+    """The decision covers every epoch, by one rule: rejected when more than 20 % of the good channels flag it, from
+    tool 7's per-(epoch, channel) flags; the `_ref` counts are those of the reference stages. Their values are compared
+    to the golden by test_pipeline.py (the former check against the clean-epo copies retired on 2026-11-19)."""
     p = ids(chain)
     dec_dir = chain['data'] / 'derivatives' / 'rejection_auto'
     rep_dir = chain['data'] / 'reports_rejection_auto'
     assert not (chain['data'] / 'derivatives' / 'clean_epo_auto').exists()     # no copy of the epochs
     for fid in p:
         ed = tsv(dec_dir / f'{fid}_epoch_decision.tsv')
-        kept_old, chans_old = golden_clean(golden, fid, 'clean_epo_auto')
         rec = tsv(rep_dir / f'{fid}_autoreject_decision.tsv').iloc[0]
         ref = rec['stages_of_interest'].split('+')
         is_ref = ed['stage'].astype(str).isin(ref)
         assert len(ed) == len(fif(chain['data'], fid))                   # every epoch has a row
         assert ed['in_scope'].all()                                      # the decision covers every epoch
-        assert ed[is_ref & ~ed['rejected']]['epoch_idx'].tolist() == kept_old
         assert (ed.loc[ed['rejected'], 'reject_reason'] != '').all()
         cd = tsv(dec_dir / f'{fid}_channel_decision.tsv')
         good = sorted(cd.loc[~cd['dropped'], 'channel'])
-        assert good == sorted(chans_old)
-        # the other stages: same epoch rule, on the good channels
+        # every stage: the same epoch rule, on the good channels
         pairs = tsv(next((chain['data'] / 'reports_preproc').rglob(f'{fid}_epoch_channel_rejection.tsv')))
         frac = (pairs[pairs['channel'].isin(good)].groupby('epoch_idx')['reject_any']
                 .mean().reindex(ed['epoch_idx']).fillna(0.0).values)
         expected = (frac > 0.20) if good else np.ones(len(ed), dtype=bool)
         assert (ed['rejected'].values == expected).all()
         assert (~is_ref).any()                                           # W/N1 epochs were decided
-        # the reference-stage counts are the former in-scope ones; the every-epoch counts cover the night
-        old = snapshot._read_table(str(golden / 'reports_rejection_auto' / f'{fid}_autoreject_decision.tsv.gz')).iloc[0]
-        assert int(rec['n_epochs_ref']) == int(old['n_epochs'])
-        assert int(rec['n_epochs_rejected_ref']) == int(old['n_epochs_rejected'])
+        # the reference-stage counts, and the every-epoch counts over the night
+        assert int(rec['n_epochs_ref']) == int(is_ref.sum())
+        assert int(rec['n_epochs_rejected_ref']) == int((is_ref & ed['rejected']).sum())
         assert int(rec['n_epochs']) == len(ed) and int(rec['n_epochs_rejected']) == int(ed['rejected'].sum())
         assert sum(int(rec[f'n_{st}']) for st in ed['stage'].astype(str).unique()) == len(ed)
     for fid, bad in [(p[0], 'Fp1'), (p[1], 'C3')]:                      # tool-7 deselected channels
@@ -259,16 +245,18 @@ def test_tool8bis_skip_decides_again_with_other_settings(chain, data_copy):
 
 # =====================================================================================  tool 8
 @pytest.mark.tool8
-def test_tool8_decision_tables(chain, golden):
+def test_tool8_decision_tables(chain):
+    """Every epoch decided and every channel of the epochs in the channel table. Their values are compared to the golden
+    by test_pipeline.py (the former check against the clean-epo copy retired on 2026-11-19)."""
     fid = minidb.manual_review_participant(chain['dataset'])
     dec_dir = chain['data'] / 'derivatives' / 'rejection_manual'
     assert not (chain['data'] / 'derivatives' / 'clean_epo_manual').exists()
+    epochs = fif(chain['data'], fid)
     ed = tsv(dec_dir / f'{fid}_epoch_decision.tsv')
-    kept_old, chans_old = golden_clean(golden, fid, 'clean_epo_manual')
+    assert len(ed) == len(epochs)                     # every epoch has a row
     assert ed['in_scope'].all()                       # the decision covers every epoch
-    assert ed[ed['in_scope'] & ~ed['rejected']]['epoch_idx'].tolist() == kept_old
     cd = tsv(dec_dir / f'{fid}_channel_decision.tsv')
-    assert sorted(cd.loc[~cd['dropped'], 'channel']) == sorted(chans_old)
+    assert sorted(cd['channel']) == sorted(epochs.ch_names)
 
 
 @pytest.mark.tool8
