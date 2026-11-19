@@ -3520,7 +3520,8 @@ a section below. Update this list when an item is done.
 4. Features: *Database organisation inferred by tool 1*, *Tool 6: keep a raw run and a prepared run side by side*,
    *Tool 2: richer context channels*, *Tool 3bis: follow-ups of the Score_EDF port*, *Standalone comparison of
    hypnograms*, *Simulated recording generator in tool 0*, *Task triggers*.
-5. Between larger jobs: *English everywhere*, *Tools 1 to 4: one code cell per section*.
+5. Between larger jobs: *English everywhere*, *Tools 1 to 4: one code cell per section*, *Voila pages: a Stop button and
+   numbered report folders*.
 6. After the extraction: *Clean-up before distribution*, *Distribution and licensing*, the installation tutorial.
 7. Long term: *Tool 0: interactive canvas for the epoch explorer*, *Event-epoch visualizer (Phase B)*, tool 8's
    per-(epoch, channel) override. (*EDF reading of tools 2, 4, 6, 7 through `edf_io_lib`* and *A Curry twin of tool 0*
@@ -3539,8 +3540,8 @@ tools 1, 2, 3, 6 (phase 2), tool 3bis with the channel checks and tool 6's compa
 tools 4, 5, 7, 0 and 8bis (phase 4), a flat online reference left out and the event files declared in tool 4 (phase 4 bis),
 the high-density display of tools 0, 6, 7, 8, 9 (phase 5), the two rounds of the user's visual inspection (phases 5 bis and
 5 ter, 5 quater) and the removal of the Curry twins (phase 6, 2026-11-18: Curry read by `recording_lib` through `curry_lib`,
-*Recording formats*). Left: a *Stop* button beside *Run* (phase 6 bis, `jupyter-ui-poll`), the report folders numbered after
-their tool (phase 6 ter), then the documentation (phase 7).
+*Recording formats*). Left: the documentation (phase 7). The *Stop* button and the numbered report folders (phases 6 bis
+and 6 ter) moved to their own TODO on 2026-11-19: *Voila pages: a Stop button and numbered report folders*.
 
 ### Interpolation of the dropped channels (TODO, asked on 2026-11-17)
 
@@ -3549,6 +3550,21 @@ group statistics (`channel_dropped`). On a cap with electrode positions (BrainVi
 interpolation of the dropped channels would give full topographies and group means per electrode. A choice of method to
 design in its own plan: which tool (9, as an option off by default?), per epoch or per participant, how the tables mark an
 interpolated value, and never for a montage without positions (an EDF PSG).
+
+### Voila pages: a Stop button and numbered report folders (TODO, asked on 2026-11-17)
+
+Two changes to every page, taken out of the BrainVision plan (phases 6 bis and 6 ter) on 2026-11-19. Both touch `ui_lib` or
+the output paths of every tool, so the whole test chain runs again (and the goldens are regenerated for the second).
+- **Stop button beside *Run***: Voila handles no click while a callback runs. `jupyter-ui-poll` (conda-forge, works with
+  ipykernel 6; to add to `environment.yml`) would read a click on *Stop* at each progress step. The participant in progress
+  is abandoned and *Skip* picks it up again (the skip gate already needs both the data and the report). The page's settings
+  are greyed during the run, so none changes on the way. Built once in `ui_lib` (the button, a check at each progress call,
+  disable then restore the page's widgets), then added to the pages with a long run (1, 3bis, 5, 6, 7, 8bis, 9, tool 0's
+  steps). First check: a click is really read inside a button callback under Voila 0.5.
+- **Report folders numbered after their tool**: `reports_01_inspection` … `reports_09_features_spectral`, to find at a glance
+  the report just written. Each tool renames the former folders of a study once, at Run. To adapt: the tools that find a
+  folder by its name (8bis, 9, 0), the runs of tool 7 (`reports_preproc_v2`), `tests/chaincache.py` (`TOOL_OUTPUTS`), the
+  goldens and `refactor_check.py`. To decide then: whether `derivatives/` is numbered too.
 
 ### Task triggers: reading, checks, trigger-locked analyses (TODO, after the slow-wave and spindle extraction)
 

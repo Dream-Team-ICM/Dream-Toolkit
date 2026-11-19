@@ -1,8 +1,9 @@
 # Plan : format BrainVision (.vhdr, .vmrk, .eeg) et une seule version de chaque outil
 
 **Statut** : version 3 du 2026-11-06, confirmée. Phases 1 à 5, 4 ter, 5 bis et 5 ter faites et commitées (5 ter avec la
-correction A + B de l'outil 0) et 5 quater. Phase 6 (suppression des jumeaux Curry) faite le 2026-11-19 (tests quick, standard et full passés). Restent les
-phases 6 bis (bouton Stop) et 6 ter (numérotation des dossiers de rapports), puis la phase 7.
+correction A + B de l'outil 0) et 5 quater. Phase 6 (suppression des jumeaux Curry) faite le 2026-11-19 (tests quick, standard et full passés).
+Les phases 6 bis (bouton Stop) et 6 ter (numérotation des dossiers de rapports) passent dans un même TODO du SPEC le 2026-11-19
+(*Voila pages: a Stop button and numbered report folders*). Reste la phase 7.
 Chaque phase est validée avant la suivante.
 **Objectif immédiat** : pouvoir inspecter ces données et faire l'autoscoring (phases 1 à 3). Le reste de la chaîne suit
 (phase 4), puis l'affichage haute densité (phase 5) et la suppression des jumeaux Curry (phase 6).
@@ -1006,14 +1007,14 @@ imports, la comparaison sur Curry, les suppressions et la documentation, les tes
 - **Tests** : `tests/curry_files.py` écrit des enregistrements Curry (MNE les ouvre) ; `test_curry_lib.py` (quick, 6 tests) et
   `test_curry_chain.py` (1 quick, 6 standard : outils 1, 4, 5, 6, 7, 0) passent.
 
-### Phase 6 bis : bouton Stop (demandé le 2026-11-17, à détailler)
+### Phase 6 bis : bouton Stop (demandé le 2026-11-17, passée en TODO du SPEC le 2026-11-19)
 
 Pendant un run, Voila ne traite aucun clic. La petite bibliothèque `jupyter-ui-poll` (conda-forge, installation à te demander) permet de
 lire le clic sur *Stop* à chaque avancée de barre. Le participant en cours est abandonné proprement et *Skip* le reprend. Les réglages
 de la page sont grisés pendant le run, pour qu'aucun ne change en cours de route. Après la phase 6, il y a moins de pages à équiper.
 Plan détaillé et tests à écrire au début de la phase.
 
-### Phase 6 ter : numérotation des dossiers de rapports (demandé le 2026-11-17, à détailler)
+### Phase 6 ter : numérotation des dossiers de rapports (demandé le 2026-11-17, passée en TODO du SPEC le 2026-11-19)
 
 `reports_01_inspection` … `reports_09_features_spectral`, pour retrouver d'un coup d'œil le rapport qu'on vient d'écrire. Chaque outil
 renomme une fois les anciens dossiers d'une étude au Run, et les outils qui se retrouvent par le nom de dossier (8bis, 9, 0) sont
