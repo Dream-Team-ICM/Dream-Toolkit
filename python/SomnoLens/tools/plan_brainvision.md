@@ -3,7 +3,8 @@
 **Statut** : version 3 du 2026-11-06, confirmée. Phases 1 à 5, 4 ter, 5 bis et 5 ter faites et commitées (5 ter avec la
 correction A + B de l'outil 0) et 5 quater. Phase 6 (suppression des jumeaux Curry) faite le 2026-11-19 (tests quick, standard et full passés).
 Les phases 6 bis (bouton Stop) et 6 ter (numérotation des dossiers de rapports) passent dans un même TODO du SPEC le 2026-11-19
-(*Voila pages: a Stop button and numbered report folders*). Reste la phase 7.
+(*Voila pages: a Stop button and numbered report folders*). Phase 7 (documentation) faite le 2026-11-19 : le plan est
+terminé et supprimé dans le commit suivant (le SPEC, *Recording formats*, dit que les mentions *phase N* renvoient à lui).
 Chaque phase est validée avant la suivante.
 **Objectif immédiat** : pouvoir inspecter ces données et faire l'autoscoring (phases 1 à 3). Le reste de la chaîne suit
 (phase 4), puis l'affichage haute densité (phase 5) et la suppression des jumeaux Curry (phase 6).

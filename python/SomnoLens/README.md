@@ -109,9 +109,10 @@ or by hand (`3bis_export_edf_manually_Profusion.docx`, not recommended).
 - **Easier distribution**: a dedicated repository, an installable package with a menu of the tools, a one-click
   Windows installation.
 - **Tool 1** inferring the organisation of the database (groups, nights, missing companion files).
-- **Tool 0**: an interactive epoch explorer (click, zoom, annotations drawn with the mouse), simulated recordings
-  to try every step, and a Curry version.
-- **Harmonized pages** across the tools (layout, file detection, English everywhere).
+- **Tool 0**: an interactive epoch explorer (click, zoom, annotations drawn with the mouse) and simulated recordings
+  to try every step.
+- **Harmonized pages** across the tools (English everywhere, a *Stop* button during a run, report folders numbered
+  after their tool).
 
 ## Documentation
 
