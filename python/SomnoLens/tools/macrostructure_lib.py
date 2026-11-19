@@ -262,6 +262,13 @@ def load_subject_info(path):
 # ---------------------------------------------------------------------------
 # EDF header (header-only binary read - the signal is never loaded here)
 # ---------------------------------------------------------------------------
+# The per-channel fields of the EDF header, in file order, with their width in bytes (EDF specification; the same
+# widths as edf_io_lib.read_edf_header_custom)
+EDF_CHANNEL_FIELDS = [('label', 16), ('transducer_type', 80), ('dimension', 8), ('physical_min', 8),
+                      ('physical_max', 8), ('digital_min', 8), ('digital_max', 8), ('prefiltering', 80),
+                      ('samples_per_record', 8), ('reserved', 32)]
+
+
 def read_edf_header_info(edf_path):
     """Read the fixed EDF header and the per-channel labels without touching the signal.
 
@@ -288,13 +295,20 @@ def read_edf_header_info(edf_path):
     year = 2000 + yy if yy <= 84 else 1900 + yy          # EDF 2-digit-year rule
     start_dt = datetime.datetime(year, mm, dd, hh, mi, ss)
 
-    def field(offset, width):
+    # The per-channel block stores each field for every channel in turn (all the labels, then all the
+    # transducer types...): a field starts after n_ch times the width of every field before it.
+    offsets, start = {}, 0
+    for name, width in EDF_CHANNEL_FIELDS:
+        offsets[name] = (start, width)
+        start += n_ch * width
+
+    def field(name):
+        offset, width = offsets[name]
         return [block[offset + i * width: offset + (i + 1) * width].decode('latin-1').strip()
                 for i in range(n_ch)]
-    labels = field(0, 16)
-    dims = field(16 * n_ch + 80 * n_ch, 8)
-    spr_off = 16 * n_ch + 80 * n_ch + 8 * n_ch + 8 * n_ch * 4 + 80 * n_ch
-    samples_per_record = [int(float(x)) if x else 0 for x in field(spr_off, 8)]
+    labels = field('label')
+    dims = field('dimension')
+    samples_per_record = [int(float(x)) if x else 0 for x in field('samples_per_record')]
     if n_records < 0:                                     # unknown length: infer from the size
         bytes_per_record = 2 * sum(samples_per_record)
         n_records = (edf_path.stat().st_size - header_bytes) // max(bytes_per_record, 1)
@@ -1465,7 +1479,10 @@ def compute_recording(p, cfg, custom_stages, event_remap, subject, hypno_suffix,
     events_df = None                    # returned for the night figure of the per-recording report
     if cfg['events'] or cfg['odi']:
         remap = event_remap
-        events_df, source = load_events(p['edf'], evt_txt_suffix, evt_csv_suffix, xml=evt_xml)
+        # an event file found but not read (unreadable, empty, no recording start) is a warning of the checks table
+        events_df, source = load_events(p['edf'], evt_txt_suffix, evt_csv_suffix, xml=evt_xml,
+                                        warn=lambda m: checks.append({'check': 'event_file', 'status': 'warning',
+                                                                      'detail': m}))
         event_info['source'] = source
         if events_df is not None:
             event_info['n_total'] = int(len(events_df))

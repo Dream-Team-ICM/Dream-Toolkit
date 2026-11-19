@@ -408,6 +408,10 @@ test must point it at a copied `preproc_epo`.
 - the formats: `test_brainvision_lib.py`, `test_brainvision_tools.py`, `test_brainvision_chain.py` (BrainVision, recordings
   written by `brainvision_files.py`), `test_curry_lib.py` (quick) and `test_curry_chain.py` (tools 1, 4, 5, 6, 7, 0 on
   Curry recordings written by `curry_files.py`), `test_edf_io_sync.py` (no copy of `edf_io_lib` comes back).
+- `test_event_sources.py` (quick): `load_events` (edf_io_lib, and tool 4's taken from its notebook) names each event
+  file found but not read, why, and the file read instead, says nothing when every file is read, and the value returned
+  is unchanged (*Cross-cutting → Event sourcing*); `read_edf_header_info`'s channel fields against
+  `read_edf_header_custom`'s (code review #20).
 - *Skip* and the settings (*Cross-cutting → Skip + cumulative-merge*): `test_settings_skip.py` (standard, tools 6, 7, 8bis, 8, 9, each
   scenario in a **new session** on a light copy of the chain's outputs: same settings skipped, other settings stop before
   anything is written, the three answers, what follows tool 7, a new participant made like the others),
@@ -893,6 +897,19 @@ instead of restating them. Only tool-specific deltas are kept inline.
   gains an **additive `Desaturation` column** (the XML `<Desaturation>` depth in %, NaN elsewhere) for the ODI
   threshold: tool 7 is unchanged. Since the tool-0 redesign (phase 3) tool 5 imports this chain from
   `edf_io_lib` (through `macrostructure_lib`); its former copy was identical, checked function by function.
+  **A file found but not read is said** (code review of 2026-10-24, #10, done 2026-11-19): `load_events(…, warn=None)`
+  (edf_io_lib, tool 7's copy, tool 4's own) keeps its fallback, and each companion found but not used gives its reason:
+  *unreadable (Type: message)*, *no event line in the expected format* (TXT), *no Name / Start / Duration columns* (CSV),
+  *no <ScoredEvent>* (XML), *not read: the recording start is unknown (or the recording was paused)* (TXT), a
+  `_manual_events.tsv` *unreadable: the manual annotations are left out* (one emptied in tool 8, header only, says
+  nothing). The reasons are joined in **one line per recording** that ends with what was read instead (*events read from
+  `<file>` instead* / *no scored event read*), given to `warn`, else to the `logging` module. The value returned is
+  unchanged and nothing is said when every file found is read, so a study whose files are readable keeps every output.
+  Where the line goes: tool 7's run log (`[id] ⚠ …`) and *Count affected epochs*; tool 0's loading notes and step 6;
+  tool 5's checks table (`event_file` warning, §5); tool 4's Scan log and `failed_event_read.tsv` (§4). Tool 4's loader
+  follows the fallback of the others since then: a TXT without an event line (formerly kept as an empty list, 0 label,
+  while tools 5 and 7 read the CSV, whose labels could then miss from `event_remap.json`) passes to the next file, and
+  an XML without `<ScoredEvent>` gives no event.
   - **Declared event files (2026-11-12, `tools/plan_brainvision.md` phase 4 bis)**: tool 4 declares which kinds of
     companion the study has (*Names registry*, key `event_files`), so that a study with a text export only, or with
     no scored events at all, gets no message about the others. `event_companion_paths(edf, txt_suffix, csv_suffix,
@@ -1450,7 +1467,8 @@ chosen = loading refused with a message; the summary and the log say "chosen by 
 compares the detected files with it, a rescoring is saved beside it. Read and length-checked with tool 7's rule (`hypno_length_status`: equal / one extra
 score trimmed / **mismatch**: shown in red as "tool 7 skips this participant", then cut or padded with `?` so
 the night can still be viewed). No hypnogram: every epoch `?`. Labels outside AASM + custom + `MT`/`?` are
-warned (run tool 3). Events: `edf_io_lib.load_events` (TXT → CSV → XML), labels translated with
+warned (run tool 3). Events: `edf_io_lib.load_events` (TXT → CSV → XML; a file found but not read is an orange
+note, step 6 notes it too), labels translated with
 `event_remap.json` (unmapped ones counted and named: tool 7 ignores them). Manual annotations:
 `L.load_manual_events`. Epochs: `make_fixed_length_epochs(duration=30)` from t = 0 then `drop_bad()` (an epoch
 over a BAD EDF annotation is dropped as in tool 7, with a ⚠), as many as the hypnogram, so **epoch indices
@@ -2077,7 +2095,7 @@ under `event_remap` in `config_param/file_names.json` and becomes the line's fil
 **Configuration grouping**: files are grouped by their `frozenset` of **unique event labels actually present**, two files with the same unique labels share one configuration even if their event counts/timing differ.
 
 **Workflow (sections):**
-1. **Scan**, select the study folder (recursive `rglob('*.edf')`). Selecting the folder only refreshes an info line **and auto-detects both the TXT and CSV suffixes** (editable `TXT suffix:` / `CSV suffix:` fields, colour-coded detection lines, see *Configurable event suffixes* above), the scan runs on an explicit **Run scan** button. The scan summary reports the per-source counts (`N from TXT, N from CSV, N from XML fallback`). A **"Skip labels already mapped"** checkbox (on by default) hides labels already present in an existing `event_remap.json` (incremental harmonization when a new cohort is added).
+1. **Scan**, select the study folder (recursive `rglob('*.edf')`). Selecting the folder only refreshes an info line **and auto-detects both the TXT and CSV suffixes** (editable `TXT suffix:` / `CSV suffix:` fields, colour-coded detection lines, see *Configurable event suffixes* above), the scan runs on an explicit **Run scan** button. The scan summary reports the per-source counts (`N from TXT, N from CSV, N from XML fallback`), then a `⚠️ [id] …` line for each recording whose event file was found but not read (*Cross-cutting → Event sourcing*: which file, why, what was read instead). A **"Skip labels already mapped"** checkbox (on by default) hides labels already present in an existing `event_remap.json` (incremental harmonization when a new cohort is added).
 1bis. **(Optional) text/CSV vs XML consistency check** (on the page: an unnumbered optional sub-section at the end of
 Section 1, button *Check text/CSV vs XML*): opt-in button. For every file having both a **primary text source** (the `.txt` if present, else the CSV) **and** the `*.edf.XML`, compares the two `<ScoredEvents>` descriptions **language-robustly** and writes `event_source_mismatch.tsv`. Both sources are first passed through `_canon_events()`: names normalized to the **canonical vocabulary** (`suggest_canonical`, raw-lowercase fallback) so English (XML) and French (`.txt`) labels compare equal, and start times floored to **whole seconds** (the `.txt` truncates clock times to the second, converted via `read_edf_start_datetime`). `_match_events()` then greedily pairs events **within ±`tol` seconds** (editable **`Match tol (s)`** `BoundedIntText`, default **1**, `0` = strict same-second) in two passes: (1) same canonical label within `tol` (nearest wins), (2) any leftover within `tol` → a **co-occurring pair with different labels**. Each event ends up **matched** (same label, within `tol`), **cooccur_difflabel** (paired in time but different canonical label, a candidate same-event whose names are not yet harmonized, e.g. a cross-language pair: the key discovery aid, if the paired labels are unrelated they may instead be two distinct events within `tol`), **only_in_primary** (no counterpart, e.g. an export that omits snoring) or **only_in_xml**. `status = match` only when all three "diff" buckets are empty. The default ±1 s absorbs the common case where the two Compumedics exports round a start one second apart (verified on ICEBERG: 2/53 hypopnea were exactly 1 s off). Opt-in because it reads both files per EDF.
 2. **Visualize configurations**, because two files sharing the same label names can still form distinct configs (a config = the exact set of labels *present*, so a missing label splits it off), the configs are not stacked: a **dropdown** ("Show config:") selects one configuration to detail (its sorted unique labels + file/label counts), and a **"Show file ids" toggle button** (replacing the old `<details>` arrow) shows/hides that config's file-id list in a scrollable box. The global table of every raw label (file count + total occurrences + suggested canonical) is kept below.
@@ -2090,7 +2108,8 @@ Section 1, button *Check text/CSV vs XML*): opt-in button. For every file having
 **Outputs** (under `<study_folder>/config_param/`):
 - `event_remap.json`: global flat `{raw_label: canonical_label}` (`null` = ignore), merged across runs
 - `event_source_mismatch.tsv`, only if the 1bis text/CSV-vs-XML check is run. Columns `file_id, primary_source` (`txt`/`csv`)`, match_tol_s` (the ±tolerance used)`, n_primary, n_xml, n_matched, n_cooccur_difflabel, only_in_primary` (per-type counts, e.g. `snore×426`, its total replaces the former `n_only_in_primary` column)`, only_in_xml, cooccur_label_pairs` (e.g. `bidule fr↔foobar en×1`)`, status` (`match` / `MISMATCH` / `missing text/CSV` / `missing XML` / `cannot read EDF start datetime` / `error: …`)
-- `failed_event_read.tsv`: files with no readable event companion (only if any failed)
+- `failed_event_read.tsv`: files with no readable event companion (only if any failed). `reason` = the line of
+  `load_events` when a file was found but not read (each file and why), else *no readable event companion*.
 
 ### 5. Sleep macrostructure: the classical PSG summary metrics (`5_compute_sleep_macrostructure_voila.ipynb`)
 
@@ -2138,7 +2157,8 @@ the remapped hypnogram `{file_id}<hypno suffix>` (one label per line, suffix pre
 chain** (`edf_io_lib`, TXT → CSV → `.edf.XML`, the `.txt` clock times converted with
 `read_edf_start_datetime`), and the **EDF header only**: `read_edf_header_info()` is a hand-written
 binary read of the fixed header (offsets 168/176 start date-time with the 2-digit-year rule, 184 header
-size, 236 record count, 244 record duration, 252 channel count, then the 16-byte labels) giving the start
+size, 236 record count, 244 record duration, 252 channel count, then the per-channel fields, each placed by
+`EDF_CHANNEL_FIELDS`, their names and widths in file order: code review #20, 2026-11-19) giving the start
 datetime, the duration (`n_records × record_duration`, file-size fallback when the count is −1) and the
 channel names. **edfio is deliberately not used**: `edfio.read_edf(lazy_load_data=True)` crashes on
 `tools/test_data/73.edf` (empty EDF+ annotation record). The binary read agrees with MNE's
@@ -2209,8 +2229,9 @@ commented alternative `'sleep_epochs'`) and divided by TST in hours. Canonical l
 `hypopnea_obstructive` in tool 4's free-text combobox, and every arousal subtype belongs to the arousal
 index). A raw label **absent from `event_remap.json` is not counted** and reported once per recording
 (`unmapped_events` warning with `label ×count`, `n_unmapped_events` column): the pointer is tool 4. A
-label mapped to `null` is silently ignored. No companion → indices NaN + `events_source` info. No
-remap → NaN + `event_remap` warning. Never fatal. `ahi = oai + cai + mai + hi` by construction.
+label mapped to `null` is silently ignored. No companion → indices NaN + `events_source` info. A companion
+found but not read → an `event_file` warning, its detail the line of `load_events` (each file, why, and the file
+read instead: *Cross-cutting → Event sourcing*). No remap → NaN + `event_remap` warning. Never fatal. `ahi = oai + cai + mai + hi` by construction.
 **ODI** (`cb_odi`, opt-in): desaturations with depth ≥ `Desaturation depth >= (%)` (default 3, the
 current AASM rule, 4 in older studies). The depth exists only in the `.edf.XML`. When the events came from
 the txt/csv the XML companion is re-read for the depths (`odi_rule = depth>=3%`), and without any depth
@@ -2231,7 +2252,7 @@ fail): `spt_consistency` (SPT = TST + WASO + other), `se_range` (0–100), `tst_
 `sol_plus_spt_le_tib`, `stage_pct_sum` (±0.1), `latencies_range` ([0, SPT]), `stage_absent` (info),
 `hypno_vs_edf_length`, `lights_txt_vs_hypno_length`, `lights_order`, `lights_fallback`, `no_lights_off` /
 `no_lights_on`, `lights_on_inside_sleep`, `mt_custom_present`, `sleep_before_onset`, `no_sleep`,
-`events_source`, `event_remap`, `unmapped_events`, `event_onsets_in_recording`, `events_outside_window`,
+`events_source`, `event_file`, `event_remap`, `unmapped_events`, `event_onsets_in_recording`, `events_outside_window`,
 `odi_rule`, `spo2_channel`, `spo2_units`, `spo2_length`, `spo2_artifact`. `n_warnings` = warnings + fails.
 
 **Sections.** **1** study folder (recursive), optional output folder (default = study folder, a `lbl_out_warn` ⚠ when
@@ -2634,9 +2655,9 @@ without scored events hides `cb_event_reject` (unticked) with `event_none_info` 
 above 12 channels the rows are 0.14 in and the figure at most 14 in wide (*High-density montage support*).
 **Channel checks** (`channel_check_lib`, before the read): the reference channels declared in tool 2 against the median
 EEG channel, and the amplitude / mains of the declared ECG and chin EMG, as `⚠ channel check:` lines of the log only (no
-output changes). An EDF study gives the same outputs (the test chain's golden). The event-chain copies of the notebook
-also take the team's fixes of `edf_io_lib` (FIX #8 `read_bytes`, FIX #10 logged parse errors), so that
-`test_edf_io_sync.py` holds.
+output changes). An EDF study gives the same outputs (the test chain's golden). The notebook's `load_events` is
+`edf_io_lib`'s (`test_edf_io_sync.py`): an event file found but not read is a `[id] ⚠ …` line of the run log, and a
+line under *Count affected epochs* (*Cross-cutting → Event sourcing*).
 
 **Shared library (`tools/preprocessing_lib.py`, tool-0 redesign phase 5)**: the computation lives in the library,
 **moved verbatim** and shared with tool 0's step 6 (same code, same flags). It holds (a) the former
@@ -3472,20 +3493,22 @@ Modules still in development. The quality-overview (6), preprocessing (7) and QC
 What can silently give a wrong result comes first, then what forces a full reprocess, then the features. Each item is
 a section below. Update this list when an item is done.
 
-1. **Next: *Code review of 2026-10-24***, first #10 (`load_events` skips a broken file silently).
-2. *Tool 7: band-pass phase* and *Lighter conda environments* (the version refresh goes with the split, decided on
-   2026-10-29), together, between two studies: every output is reprocessed. Before item 3: slow waves sit near the low
-   cut-off of the band-pass.
-3. *Slow-wave and spindle extraction*. The licence waits for it.
-4. Features: *Database organisation inferred by tool 1*, *Tool 6: keep a raw run and a prepared run side by side*,
+1. **Next: *Tool 7: band-pass phase* and *Lighter conda environments*** (the version refresh goes with the split,
+   decided on 2026-10-29), together, between two studies: every output is reprocessed. Before item 2: slow waves sit
+   near the low cut-off of the band-pass.
+2. *Slow-wave and spindle extraction*. The licence waits for it.
+3. Features: *Database organisation inferred by tool 1*, *Tool 6: keep a raw run and a prepared run side by side*,
    *Tool 2: richer context channels*, *Tool 3bis: follow-ups of the Score_EDF port*, *Standalone comparison of
-   hypnograms*, *Simulated recording generator in tool 0*, *Task triggers*.
-5. Between larger jobs: *English everywhere*, *Tools 1 to 4: one code cell per section*, *Voila pages: a Stop button and
+   hypnograms*, *Simulated recording generator in tool 0*, *Task triggers*. *Recordings exported with derived channels*
+   before the first study that has some (one case is silently wrong in tool 3bis).
+4. Between larger jobs: *English everywhere*, *Tools 1 to 4: one code cell per section*, *Voila pages: a Stop button and
    numbered report folders*.
-6. After the extraction: *Clean-up before distribution*, *Distribution and licensing*, the installation tutorial.
-7. Long term: *Tool 0: interactive canvas for the epoch explorer*, *Event-epoch visualizer (Phase B)*, tool 8's
+5. After the extraction: *Clean-up before distribution*, *Distribution and licensing*, the installation tutorial.
+6. Long term: *Tool 0: interactive canvas for the epoch explorer*, *Event-epoch visualizer (Phase B)*, tool 8's
    per-(epoch, channel) override. (*EDF reading of tools 2, 4, 6, 7 through `edf_io_lib`* and *A Curry twin of tool 0*
-   were closed by phase 6 of `tools/plan_brainvision.md`: *Recording formats*.)
+   were closed by phase 6 of `tools/plan_brainvision.md`: *Recording formats*. The *Code review of 2026-10-24* was
+   closed on 2026-11-19: #10 in *Cross-cutting → Event sourcing*, #20 in §5, #8 / #16 = tool 4 reads its text export
+   with `Path.read_bytes()`, #11 needed no change.)
 
 Still to check by hand, not covered by the tests: a real participant table through tools 5 and 9.
 
@@ -3496,6 +3519,25 @@ group statistics (`channel_dropped`). On a cap with electrode positions (BrainVi
 interpolation of the dropped channels would give full topographies and group means per electrode. A choice of method to
 design in its own plan: which tool (9, as an option off by default?), per epoch or per participant, how the tables mark an
 interpolated value, and never for a montage without positions (an EDF PSG).
+
+### Recordings exported with derived channels (bipolar montages) (TODO, asked on 2026-11-19)
+
+Anticipation, no study has one yet: a clinical recording with a low-density montage is often exported with its channels
+already derived, the name saying it (`C3-M2`, `EEG F3-A2`, `E1-M2`, `Fp1-C3`, `C3-O1`). Plan: `tools/plan_bipolar_montages.md`
+(questions answered on 2026-11-19). What the code does today (checked on the name functions, no recording):
+- Works: tools 1 and 2 type these names as EEG and find the context channels; tool 2's re-reference is *None* by default
+  and tool 7 follows it; tools 6 to 9 work channel by channel (at 12 channels or fewer the high-density path stays inert).
+- Tool 3bis, contralateral mastoid: `electrode_side` reads the last digit (`C3-M2` taken as a right electrode). Without a
+  mastoid channel it falls back to tool 2's *None* (right signal, misleading note). **With a mastoid also kept in tool 2,
+  `C3-M2` becomes C3 − M2 − M1, silently.** Its menus and SleepFM miss `C3-M2` (plain names expected), and `E1-M2` is
+  offered as an EEG electrode when tool 2 did not declare it.
+- Tool 2 accepts *Average* or *Custom* on derived channels without a warning. Tool 0 pre-ticks `E1-M2` as EEG.
+
+The rule planned: two channels are subtracted only when they share the same reference part (both plain, or both `-B`),
+read on the original names; a channel no reference can be subtracted from is used as recorded and said. Tool 3bis still
+offers a bipolar or ipsilateral derivation, after the contralateral-mastoid ones, tagged and warned. Every referential
+study stays byte-identical. Left for a real clinical file: its channel names, tool 7's µV thresholds on short bipolar
+derivations, the models' scoring on bipolar chains.
 
 ### Voila pages: a Stop button and numbered report folders (TODO, asked on 2026-11-17)
 
@@ -3555,6 +3597,11 @@ the data**: groups (sub-folders, name prefixes), several recordings per particip
 companion files present per recording, and the files that break the convention. The audit lists what the current
 code assumes and where it fails on real databases; the inferred structure could then pre-fill a participant table
 for the later tools.
+A first failure, fixed on 2026-11-19: with the groups given by `participants.tsv` or by several sub-folders, the
+session step stopped the run (`count_precomp` was computed only for the groups taken from the file names). The
+counts are now computed for every organisation, and the group + session step is non-fatal (a ⚠, both columns left
+empty, the inspection goes on); `test_tool1_reads_the_groups_from_folders_or_table` covers both organisations.
+Still to audit: one folder per participant (`sub-01/`, `sub-02/`…) is read as one group per folder.
 this part could also checks the companion files (hypno, events etc), and gives warning if some are missing
 
 ### Tool 7: band-pass phase (TODO, to decide)
@@ -3829,20 +3876,6 @@ custom and unscored epochs count; hypnograms of different lengths or start times
 starts from; whether the rescorer sees who gave which stage (blind adjudication or not); several nights (database
 tables and figures, the group statistics); whether Section 4 of tool 3bis ends up sharing these metrics when its
 outputs are harmonised.
-
-### Code review of 2026-10-24: SomnoLens findings (TODO, small)
-
-From `python/Score_EDF/DreamToolkit_Claude_Report.md`, checked against the code on 2026-10-28:
-- **#8 / #16, file opened without `with`**: left in tool 4's `load_events_from_txt` (`open(txt_path, "rb").read()`).
-  Harmless in CPython (closed at once), but write `Path(...).read_bytes()`, as `edf_io_lib._events_df_from_txt` does
-  (tool 7 imports it; the Curry readers that had the same pattern are gone).
-- **#10, `edf_io_lib.load_events` swallows its errors**: the TXT → CSV → XML fallback is intended, but a broken
-  file is skipped silently. Keep the fallback, and return which source failed and why, for the tools to log it.
-- **#20, `macrostructure_lib.read_edf_header_info`**: offsets written as `16 * n_ch + 80 * n_ch …`. Name them, or
-  read the header with `edf_io_lib.read_edf_header_custom`.
-- **#11 (checked, no change)**: `macrostructure_lib._clock_to_hours` only places the lights-off / on bars of a
-  figure, on the toolkit's noon-to-noon clock scale (same as tool 3bis's `clock_hours`): a daytime nap is just drawn
-  to the right of the nights.
 
 ### Event-based epoch rejection (Phase A): **implemented in tool 7**
 
