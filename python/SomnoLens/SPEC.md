@@ -3479,7 +3479,8 @@ a section below. Update this list when an item is done.
 3. *Slow-wave and spindle extraction*. The licence waits for it.
 4. Features: *Database organisation inferred by tool 1*, *Tool 6: keep a raw run and a prepared run side by side*,
    *Tool 2: richer context channels*, *Tool 3bis: follow-ups of the Score_EDF port*, *Standalone comparison of
-   hypnograms*, *Simulated recording generator in tool 0*, *Task triggers*.
+   hypnograms*, *Simulated recording generator in tool 0*, *Task triggers*. *Recordings exported with derived channels*
+   before the first study that has some (one case is silently wrong in tool 3bis).
 5. Between larger jobs: *English everywhere*, *Tools 1 to 4: one code cell per section*, *Voila pages: a Stop button and
    numbered report folders*.
 6. After the extraction: *Clean-up before distribution*, *Distribution and licensing*, the installation tutorial.
@@ -3496,6 +3497,24 @@ group statistics (`channel_dropped`). On a cap with electrode positions (BrainVi
 interpolation of the dropped channels would give full topographies and group means per electrode. A choice of method to
 design in its own plan: which tool (9, as an option off by default?), per epoch or per participant, how the tables mark an
 interpolated value, and never for a montage without positions (an EDF PSG).
+
+### Recordings exported with derived channels (bipolar montages) (TODO, asked on 2026-11-19)
+
+Anticipation, no study has one yet: a clinical recording with a low-density montage is often exported with its channels
+already derived, the name saying it (`C3-M2`, `EEG F3-A2`, `E1-M2`, `Fp1-C3`, `C3-O1`). Plan: `tools/plan_bipolar_montages.md`
+(draft, questions to answer). What the code does today (checked on the name functions, no recording):
+- Works: tools 1 and 2 type these names as EEG and find the context channels; tool 2's re-reference is *None* by default
+  and tool 7 follows it; tools 6 to 9 work channel by channel (at 12 channels or fewer the high-density path stays inert).
+- Tool 3bis, contralateral mastoid: `electrode_side` reads the last digit (`C3-M2` taken as a right electrode). Without a
+  mastoid channel it falls back to tool 2's *None* (right signal, misleading note). **With a mastoid also kept in tool 2,
+  `C3-M2` becomes C3 − M2 − M1, silently.** Its menus and SleepFM miss `C3-M2` (plain names expected), and `E1-M2` is
+  offered as an EEG electrode when tool 2 did not declare it.
+- Tool 2 accepts *Average* or *Custom* on derived channels without a warning. Tool 0 pre-ticks `E1-M2` as EEG.
+
+The rule planned: two channels are subtracted only when they share the same reference part (both plain, or both `-B`),
+read on the original names; a channel no reference can be subtracted from is used as recorded and said. Every referential
+study stays byte-identical. Left for a real clinical file: its channel names, tool 7's µV thresholds on short bipolar
+derivations, the models' scoring on bipolar chains.
 
 ### Voila pages: a Stop button and numbered report folders (TODO, asked on 2026-11-17)
 
