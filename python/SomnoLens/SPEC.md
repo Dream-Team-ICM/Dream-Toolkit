@@ -3523,8 +3523,8 @@ a section below. Update this list when an item is done.
    *Tool 2: richer context channels*, *Tool 3bis: follow-ups of the Score_EDF port*, *Standalone comparison of
    hypnograms*, *Simulated recording generator in tool 0*, *Task triggers*. *Recordings exported with derived channels*
    before the first study that has some (one case is silently wrong in tool 3bis).
-4. Between larger jobs: *English everywhere*, *Tools 1 to 4: one code cell per section*, *Voila pages: a Stop button and
-   numbered report folders*.
+4. Between larger jobs: *Flat epochs in the comparison with the median channel*, *English everywhere*, *Tools 1 to 4:
+   one code cell per section*, *Voila pages: a Stop button and numbered report folders*.
 5. After the extraction: *Clean-up before distribution*, *Distribution and licensing*, the installation tutorial.
 6. Long term: *Tool 0: interactive canvas for the epoch explorer*, *Event-epoch visualizer (Phase B)*, tool 8's
    per-(epoch, channel) override. (*EDF reading of tools 2, 4, 6, 7 through `edf_io_lib`* and *A Curry twin of tool 0*
@@ -3533,6 +3533,21 @@ a section below. Update this list when an item is done.
    with `Path.read_bytes()`, #11 needed no change.)
 
 Still to check by hand, not covered by the tests: a real participant table through tools 5 and 9.
+
+### Flat epochs in the comparison with the median channel (TODO, asked on 2026-11-20)
+
+Found with the version refresh (phase 2 of `tools/plan_bandpass_and_envs.md`): at the flat end of a real night (the
+signal at numerical zero, the median channel's standard deviation 4e-20 µV), `channel_check_lib.compared_with_median`
+divides one rounding noise by another. `noisy_vs_median_pct` / `flat_vs_median_pct` then count epochs that hold no
+signal, and the count moves with the numerical libraries (Fp1 of the test night 731: 0 % with MKL, 0.54 % with
+OpenBLAS). Up to 12 channels it is a comparison column only, but above 12 tool 6 flags a channel from it
+(`quality_lib.comparison_flag`): a long flat stretch (electrodes removed before the recording stops) could flag channels.
+Planned: an epoch whose median channel is under a floor far below any EEG (to choose, e.g. 1e-3 µV) is left out of the
+comparison, the shares counted over the epochs that hold a signal. Both callers follow (tool 6's `compare_channels`, the
+channel checks of tool 3bis). Tool 9 has the same noise on these epochs (power near -270 dB, a 1/f fit of rounding
+noise), but they are flagged and rejected (all of them on the test nights), so nothing reaches its aggregates: writing
+NaN there is a separate choice.
+Changes tool 6's outputs on the recordings with a flat stretch (reprocess them).
 
 ### Interpolation of the dropped channels (TODO, asked on 2026-11-17)
 

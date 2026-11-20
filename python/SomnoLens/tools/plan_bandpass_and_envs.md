@@ -211,6 +211,24 @@ checked first, each env 2-5 GB):
   4.62 GB). Quick 331 passed; the chain rebuilt there is byte-identical to `somnolens_next`'s (155 files); the two
   GSSC tests of `test_autoscoring_formats` skip; tool 3bis greys GSSC and SleepFM out with the full-install message,
   YASA available.
+- Night 100 (real, with your permission), tool 3bis with `score_edf_equivalence`'s settings (`run-3bis-real`), the
+  former code in the former `somnolens` (YASA 0.6.5, torch 2.8, MKL) against the new code in `somnolens_next` (YASA
+  0.8.1, torch 2.14 from PyPI, OpenBLAS): the three hypnograms byte-identical; YASA (C4) identical, probabilities
+  included; GSSC the same 941 stages, probabilities within 1e-4 (the 4th stored decimal); SleepFM the same stages,
+  its 5,652 5-s steps within 1e-6. YASA alone on C3 with the page's defaults: identical too. Against Score_EDF
+  (`autoscore`, YASA 0.7 + antropy 0.2.3): GSSC identical, SleepFM 1 epoch (the tail, intended), YASA 5 / 941 epochs
+  (antropy 0.2, as before: κ 0.110 against 0.113). Time: 86 s against 117 s.
+- Full level on the real nights (`somnolens_next`): 70 passed, 2 failed against the real goldens of phase 1, both on the
+  flat end of the nights (epochs 927-932 of 934, the signal at numerical zero: -273 dB against a night median of 7 dB,
+  the median channel's std 4e-20 uV), where any measure is a rounding noise that moves with the libraries. Tool 9:
+  the per-epoch tables differ there only (power, 1/f fit, peaks), every one of these epochs rejected, so the stage and
+  global tables are unchanged. Tool 6: `noisy_vs_median_pct` of Fp1 on 731 goes from 0 to 0.54 % (epochs 928-932, a
+  ratio of two rounding noises; a comparison column, not a flag). Tools 5, 7, 8bis, 8: identical to the goldens (no
+  flag, decision or metric change on the real nights either). Its fix is a TODO of SPEC (*Flat epochs in the
+  comparison with the median channel*).
+- Goldens: the synthetic ones of phase 1 still pass (kept). The real ones retaken in `somnolens_next` (the former copied
+  to `%TEMP%\dtk_golden_real_backup_phase1`): beyond the tolerance they differ on these 14 files only. Full level
+  then: 72 passed.
 
 ### Phase 3: the final environment and the docs
 
