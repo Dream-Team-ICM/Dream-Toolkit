@@ -60,7 +60,9 @@ Two things keep the runs short:
   shared by several tools runs the tests of every tool that uses it.
 - **The chain is not rerun when nothing changed.** The test run remembers which version of each tool produced
   the current results. If only tool 9 changed, tools 5 to 8 keep their results and only tool 9 is rerun (about
-  2 minutes instead of 4.5). A change to the test machinery itself reruns everything.
+  2 minutes instead of 4.5). A change to the test machinery itself reruns everything, and so does another Python
+  environment (another folder, another version of a package that computes the results, another library for numpy's
+  matrix computations): results made with other packages are never reused.
 
 At each change, the level to run is proposed with a recommendation, and you choose.
 
@@ -93,6 +95,14 @@ When tool 7's band-pass became one zero-phase pass, the reference run was taken 
 these three comparisons retired with the former run (they remain in the project's history). The rules they relied on
 are still checked: tool 8bis's decision rule on every epoch (`test_exclusion_tools.py`), the 50-ms flat rule
 (`test_quality_lib.py`), tool 9's every epoch and channel and its re-aggregation (`test_tool9.py`).
+
+On 2026-11-20 the package versions were refreshed (Python 3.14, numpy 2.5, YASA 0.8...). The whole suite ran in the
+new environment against the reference runs. On the synthetic nights everything still matched, so that reference
+was kept. On the real nights, no flag, rejection, exclusion or sleep metric changed, but two tools differed on the
+last minutes of each night, where the recording is flat (a signal at zero to the computer's precision): there every
+measure is rounding noise, which changes with the computing libraries, and these epochs are rejected anyway. The
+real reference run was taken again in the new environment (the former one kept aside), after checking that it
+differed on these flat epochs only.
 
 ### 3. A deselected channel is referenced like the others
 
@@ -388,6 +398,7 @@ repository.
 | Several runs of tool 7 | Each run reads tool 5bis's decisions and its own; a decision on one run leaves the other's alone; on empty files: tool 7's line of the run, *New version* under Skip, the suffix proposed, typed, refused or already taken, who is already processed followed without a new Scan; tools 8, 8bis and 9 pre-choose the most recent run, tool 9 only its decisions. On the synthetic database (full level): a `_v2` of tool 7 then 8bis, 8 and 9 on it, each writing its own folders, the first run untouched and unaware of its exclusion |
 | Hypnogram choice | When the study folder is picked, tools 3, 3bis, 5, 6 and 7 pre-choose the right hypnogram even with the toolkit's own hypnograms beside the recordings (tool 3bis's automatic ones, tool 0's rescored one): tool 3 the raw export, the others the remapped one; participants 1 and 10 are not mixed up; a name a tool recorded in `config_param/file_names.json` is followed; a study keeps its output names (shorter names for new studies only); only automatic hypnograms present = nothing pre-chosen; the names file keeps the other tools' entries and is never overwritten when unreadable |
 | Curry recordings | Curry 9 recordings written by the tests (a `.cdt` and its `.cdt.dpo`, invented values): the header, the impedances in kOhm, the start to the millisecond and the signal read back as written (quick level); tools 1, 4, 5, 6, 7 and 0 on a small Curry nap study (standard level) |
+| Environment files | The light, full and developer environment files agree (each holds the one below it, with the same versions), every version is pinned, and every package a tool imports is declared: in the light file, except the packages of automatic scoring (GSSC, SleepFM), which only the full file holds (`test_environment_files.py`, quick level) |
 | Shared EDF reading | Tools 2, 4, 6 and 7 and the quality library import the shared reading functions instead of keeping copies (the Curry twins that rewrote those copies are gone): a copy that comes back fails this check, and the two kept on purpose stay the same code as the shared library's (quick level) |
 | Scored-event files not read | A text export, CSV or XML found but unreadable, without any event, or a text export without a recording start, is named in one line with the reason and the file read instead (tools 0, 5, 7, and tool 4's own reader, which now passes an export without events to the CSV like the others); nothing is said when every file is read; a broken manual-annotation file leaves the scored events; tool 5's header reader finds the same channel fields as tool 1's (`test_event_sources.py`, quick level) |
 | Tool 0 | On every participant, loading gives exactly tool 7's epochs, sleep stages, EEG channels and scored events; a hypnogram the detection misses (renamed, in another folder) loads through "Other file…" with the same stages; the EOG / EMG traces are tool 7's, sample for sample; the header step flags the ±50 µV Fp1 like tool 1 and shows one channel table per detected type; the scoring step counts every scored event under its tool-4 label; its automatic scoring (read from tool 3bis's files, or redone in tool 0) gives tool 3bis's stages, probabilities and kappa; its macrostructure step gives tool 5's value for every metric and the same lights-off / lights-on source, on every participant; its signal-quality step gives tool 6's value for every metric of every channel, over the whole night and per sleep stage, and the same flagged channels, on every participant; its preprocessing step gives tool 7's flag for every epoch and channel and the same per-epoch information, on every participant, and then shows that signal in the explorer; its decision step gives tool 8bis's epoch table, channel table and decision record, on every participant, and reads tool 8's and 8bis's tables back unchanged; its spectral step gives every per-participant table of tool 9, on every participant; rescoring and annotations write only their documented files (the annotation in tool 8's format, read back by tool 7's event reading; the rescored hypnogram's name in `config_param/file_names.json`) and touch nothing else in the study |

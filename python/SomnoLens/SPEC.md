@@ -17,7 +17,9 @@ The former code-visible Jupyter versions of tools 0–4 are archived, frozen, in
 ```
 SomnoLens/
 ├── README.md                    # User-facing presentation: tools, installation, quick start (start here)
-├── environment.yml              # Conda environment definition (somnolens)
+├── environment.yml              # Conda environment somnolens, light: every tool, YASA alone in tool 3bis
+├── environment-full.yml         # light + GSSC and SleepFM (tool 3bis)
+├── environment-dev.yml          # full + pytest, notebook (developers, the test suite)
 ├── CLAUDE.md                    # Development rules and design decisions
 ├── SPEC.md                      # This file: project specification
 ├── TESTS.md                     # What the test suite checks, in plain words (for researchers)
@@ -79,7 +81,8 @@ tests/                                         # pytest suite: the Voila noteboo
 ├── outside_chain.py / refactor_check.py       # scripts: what the chain does not run + before / after
 │                                              # comparison of a code move into a library
 ├── score_edf_equivalence.py                   # script: tool 3bis against python/Score_EDF (run by hand)
-├── test_*.py                                  # golden, known answers, tools 1/3/4, variants, invariants, notebooks execute
+├── test_*.py                                  # golden, known answers, tools 1/3/4, variants, invariants, notebooks execute,
+│                                              # the environment files
 └── golden/synthetic/ (versioned), golden/real/ (git-ignored: real participant data)
 ```
 
@@ -121,28 +124,82 @@ notebooks, rename around the extension blocks (**rename-to-`.txt`** method):
 
 ## Conda environment
 
-Defined in `environment.yml`. Key packages:
-- **Python 3.12.10**
-- **MNE 1.12**: EDF reading, epoching, signal processing (bumped from 1.9 for Curry `.cdt` support, the EDF tools run unchanged on it)
-- **YASA 0.6**: sleep staging, hypnogram handling, spectral helpers. Its sleep staging depends on the version of
-  **antropy**, pinned to **0.1.9** in `environment.yml` (2026-10-29; YASA 0.6.5 accepts any antropy, so a new
-  install would otherwise take 0.2.x): the computation YASA's classifiers were trained with (§3bis, *Same models in
-  the user environment*)
-- **pandas 2.2, numpy 2.2**: data manipulation
-- **voila 0.5, ipywidgets 8.1, ipyfilechooser 0.6**: interactive GUI layer
-- **chardet 5.2**: encoding detection for EDF headers
-- **edfio**: EDF read/write (used directly for export with per-channel physical range control)
-- **specparam**: aperiodic/periodic spectral decomposition (1/f fitting)
-- **statsmodels 0.14**: LOWESS smoother (`smoothers_lowess.lowess`), used by tool 7 (and `qc_rejected_epochs_lib.py`) for the optional PSD smoothing before the 1/f fit (see tool 7)
-- **pytorch-cpu + gssc 0.0.9** (pip, pinned): tool 3bis's automatic sleep scoring. Install: `conda install -n somnolens -c conda-forge pytorch-cpu`, then `python -m pip install gssc==0.0.9`
-- **h5py, einops, loguru, pyyaml**: tool 3bis's SleepFM (imported by its official code; listed explicitly for the
-  coming light / full split, see *Planned modules*). Its model files are not a package: tool 3bis downloads them.
-  SleepFM gives the same results here as in the autoscoring environment `autoscore` (python 3.10, torch 2.5.1,
-  `python/Score_EDF/environment_autoscore_debugyn.yml`): night 100, max difference 2e-6, same stage on 5,652 / 5,652
-  5-s steps (2026-10-27). Without these packages the tool greys SleepFM out with an install message. SleepFM's
-  official code starts a multiprocessing pool: from a plain Python script on Windows, the calling code must sit
-  under `if __name__ == '__main__':` (no issue in Voila / Jupyter).
-- **openpyxl 3.1**: writes tool 9's `.xlsx` workbook (via `pandas.ExcelWriter`). Its absence is non-fatal (the TSV tables stay complete)
+Three files, one environment name, `somnolens` (since 2026-11-20, `tools/plan_bandpass_and_envs.md` in the git history):
+- **`environment.yml`, light** (1.3 GB): every tool. Tool 3bis scores with YASA alone: GSSC and SleepFM are greyed out,
+  their message points to the full installation.
+- **`environment-full.yml`, full** (2 GB): light + GSSC and SleepFM for tool 3bis (torch, gssc, h5py, einops, loguru,
+  pyyaml, importlib_resources).
+- **`environment-dev.yml`, developers**: full + `pytest` (the test suite runs in it) and `notebook` (the archived
+  code-visible notebooks). The former single environment weighed 4.6 GB (`mne` metapackage with its 3D / Qt stack,
+  Spyder, conda's torch with MKL).
+
+From the SomnoLens folder (on ICM's network, `CONDA_SSL_VERIFY=truststore` for the command):
+```powershell
+conda env create -n somnolens -f environment.yml        # light
+conda env create -n somnolens -f environment-full.yml   # full
+conda env update -n somnolens -f environment-full.yml   # a light environment becomes full
+```
+Replace an environment by removing it and creating it again: a clone or a rename breaks torch and the pip launchers.
+
+conda has no include: each file repeats the list of the one below it. **`tests/test_environment_files.py`** (quick)
+checks that light ⊂ full ⊂ dev with the same pins, that every pin is set, and that every third-party import of the
+tools (Voila pages, `*_lib.py`, batch scripts) is declared: in the light file, except the autoscoring packages, which
+belong to the full file and never to the light one. A tool that imports a new package adds it to the three files (to
+the full and dev files only for the autoscoring).
+
+**Versions: pinned, refreshed deliberately** (user decision, 2026-10-29). Each pin is `x.y.*` (the pip ones `==`),
+refreshed one or two times a year or when a need arises, a few weeks after a release (not the day it comes out),
+between two studies (a study is processed from start to end with one version), each refresh validated by the full
+test suite and noted here. Not "always the latest" (results can change silently, as antropy 0.2 moves YASA's stages,
+and one update drags others along), nor frozen for good (old versions vanish from the channels, as the `pytorch` one
+did, and a late jump of several versions costs more than following them). **Refresh of 2026-11-20**: python 3.14,
+numpy 2.5, pandas 2.3 (pandas 3: its own task), scipy 1.18, mne-base 1.13, matplotlib-base 3.11, YASA 0.8, statsmodels
+0.15, scikit-learn 1.9, torch 2.14. Measured against the former environment: no flag, decision, exclusion or
+macrostructure metric changes, on the synthetic and on the real nights; a float noise in tool 9 (up to 2e-7 dB) and on
+the flat end of the real nights (rounding noise, every epoch rejected: *Flat epochs in the comparison with the median
+channel*, *Planned modules*); tool 3bis's stages identical (night 100: YASA 0.8.1 = 0.6.5, GSSC and SleepFM the same
+941 stages); the images redrawn. Code adapted: YASA 0.8 (§3bis), `np.trapz` → `np.trapezoid` (numpy 2.5),
+`boxplot(tick_labels=)` and `with_extremes(bad=)` (matplotlib 3.11). The real goldens were taken again.
+
+Key packages:
+- **mne-base**: EDF reading, epoching, signal processing. The `mne` metapackage adds a 3D / GUI stack (PySide6,
+  VTK, PyVista...) that no tool uses.
+- **YASA 0.8** with **antropy 0.1.9**: sleep staging, hypnogram handling. YASA's stages depend on antropy's version:
+  its classifiers were trained with antropy < 0.2 (§3bis, *Same models in the user environment*), recorded as
+  `antropy_version` in YASA's `_scoring_params.json`. **lspopt**: tool 6's multitaper hypnospectrograms (the
+  function `yasa.plotting` re-exports, imported directly).
+- **numpy, pandas, scipy, statsmodels** (LOWESS smoother of the PSD before the 1/f fit, tools 7, 8, 9), **scikit-learn**.
+- **numpy's BLAS = OpenBLAS** (`libblas=*=*openblas`), see the Windows gotchas below.
+- **voila 0.5, ipywidgets 8.1, ipyfilechooser 0.6, ipyevents**: the interactive layer. **ipykernel 6** (not 7:
+  `tests/nbdriver.py` and the planned Stop button depend on its event loop).
+- **chardet 5.2**: encoding detection for EDF headers. **Not 7**: its confidence on latin-1 / cp1252 headers falls to
+  0.01-0.04, so tool 1 (which asks 0.6) would refuse the Compumedics exports with accents.
+- **edfio**: EDF read/write (used directly for export with per-channel physical range control).
+- **specparam** (pip, `2.0.0rc7`: still no final 2.0): aperiodic/periodic spectral decomposition (1/f fitting).
+- **curryreader** (pip): MNE's reader of Curry recordings.
+- **openpyxl 3.1**: writes tool 9's `.xlsx` workbook (via `pandas.ExcelWriter`). Its absence is non-fatal (the TSV
+  tables stay complete). **tk**: the folder dialog of tool 1's batch scripts.
+- *Full*: **torch** (pip, the CPU wheel of PyPI) + **gssc 0.0.9** (pip, pinned: tool 3bis reproduces its scoring
+  loop). **h5py, einops, loguru, pyyaml**: tool 3bis's SleepFM (imported by its official code). Its model files are
+  not a package: tool 3bis downloads them. Without these packages the tool greys GSSC / SleepFM out with an install
+  message. SleepFM's official code starts a multiprocessing pool: from a plain Python script on Windows, the calling
+  code must sit under `if __name__ == '__main__':` (no issue in Voila / Jupyter).
+- The **`autoscore`** environment (python 3.10, Score_EDF's versions, `python/Score_EDF/environment_autoscore_debugyn.yml`)
+  only runs `tests/score_edf_equivalence.py`.
+
+**Windows gotchas**:
+- **MKL 2026 crashes numpy**: on Windows conda-forge picks the MKL BLAS by default, and MKL 2026.1 with llvm-openmp
+  crashes Python at the first matrix product (`0xc06d007f`: `mkl_intel_thread.3.dll` delay-imports
+  `__atomic_compare_exchange` / `__atomic_load`, which llvm-openmp's `libiomp5md.dll` does not export; 23.1.4 to 23.1.6
+  alike, found 2026-11-20). Hence `libblas=*=*openblas` in every file (no MKL, no OpenMP in the BLAS, lighter). A
+  change of BLAS moves the results by a float noise only.
+- **torch from PyPI**: every Windows build of conda-forge's torch is `cpu_mkl` / `cuda_mkl` and needs MKL 2026. The
+  PyPI CPU wheel carries its own MKL and Intel OpenMP; checked in one process with YASA's lightgbm (MSVC's `vcomp`):
+  one Intel OpenMP loaded, no `OMP Error #15`. Torch's pip requirements (sympy, networkx, filelock, fsspec,
+  setuptools, typing_extensions, jinja2) come from conda, so pip installs torch alone.
+- The `pytorch` conda channel is retired (HTTP 403).
+- When an env's `Scripts` folder is on the user PATH (here `somnolens\Scripts`), a bare `voila` runs that env
+  whatever env the user meant: launchers must call the env's own Voila.
 
 ## How to run the tools
 
@@ -259,7 +316,8 @@ A plain-language description of every check, for researchers, is in **`TESTS.md`
 a test is added or changed).
 
 **Three levels** (markers declared in `pytest.ini`, `--strict-markers` refuses an unknown one):
-- **quick** (`-m quick`, ~1.5 min): unit tests (registry, selector, chain cache, the BrainVision and Curry readers), and
+- **quick** (`-m quick`, ~2 min): unit tests (registry, selector, chain cache, the BrainVision and Curry readers, the
+  environment files: `test_environment_files.py`, *Conda environment*), and
   `test_notebooks_execute.py`, which runs every `tools/*_voila.ipynb` top to
   bottom without clicking anything (no traceback, no `Import error`). The archived Jupyter notebooks (`tools/jupyter_notebook/`) are not run.
 - **standard** (`-m "not full"`, ~32 min from scratch, ~28 min with the chain reused, measured on 2026-11-06): quick + the chain on the **synthetic** database (golden
@@ -284,8 +342,10 @@ batch tools, so a change to a tool it mirrors also runs `tool0` (`test_tool0.py`
 
 **Chain reuse** (`tests/chaincache.py`): the chain fixture does not rerun the whole chain each session. It
 fingerprints (sha256) the test harness (`BASE_DEPS`: `nbdriver`, `pipeline`, `minidb`, `synthetic`,
-`chaincache`, `tools/generate_test_data.py`) and each tool's notebook + the shared modules it imports
-(`TOOL_DEPS`), stored in `%TEMP%/dtk_tests/<dataset>/chain_state.json` after each tool. Next session, it
+`chaincache`, `tools/generate_test_data.py`), the Python environment (`chaincache.environment()`: its folder, the
+versions of the packages that compute the outputs, `ENV_PACKAGES`, and numpy's BLAS, read from the `libblas` record of
+`conda-meta`: a chain made in another environment is rerun, never reused) and each tool's notebook + the shared modules
+it imports (`TOOL_DEPS`), stored in `%TEMP%/dtk_tests/<dataset>/chain_state.json` after each tool. Next session, it
 reruns **from the first tool whose fingerprint changed** (a harness change: from scratch), after deleting
 that tool's and the later tools' outputs (`TOOL_OUTPUTS`) and their own registry rows
 (`TOOL_REGISTRY_SOURCES`). `--fresh-chain` forces a full rerun. A test that writes must therefore work on a
@@ -449,8 +509,8 @@ the run. Changing `nbdriver.py` changes `BASE_DEPS`, so the chain reruns once.
 `nbdriver.click_labelled(description)` clicks a button built inside a callback (no global name), found by
 its label like a user would (the most recent `Button` with that description).
 
-A pytest suite (added for the exclusion refactor, at the user's request; pytest installed with pip, as
-conda hits an SSL certificate error on the ICM network) runs the chain **5 → 5bis → 6 → 7 → 8bis → 8 →
+A pytest suite (added for the exclusion refactor, at the user's request; pytest comes with
+`environment-dev.yml`) runs the chain **5 → 5bis → 6 → 7 → 8bis → 8 →
 9** through the **real notebook widgets**: `nbdriver.py` executes every cell in a Jupyter kernel
 (`nbclient`), then injects driver cells that pick folders in the FileChoosers (`reset` + the dialog's
 Select, callbacks included), set widget values and click buttons. Results are read from the files the
@@ -1768,8 +1828,8 @@ button that reloads the written files. Until then a section shows *Complete sect
 ### 3bis. Automatic sleep scoring: GSSC, YASA, SleepFM and their comparison (`3bis_autoscoring_voila.ipynb`)
 
 Scores every 30-s epoch automatically with up to three published models: **GSSC** (Greifswald Sleep Stage
-Classifier, `gssc==0.0.9`, pip-only, CPU torch from conda-forge), **YASA** (`SleepStaging`, 0.6 in `somnolens`,
-0.7 in `autoscore`) and **SleepFM-Clinical** (official checkpoints, `sleepfm_lib`), for nights without an expert
+Classifier, `gssc==0.0.9`, pip-only, PyPI's CPU torch), **YASA** (`SleepStaging`, 0.8 in `somnolens`, 0.7 in
+`autoscore`) and **SleepFM-Clinical** (official checkpoints, `sleepfm_lib`), for nights without an expert
 hypnogram and to compare with the expert one where it exists. Two steps: **step 1** (Sections 1-3) runs each
 ticked model on each night and writes that model's outputs; **step 2** (Section 4) compares the models with the
 expert hypnogram on every night together, the computation of `python/Score_EDF` ported on 2026-10-27
@@ -1949,9 +2009,17 @@ fractal dimension (`range(1, n_max)` → `range(1, n_max + 1)`), one of YASA's f
 are equal), while YASA's classifiers (the `_0.5.0` files, 2021, byte-identical up to YASA 0.8.1) were trained
 with the former computation. Hence **`antropy<0.2`** wherever YASA scores: the model then sees its features as
 trained, and a study scores the same in every environment. YASA's results depend on that version, so it belongs
-in the provenance (today `_scoring_params.json` records `yasa_version` only: add `antropy_version` at the version
-refresh, *Planned modules*). **YASA 0.8 removes `SleepStaging.predict_proba()`** (deprecated in 0.7), which
-`score_night_yasa` calls: keep `yasa=0.6.*` until that refresh moves it to `predict().proba`.
+in the provenance: YASA's `_scoring_params.json` records `antropy_version` beside `yasa_version` (since 2026-11-20).
+
+**YASA 0.8** (version refresh of 2026-11-20, *Conda environment*): `SleepStaging.predict_proba()` is removed, so
+`score_night_yasa` takes the probabilities from `predict().proba` (a `yasa.Hypnogram`; its `WAKE` / `REM` columns
+renamed `W` / `R` as before), and silences YASA through `logging.getLogger('yasa')` (`yasa.logger` is gone). Its
+classifiers are the same `_0.5.0` files but its feature computation was rewritten; measured on night 100 with
+`score_edf_equivalence`'s settings, former `somnolens` (YASA 0.6.5, torch 2.8) against the new one (YASA 0.8.1, torch
+2.14 from PyPI): YASA identical on C4 and on C3 (stages and stored probabilities), GSSC and SleepFM the same 941 stages
+(probabilities within 1e-4), the three hypnograms byte-identical; against Score_EDF, YASA still differs on 5 / 941
+epochs (antropy 0.2). On the synthetic nights, YASA 0.8's probabilities move by at most 0.01 on 12 epochs, stages
+unchanged. Time on night 100: 86 s for the three models (117 s before).
 
 **Code location** (tool-0 redesign, phase 2): the computation and the figures live in
 **`tools/autoscoring_lib.py`**, moved verbatim from the notebook's former cell 2, with the guarded GSSC import
@@ -3515,22 +3583,20 @@ Modules still in development. The quality-overview (6), preprocessing (7) and QC
 What can silently give a wrong result comes first, then what forces a full reprocess, then the features. Each item is
 a section below. Update this list when an item is done.
 
-1. **In progress (`tools/plan_bandpass_and_envs.md`): *Lighter conda environments*** (the version refresh goes with the
-   split, decided on 2026-10-29), between two studies: every output is reprocessed. Tool 7's band-pass phase, the other
-   half of this item, was settled on 2026-11-19 (phase 1 of the plan: `zero`, §7 *The band-pass phase*).
-2. *Slow-wave and spindle extraction*. The licence waits for it.
-3. Features: *Database organisation inferred by tool 1*, *Tool 6: keep a raw run and a prepared run side by side*,
+1. *Slow-wave and spindle extraction*. The licence waits for it.
+2. Features: *Database organisation inferred by tool 1*, *Tool 6: keep a raw run and a prepared run side by side*,
    *Tool 2: richer context channels*, *Tool 3bis: follow-ups of the Score_EDF port*, *Standalone comparison of
    hypnograms*, *Simulated recording generator in tool 0*, *Task triggers*. *Recordings exported with derived channels*
    before the first study that has some (one case is silently wrong in tool 3bis).
-4. Between larger jobs: *Flat epochs in the comparison with the median channel*, *English everywhere*, *Tools 1 to 4:
+3. Between larger jobs: *Flat epochs in the comparison with the median channel*, *English everywhere*, *Tools 1 to 4:
    one code cell per section*, *Voila pages: a Stop button and numbered report folders*.
-5. After the extraction: *Clean-up before distribution*, *Distribution and licensing*, the installation tutorial.
-6. Long term: *Tool 0: interactive canvas for the epoch explorer*, *Event-epoch visualizer (Phase B)*, tool 8's
+4. After the extraction: *Clean-up before distribution*, *Distribution and licensing*, the installation tutorial.
+5. Long term: *Tool 0: interactive canvas for the epoch explorer*, *Event-epoch visualizer (Phase B)*, tool 8's
    per-(epoch, channel) override. (*EDF reading of tools 2, 4, 6, 7 through `edf_io_lib`* and *A Curry twin of tool 0*
    were closed by phase 6 of `tools/plan_brainvision.md`: *Recording formats*. The *Code review of 2026-10-24* was
    closed on 2026-11-19: #10 in *Cross-cutting → Event sourcing*, #20 in §5, #8 / #16 = tool 4 reads its text export
-   with `Path.read_bytes()`, #11 needed no change.)
+   with `Path.read_bytes()`, #11 needed no change. *Tool 7: band-pass phase* and *Lighter conda environments* were
+   closed on 2026-11-20 by `tools/plan_bandpass_and_envs.md`: §7 *The band-pass phase* and *Conda environment*.)
 
 Still to check by hand, not covered by the tests: a real participant table through tools 5 and 9.
 
@@ -3581,7 +3647,7 @@ derivations, the models' scoring on bipolar chains.
 Two changes to every page, taken out of the BrainVision plan (phases 6 bis and 6 ter) on 2026-11-19. Both touch `ui_lib` or
 the output paths of every tool, so the whole test chain runs again (and the goldens are regenerated for the second).
 - **Stop button beside *Run***: Voila handles no click while a callback runs. `jupyter-ui-poll` (conda-forge, works with
-  ipykernel 6; to add to `environment.yml`) would read a click on *Stop* at each progress step. The participant in progress
+  ipykernel 6; to add to the environment files) would read a click on *Stop* at each progress step. The participant in progress
   is abandoned and *Skip* picks it up again (the skip gate already needs both the data and the report). The page's settings
   are greyed during the run, so none changes on the way. Built once in `ui_lib` (the button, a check at each progress call,
   disable then restore the page's widgets), then added to the pages with a long run (1, 3bis, 5, 6, 7, 8bis, 9, tool 0's
@@ -3689,7 +3755,7 @@ the montage without a redraw, and **annotations drawn with the mouse** (written 
 `{file_id}_manual_events.tsv` beside the recording). Candidate backends: `ipympl` (least change from the current
 matplotlib figures; click events and pan / zoom; occasionally flaky under Voila, harder to snapshot) or Plotly
 (fully interactive, shape drawing; heavy, slower first render on dense montages). Constraints: usable under Voila,
-navigation as fast as now (keep the static PNG as a fallback toggle), the backend added to `environment.yml`.
+navigation as fast as now (keep the static PNG as a fallback toggle), the backend added to the environment files.
 
 ### Slow-wave and spindle extraction (TODO)
 
@@ -3700,64 +3766,6 @@ design (inputs, detection method, outputs). It comes before the distribution: th
 Before designing it, discuss feature by feature how it uses tool 7's preprocessing (filters, re-reference, resampling,
 epoching, flagging) or does without it: a detection may have its own signal needs, so do not assume it starts from
 `_all-epo.fif` as tool 9 does (user request, 2026-11-05).
-
-### Lighter conda environments + a dedicated autoscoring environment (TODO)
-
-Goal: a user installs the **strict minimum**, so setup stays fast (the current `somnolens` env weighs ~4.7 GB).
-How it is offered to users: *Light / full install* below, and *Distribution and licensing*. Audit of 2026-10-19
-(every package of `environment.yml` checked against the imports of `tools/`, `tools_curry/`, `tests/`):
-- **`mne` → `mne-base`**: conda-forge's `mne` is a metapackage that pulls the 3D/GUI stack (PySide6/Qt6, VTK,
-  PyVista, trame, dipy, nilearn, openmeeg), used by no tool. `mne-base` is the same library without it, and YASA
-  only depends on `mne-base`. The packages the tools need that `mne` brought (`edfio`, `statsmodels`, `h5py`
-  for the autoscoring) must then be listed explicitly (`edfio` and `statsmodels` already are).
-- **Developer-only packages out of the user env**: `spyder` (IDE, pulls PyQt5 + QtWebEngine), `pytest` (tests)
-  and `notebook` (pulls JupyterLab; Voila runs without it) → a separate `environment-dev.yml` (user env + these).
-- **A dedicated autoscoring environment** (user decision, 2026-10-19): `pytorch-cpu` and `gssc` leave the user
-  env for an autoscoring env, which also holds SleepFM's packages (`h5py`, `einops`, `loguru`, `pyyaml`; its model
-  is downloaded by tool 3bis itself, `sleepfm_lib`, 2026-10-27). Tool 3bis then runs from that env, and its "GSSC
-  missing" message must say so. Today's env, `autoscore`, is python 3.10 / numpy 1.26 / torch 2.5.1 (Score_EDF's
-  versions; `Score_EDF/environment_autoscore_debugyn.yml`, + `chardet`), the user env python 3.12 / numpy 2.2 /
-  torch 2.8. Tool 3bis no longer needs torch < 2.6 (`weights_only=False` in `sleepfm_lib`,
-  `TORCH_FORCE_NO_WEIGHTS_ONLY_LOAD=1` for GSSC), and SleepFM and GSSC give the same results under python 3.12 /
-  numpy 2.2 / torch 2.8, YASA too with `antropy<0.2` (checked 2026-10-27 / 29, §3bis *Same models in the user
-  environment*): the autoscoring env can take the user env's versions.
-  Until the split, `somnolens` holds the autoscoring packages too (user decision 2026-10-27: `einops` added).
-- **Light / full install** (open question, to settle before rewriting the installation tutorial
-  `tutorials/1_install_python.docx`). **Light** = every tool but the autoscoring: the user env without
-  `pytorch-cpu`, `gssc` and SleepFM's packages, `yasa` kept (small, no torch). To decide: is YASA alone enough to
-  offer tool 3bis in the light install? **Full** = light + `pytorch-cpu` + `gssc` + SleepFM's packages (tool 3bis);
-  whether it is one env or the light env + the autoscoring env above is part of the decision. `python/Score_EDF/`
-  is not needed for it (ported into 3bis, 2026-10-27), and SleepFM's model (~29 MB) is downloaded at first use, so
-  most of the weight is `pytorch-cpu`. The messages of `autoscoring_lib.py` when a model's packages are missing
-  (`GSSC_MSG`, `YASA_MSG`, `SLEEPFM_DEPS_MSG`) must then point to the full install.
-- **Version refresh, done with the split** (user decision, 2026-10-29). The rule, for every package: **versions
-  pinned** in the environment files (as today), **refreshed deliberately**, one or two times a year or when a need
-  arises, a few weeks after a release (not the day it comes out), each refresh validated by the full test suite,
-  its intended output changes listed in `INTENDED_CHANGES` and noted here with the date. A study is processed
-  from start to end with one version: refresh between studies, never in the middle. Not "always the latest"
-  (results can change silently, as antropy 0.2 moves YASA's stages, and one update drags others along), nor frozen
-  for good (old versions vanish from the channels, as the `pytorch` one did, and a late jump of several versions
-  costs more than following them). For this first refresh, every pin moves to its current stable version; known
-  points for **YASA 0.8** (0.8.1 of 2026-10-25, read from its wheel, not installed):
-  - `SleepStaging.predict_proba()` is removed: `score_night_yasa` takes `predict().proba` (about 3 lines; the new
-    column names `WAKE` / `REM` are already renamed to `W` / `R`).
-  - It requires **pandas ≥ 2.3** (pinned 2.2 today: every tool, hence the full test suite) and `pooch`; numpy,
-    mne, lightgbm already fit.
-  - Same classifiers (byte-identical `_0.5.0` files), but the feature computation was rewritten (all channels
-    filtered at once, a new channel pick): measure the stages on night 100 as for YASA 0.7 (§3bis), and rerun the
-    YASA part of `tests/score_edf_equivalence.py`.
-  - `from yasa.plotting import spectrogram_lspopt` (`quality_lib`, every hypnospectrogram) still works, but it
-    is a re-export of the `lspopt` package: import it from `lspopt` directly (the same function, outputs
-    unchanged).
-  - Keep `antropy<0.2` (YASA 0.8.1 accepts antropy ≥ 0.1.9) and add `antropy_version` to YASA's
-    `_scoring_params.json`.
-- **Windows gotchas found on the way**: the `pytorch` conda channel is retired (HTTP 403): use conda-forge's
-  `pytorch`. conda-forge's `libtorch 2.5.1` fails to load (`DLL load failed ... torch._C`) with
-  `intel-openmp 2024.2`, which no longer exports the `_vcomp_*` functions its `fbgemm.dll` imports: pin
-  `intel-openmp=2024.1`. When an env's `Scripts` folder is on the user PATH (here `somnolens\Scripts`), a
-  bare `voila` runs that env whatever env the user meant: launchers must call the env's own Voila.
-- **Validation**: build an env from the slimmed file (plus `pytest`) and run the test suite in it (full level), plus a launch of
-  every Voila tool; then update *Conda environment* above and the installation tutorial.
 
 ### Distribution and licensing (TODO)
 
@@ -3783,7 +3791,7 @@ history). Nothing is decided yet unless stated.
   - **SleepFM (tool 3bis)**: code and weights under **CC BY-NC 4.0** (non-commercial use). SomnoLens does not
     redistribute them (downloaded from the official repository at first use, `sleepfm_lib`): say so in tool
     3bis's documentation.
-  - Still to check: the other packages of the full install (pytorch, `einops`, `loguru`, `pyyaml`), and
+  - Still to check: the other packages of the full install (torch, `einops`, `loguru`, `pyyaml`), and
     Score_EDF's if its standalone version is distributed.
 - **How to distribute** (today the tools live inside the team's `Dream-Toolkit` repository, which is neither a
   usual nor an intuitive way to get them). Options to compare:
@@ -3831,7 +3839,7 @@ first release, whatever the distribution route; re-run the tests of every tool t
   ssl_verify no`); use `conda config --set ssl_verify truststore` (the system's certificates, what works on ICM's
   network) and put network-specific advice in a clearly marked "behind an institutional proxy" note. It also cites
   an internal IT document (DSI `migration-to-miniforge.pdf`) and an author / date line. The light / full install
-  goes in at the same time (*Lighter conda environments*).
+  goes in at the same time (*Conda environment*: its three commands).
 - **A `LICENSE` file** in the folder (today only on GitHub), once the licence is settled (*Distribution and
   licensing*).
 - **Only what git tracks is distributed**: the folder also holds untracked files that must never leave the lab
@@ -3841,8 +3849,8 @@ first release, whatever the distribution route; re-run the tests of every tool t
   synthetic goldens, scripts, plans, `README.docx`), but 12 commits add or remove a personal path (mostly the
   archives) and the 55 notebooks deleted since may hold old saved outputs. Scan it (`git log -G` for paths and
   participant identifiers) before publishing; rewrite it (`git filter-repo`) or publish without history if needed.
-- Covered elsewhere: French messages (*English everywhere*), developer-only packages in `environment.yml`
-  (*Lighter conda environments*), the look of the tools (done: *Cross-cutting → Voila page conventions*).
+- Covered elsewhere: French messages (*English everywhere*); done: developer-only packages out of `environment.yml`
+  (*Conda environment*, 2026-11-20), the look of the tools (*Cross-cutting → Voila page conventions*).
 
 ### Tool 3bis: follow-ups of the Score_EDF port (TODO)
 

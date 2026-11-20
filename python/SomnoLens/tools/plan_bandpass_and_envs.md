@@ -246,6 +246,12 @@ checked first, each env 2-5 GB):
    (environments, autoscoring env).
 5. This plan deleted (its own commit).
 
+**Done on 2026-11-20**: `somnolens` recreated from `environment-dev.yml` (2.03 GB, no leftover of the former one:
+no `cp312` file, every pip distribution known to conda), numpy / torch / YASA / GSSC checked in one process.
+`conda env update -n somnolens_light_check -f environment-full.yml` (the command of the messages and the tutorial):
+pip installs torch and gssc only, OpenBLAS kept, tool 3bis then offers GSSC, YASA and SleepFM. The worktree
+`%TEMP%\dtk_wt` removed. SPEC, README, CLAUDE.md, TESTS.md and the memory updated.
+
 ## 4. Out of this plan
 
 - The installation tutorial (D2) and a one-click Windows install: *Clean-up before distribution*, *Distribution and
