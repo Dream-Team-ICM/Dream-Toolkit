@@ -29,8 +29,8 @@ from edf_io_lib import (   # one copy, in edf_io_lib (same folder)
     draw_hypnogram,
 )
 
-# numpy 2 renamed trapz -> trapezoid; keep both working
-_trapz = getattr(np, 'trapezoid', np.trapz)
+# numpy 2 renamed trapz -> trapezoid (the same function), and numpy 2.5 removed trapz
+_trapz = np.trapezoid
 
 # --- optional dependencies (all probed, never fatal at import time) -----------
 try:

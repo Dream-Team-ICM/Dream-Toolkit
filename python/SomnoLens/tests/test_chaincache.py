@@ -33,6 +33,13 @@ def test_a_shared_module_changes_every_tool_using_it():
     assert C.fingerprints('real')[0] != base                                   # one state per dataset
 
 
+def test_a_chain_made_in_another_environment_is_not_reused(monkeypatch):
+    base, _ = C.fingerprints('synthetic')
+    assert sys.prefix in C.environment() and 'numpy ' in C.environment()
+    monkeypatch.setattr(C, 'environment', lambda: 'another environment; numpy 9.9')
+    assert C.fingerprints('synthetic')[0] != base
+
+
 def test_rewind_deletes_only_the_rerun_tools(tmp_path):
     data = tmp_path / 'data'
     for tool, rels in C.TOOL_OUTPUTS.items():

@@ -522,8 +522,7 @@ def plot_agreement_summary(agreement_df, stagers, subjects):
 def plot_hypnogram_grid(epochs_df, stagers, subjects):
     """Colour-coded epochs: the expert then each model, one panel per recording."""
     stage_code = {s: i for i, s in enumerate(PROBABILITY_COLUMNS)}
-    cmap = ListedColormap([STAGE_COLORS[s] for s in PROBABILITY_COLUMNS])
-    cmap.set_bad('#e0e0e0')
+    cmap = ListedColormap([STAGE_COLORS[s] for s in PROBABILITY_COLUMNS]).with_extremes(bad='#e0e0e0')
     fig, axes = plt.subplots(len(subjects), 1, figsize=(13, 2.6 * len(subjects)))
     axes_arr = np.atleast_1d(axes)
     for ax, sid in zip(axes_arr, subjects):

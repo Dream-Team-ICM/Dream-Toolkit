@@ -461,7 +461,7 @@ def band_powers(freqs, psd_uV2):
     psd_uV2 = np.asarray(psd_uV2)
     for name, lo, hi in BANDS:
         m = (freqs >= lo) & (freqs < hi)
-        out[name] = float(np.trapz(psd_uV2[m], freqs[m])) if m.sum() > 1 else 0.0
+        out[name] = float(np.trapezoid(psd_uV2[m], freqs[m])) if m.sum() > 1 else 0.0   # trapz before numpy 2
     return out
 
 
@@ -1714,7 +1714,7 @@ def plot_epoch_detail(P, ei, freqs, psds_uV2, thresholds, spectro_ch_idx=0, fmin
     #         f2, p2 = _welch(data[ei, c], fs=sf, nperseg=min(int(4 * sf), data.shape[-1]))
     #         def _bp(lo, hi):
     #             m = (f2 >= lo) & (f2 < hi)
-    #             return float(np.trapz(p2[m], f2[m])) if m.sum() > 1 else np.nan
+    #             return float(np.trapezoid(p2[m], f2[m])) if m.sum() > 1 else np.nan
     #         nb = _bp(40, 47)
     #         r = _bp(48, 52) / nb if nb and nb > 0 else np.nan
     #         if not np.isnan(r) and (np.isnan(worst_ratio) or r > worst_ratio):

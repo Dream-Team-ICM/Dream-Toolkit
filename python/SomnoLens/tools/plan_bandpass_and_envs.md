@@ -1,7 +1,8 @@
 # Plan: tool 7's band-pass phase + lighter conda environments (with the version refresh)
 
-Status: **confirmed (2026-11-19), phase 1 in progress** (code, tests and docs written; the chain's differences to measure,
-then the goldens). SPEC.md, *Planned modules → Order of the TODOs*, item 1:
+Status: **confirmed (2026-11-19)**. Phase 1 done (63a88e4). Phase 2: table confirmed, files and code adaptations
+written, `somnolens_next` built (2.5 GB, 303 conda-forge packages + specparam, curryreader, gssc from pip, nothing else),
+the standard level and the comparison with phase 1 running. SPEC.md, *Planned modules → Order of the TODOs*, item 1:
 *Tool 7: band-pass phase* and *Lighter conda environments*, done together between two studies (every output is
 reprocessed once).
 
@@ -116,6 +117,7 @@ patch left free (`x.y.*`). **Bold** = to look at (a major, or kept below the new
 |---|---|---|---|
 | python | 3.12.10 | **3.14.\*** | 3.15 (Oct 2026) too recent: torch 2.14 has no 3.15 build. Every compiled package has 3.14 builds |
 | numpy | 2.2.\* | 2.5.\* | |
+| libblas | (MKL 2024.2 + intel-openmp, chosen by the solver) | **`libblas=*=*openblas`** | on Windows conda-forge picks MKL by default, today MKL 2026.1 + llvm-openmp, which crashes every numpy matrix product (torch row). Found 2026-11-20: the env rebuilt with torch from PyPI still got MKL 2026.1 and still crashed. OpenBLAS (pthreads, no OpenMP) removes MKL and tbb: lighter, and numpy, torch, YASA (lightgbm, `VCOMP140`) and GSSC run in one process, one Intel OpenMP loaded (torch's own). The results move by a float noise against MKL (2d) |
 | pandas | 2.2.\* | **2.3.\*** (2.3.3) | D3: pandas 3 (Jan 2026; copy-on-write, new string type) = its own task. YASA 0.8 needs ≥ 2.3 |
 | scipy | 1.16.\* | 1.18.\* | |
 | mne → mne-base | 1.12.\* | 1.13.\* | |
@@ -127,14 +129,14 @@ patch left free (`x.y.*`). **Bold** = to look at (a major, or kept below the new
 | scikit-learn | 1.7.\* | 1.9.\* | |
 | joblib | 1.5.\* | 1.6.\* | |
 | edfio | 0.4.\* | 0.4.\* (0.4.18) | |
-| chardet | 5.2.\* | **7.\*** | major: detects the encoding of the EDF headers (tools 1, 1bis, `edf_io_lib`). Taken only if tool 1 gives the same tables (`outside_chain.py 1` before / after), else 5.2 kept |
+| chardet | 5.2.\* | **5.2.\* kept** | 7.7 checked on 2026-11-19 (`edf_io_lib.detect_encoding` on the synthetic headers + headers written with accents): ASCII and UTF-8 the same (a UTF-8 header with one accent even better: 5.2 says MacRoman), but **latin-1 / cp1252 headers fall to a confidence of 0.01-0.04**, so tool 1 would refuse them (it asks 0.6): the Compumedics exports with accents. 5.2 is noarch, fine on Python 3.14 |
 | openpyxl | 3.1.\* | 3.1.\* | nothing newer |
 | voila | 0.5.\* | 0.5.\* (0.5.13) | |
 | ipywidgets, ipyfilechooser, ipyevents | 8.1, 0.6, 2.0 | same | nothing newer but patches |
 | ipykernel | 6.29.\* | **6.31.\*** | ipykernel 7 (Oct 2025) rewrote the kernel's event loop: `nbdriver`'s fix of the lost wake-up and the planned Stop button (`jupyter-ui-poll`, checked with ipykernel 6) depend on it. Its own check later |
 | ipython | 8.36.\* | **9.\*** | major: the tools use `IPython.display` only |
 | tk | 8.6.\* | 8.6.\* | python 3.14 still requires 8.6 |
-| *full*: pytorch-cpu | not pinned (2.8) | 2.14.\* | GSSC's scoring loop is reproduced (§3bis): its equality is checked (test_tool0 step 3, night 100) |
+| *full*: torch | conda `pytorch-cpu`, not pinned (2.8) | **pip `torch==2.14.*`** | conda-forge's torch (every Windows build is `cpu_mkl` / `cuda_mkl`) brings MKL 2026.1 + llvm-openmp 23, and llvm-openmp's `libiomp5md.dll` does not export `__atomic_compare_exchange` / `__atomic_load`, which `mkl_intel_thread.3.dll` delay-imports: **every numpy matrix product crashes Python** (`0xc06d007f`, found 2026-11-20 in tool 5's figures; llvm-openmp 23.1.4 / 23.1.5 / 23.1.6 alike; MKL sequential or TBB works). Decided: torch from PyPI (CPU wheel, its own MKL and OpenMP inside), numpy on OpenBLAS (libblas row); torch's pip requirements (sympy, networkx, filelock, fsspec, setuptools, typing_extensions, jinja2) from conda. GSSC's scoring loop is reproduced (§3bis): its equality is checked (test_tool0 step 3, night 100) |
 | *full*: h5py, einops, pyyaml | 3.14, 0.8, 6.0 | 3.16.\*, 0.8.\*, 6.0.\* | |
 | *full*: loguru | 0.7.\* | 0.7.\* | 0.8.0 is 7 days old |
 | *full*: importlib_resources | (pip, through gssc) | added | GSSC's pip requirement, so pip installs nothing beside conda |
@@ -145,12 +147,14 @@ patch left free (`x.y.*`). **Bold** = to look at (a major, or kept below the new
 | *dev*: notebook | 7.4.\* | 7.6.\* | |
 
 **2b. The three files** (no include in conda: each file repeats the list of the one below it):
-- `environment.yml` (light, name `somnolens`): python, numpy, pandas, scipy, `mne-base`, `matplotlib-base`, yasa,
-  `antropy` (<0.2), `lspopt`, statsmodels, scikit-learn, joblib, edfio, chardet, openpyxl, voila, ipywidgets,
-  ipyfilechooser, ipyevents, ipykernel, ipython, tk, pip: specparam, curryreader.
-- `environment-full.yml` (name `somnolens`): light + `pytorch-cpu`, h5py, einops, loguru, pyyaml, pip: `gssc==0.0.9`.
+- `environment.yml` (light, name `somnolens`): python, numpy, `libblas=*=*openblas`, pandas, scipy, `mne-base`,
+  `matplotlib-base`, yasa, `antropy` (<0.2), `lspopt`, statsmodels, scikit-learn, joblib, edfio, chardet, openpyxl, voila,
+  ipywidgets, ipyfilechooser, ipyevents, ipykernel, ipython, tk, pip: specparam, curryreader.
+- `environment-full.yml` (name `somnolens`): light + torch's pip requirements from conda (sympy, networkx, filelock,
+  fsspec, setuptools, typing_extensions, jinja2), importlib_resources, h5py, einops, loguru, pyyaml, pip: `torch==2.14.*`,
+  `gssc==0.0.9`.
 - `environment-dev.yml` (name `somnolens`): full + pytest, notebook.
-- Every pin `x.y.*` (the pip ones `==` or `~=`), including the ones unpinned today (`pytorch-cpu`, specparam, still a
+- Every pin `x.y.*` (the pip ones `==` or `~=`), including the ones unpinned today (torch, specparam, still a
   release candidate `2.0.0rc7` here, curryreader, pytest).
 
 **2c. Code adaptations of the refresh** (known today, completed by 2a):
@@ -166,10 +170,18 @@ patch left free (`x.y.*`). **Bold** = to look at (a major, or kept below the new
 - A new quick test, `tests/test_environment_files.py`: light ⊂ full ⊂ dev with the same pins, every third-party import of
   `tools/*.py` and `tools/*_voila.ipynb` declared in the light file, except the autoscoring ones (torch, gssc, h5py,
   einops, loguru, yaml), which must be in the full one (import name → package: `sklearn` → scikit-learn, `yaml` → pyyaml,
-  `IPython` → ipython, `torch` → pytorch-cpu, ...). It replaces the audit by hand of 2026-10-19.
-- `tests/chaincache.py`: the fingerprint of the harness includes the interpreter (`sys.prefix`) and the versions of the
-  main packages, so a chain made in another environment is rerun instead of reused (otherwise `refactor_check` would
-  compare stale outputs). A change to `BASE_DEPS`: the chain reruns once.
+  `IPython` → ipython, ...). It replaces the audit by hand of 2026-10-19.
+- numpy 2.5 removed `np.trapz` (renamed `np.trapezoid` in numpy 2.0, the same function): `spectral_lib` (tool 9, its
+  former fallback evaluated `np.trapz` anyway) and `qc_rejected_epochs_lib` (tool 8's band powers) use `np.trapezoid`.
+- `tests/chaincache.py`: the fingerprint of the harness includes the interpreter (`sys.prefix`), the versions of the
+  main packages and numpy's BLAS (the `libblas-*.json` record of `conda-meta`), so a chain made in another environment
+  is rerun instead of reused (otherwise `refactor_check` would compare stale outputs). A change to `BASE_DEPS`: the
+  chain reruns once.
+- matplotlib 3.11 removed `boxplot(labels=)` (renamed `tick_labels=` in 3.9): tool 6's stage inset and its dataset
+  overview failed (a ⚠ per participant, no `dataset_overview.html`: 4 failures of the standard level on 2026-11-20).
+  `quality_lib.py` and tool 6's page take `tick_labels=`. It also announces the end of `Colormap.set_bad`
+  (`PendingDeprecationWarning`): `quality_lib.py` (the dead-epoch grey of the hypnospectrograms) and
+  `autoscoring_compare_lib.py` take `with_extremes(bad=...)`, the same colours.
 
 **2d. Build and compare** (each install announced and approved at the time; `CONDA_SSL_VERIFY=truststore`; disk space
 checked first, each env 2-5 GB):
@@ -178,12 +190,27 @@ checked first, each env 2-5 GB):
    on the PSD, YASA 0.8 on tool 3bis outside the chain).
 2. `somnolens_light_check` from `environment.yml` + pytest: the quick level (every page executes, tool 3bis greys GSSC
    and SleepFM out with the new message, the tests skip cleanly), then the chain, compared with `somnolens_next`:
-   identical expected (at most a float noise if the light env gets another BLAS than MKL, which `refactor_check` reports
-   as within the tolerance).
+   identical expected (both on OpenBLAS).
 3. YASA 0.8 on real data (with your permission, night 100): the stages against YASA 0.6.5, and the YASA part of
    `tests/score_edf_equivalence.py`, as SPEC asks.
 4. Once you accept the differences: the goldens regenerated in `somnolens_next` (the real one copied aside first:
    `make_golden.py` replaces the folder), the full level there.
+
+**Measured on 2026-11-20** (`somnolens_next`, OpenBLAS, synthetic dataset, against the outputs of phase 1):
+- Tests: quick 331 passed; standard 498 passed, 4 failed (tool 6, matplotlib 3.11's `boxplot(labels=)`, 2c), then the
+  tests of tools 0, 3bis, 5, 6 after the fix: 164 passed. The synthetic goldens of phase 1 still pass.
+- The input EDF files regenerated under numpy 2.5: byte-identical.
+- The chain (155 files): 82 identical, 38 within the tolerance, 35 different, of which no flag, no decision, no
+  exclusion, no macrostructure metric. Different = the images (matplotlib 3.11), the footer of the MNE reports
+  (`MNE-Python 1.13.2`), and a float noise: tool 9's `*_ap_removed_db` up to 2e-7 dB (the golden tolerance is 1e-5),
+  its band powers and PSD up to 1e-10 relative; tool 6's metrics up to 1e-14; the `.fif` signals up to 5e-13 V.
+- Outside the chain: tool 1 identical. Tool 3bis: the stages of GSSC and YASA identical (the 8 hypnograms byte-identical);
+  YASA 0.8.1's probabilities move by at most 0.01 on 12 epochs, GSSC's by 0.0001 on one; `torch_version` 2.14.1+cpu,
+  `yasa_version` 0.8.1 and the new `antropy_version` recorded. Variants of tools 6 and 7: float noise only.
+- `somnolens_light_check` (`environment.yml` + pytest): 1.28 GB (the dev one 2.04 GB with torch, the former `somnolens`
+  4.62 GB). Quick 331 passed; the chain rebuilt there is byte-identical to `somnolens_next`'s (155 files); the two
+  GSSC tests of `test_autoscoring_formats` skip; tool 3bis greys GSSC and SleepFM out with the full-install message,
+  YASA available.
 
 ### Phase 3: the final environment and the docs
 

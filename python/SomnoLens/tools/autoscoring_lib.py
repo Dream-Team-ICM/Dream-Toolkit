@@ -23,7 +23,9 @@ the comparison remain usable on a scoring read from disk. Same for YASA (YASA_OK
 import os
 import re
 import json
+import logging
 import datetime
+from importlib.metadata import version as _pkg_version
 from pathlib import Path
 
 import numpy as np
@@ -53,7 +55,6 @@ try:
     from gssc.utils import (prepare_inst as gssc_prepare_inst, permute_sigs as gssc_permute_sigs,
                             epo_arr_zscore as gssc_zscore, check_flip_chan as gssc_check_flip_chan,
                             loudest_vote as gssc_loudest_vote)
-    from importlib.metadata import version as _pkg_version
     GSSC_VERSION = _pkg_version('gssc')
     TORCH_VERSION = torch.__version__
     GSSC_OK = True
@@ -61,19 +62,22 @@ except Exception as e:
     GSSC_VERSION, TORCH_VERSION = None, None
     GSSC_MSG = (
         '<div style="border:2px solid #c0392b;background:#fdecea;padding:8px 12px;border-radius:4px;">'
-        f'<b>GSSC is not available</b> ({e}). Install it in the <code>somnolens</code> environment, '
-        'then restart this page:<br><code>conda install -n somnolens -c conda-forge pytorch-cpu</code><br>'
-        '<code>python -m pip install gssc==0.0.9</code></div>')
+        f'<b>GSSC is not available</b> ({e}): it comes with the <b>full</b> installation of SomnoLens. From the '
+        'SomnoLens folder, update the environment, then restart this page:<br>'
+        '<code>conda env update -n somnolens -f environment-full.yml</code></div>')
 
 YASA_OK = False
 YASA_MSG = ''
 try:
     import yasa
     YASA_VERSION = yasa.__version__
+    # YASA's stages depend on antropy's version (its classifiers were trained with antropy < 0.2): recorded with them
+    ANTROPY_VERSION = _pkg_version('antropy')
     YASA_OK = True
 except Exception as e:
-    YASA_VERSION = None
-    YASA_MSG = f'YASA is not available ({e}): <code>conda install -c conda-forge yasa</code>'
+    YASA_VERSION, ANTROPY_VERSION = None, None
+    YASA_MSG = (f'YASA is not available ({e}): it belongs to the SomnoLens environment. From the SomnoLens folder: '
+                '<code>conda env update -n somnolens -f environment.yml</code>')
 
 
 EPOCH_SEC = 30
@@ -950,15 +954,16 @@ def score_night_yasa(edf_path, cfg_entry, eeg, eog_side, reference=REFERENCE_CON
     raw = mne.io.RawArray(np.stack([v for _, v in chans.values()]),
                           mne.create_info(list(chans), sfreq, ch_types=[t for t, _ in chans.values()]),
                           verbose='error')
-    level = yasa.logger.level
-    yasa.logger.setLevel('ERROR')
+    yasa_logger = logging.getLogger('yasa')      # YASA 0.8 no longer exposes yasa.logger
+    level = yasa_logger.level
+    yasa_logger.setLevel('ERROR')
     try:
         staging = yasa.SleepStaging(raw, eeg_name=eeg_label, eog_name='EOG' if 'EOG' in chans else None,
                                     emg_name='EMG' if 'EMG' in chans else None)
-        staging.predict()
-        proba = staging.predict_proba()
+        # predict() returns a yasa.Hypnogram holding the probabilities (predict_proba() was removed in YASA 0.8)
+        proba = staging.predict().proba
     finally:
-        yasa.logger.setLevel(level)
+        yasa_logger.setLevel(level)
     proba = proba.rename(columns={'W': 'W', 'WAKE': 'W', 'REM': 'R'})
     probs = proba[STAGES].to_numpy(float)
     stages = np.array([STAGES[i] for i in probs.argmax(axis=1)])

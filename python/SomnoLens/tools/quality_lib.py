@@ -444,7 +444,7 @@ def compute_hypnospectrogram_sxx(sig_uV, sf, fmin=0.5, fmax=40):
     Split out of plot_hypnospectrogram so the same Sxx can be computed once and used twice:
     for the per-channel figure and for the across-channel median in the Overview section.
     Returns (f, t_hours, Sxx_dB)."""
-    from yasa.plotting import spectrogram_lspopt
+    from lspopt import spectrogram_lspopt     # the function yasa.plotting re-exports
 
     # Multitaper spectrogram (mirrors yasa.plot_spectrogram internals).
     nperseg = int(30 * sf)
@@ -487,8 +487,7 @@ def spectrogram_colour_scale(Sxx, trimperc=2.5):
     vmin = max(vmin, vmax - 45)   # cap colour span (dB): real EEG structure fits within ~35 dB, so a few degraded low-power epochs can't stretch the scale and wash the plot to one colour
     norm = Normalize(vmin=vmin, vmax=vmax)
     Sxx[:, ~valid] = np.nan   # dead epochs rendered as the colormap 'bad' colour
-    spec_cmap = plt.get_cmap(SPECTROGRAM_CMAP).copy()
-    spec_cmap.set_bad(DEAD_EPOCH_COLOR)
+    spec_cmap = plt.get_cmap(SPECTROGRAM_CMAP).with_extremes(bad=DEAD_EPOCH_COLOR)   # a copy
     return Sxx, norm, spec_cmap
 
 
@@ -649,7 +648,7 @@ def plot_participant_pooled_boxplots(df_sub, df_stage_sub=None, custom_stages=No
             groups_in = [df_stage_sub[df_stage_sub["stage"] == s][m].dropna().values
                          for s in present_stages]
             bp_in = ax_in.boxplot(
-                groups_in, labels=present_stages, patch_artist=True, showfliers=False,
+                groups_in, tick_labels=present_stages, patch_artist=True, showfliers=False,
                 medianprops=dict(color="#333", linewidth=1.5),
                 whiskerprops=dict(linewidth=1.0), capprops=dict(linewidth=1.0),
             )

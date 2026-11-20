@@ -2,7 +2,9 @@
 
 The chain 5 -> 5bis -> 6 -> 7 -> 8bis -> 8 -> 9 is long (minutes). When a change touches tool 9 only, re-running
 5 to 8 proves nothing new. The last run is kept in its folder with a fingerprint of each tool (its notebook +
-the shared modules it uses) and of the 'base' (test driver, test-data generator). Next time:
+the shared modules it uses) and of the 'base' (test driver, test-data generator, and the Python environment: its
+folder, the versions of the packages that compute the outputs and numpy's BLAS, so a chain made in another environment
+is never reused). Next time:
 
     base changed, no state, unreadable state, --fresh-chain   -> full run from scratch
     otherwise                                                 -> rerun from the FIRST tool whose fingerprint
@@ -13,6 +15,7 @@ The state file is updated after each tool succeeds, so an interrupted run resume
 the tools that are not rerun are kept, so 'no traceback in any tool' still covers them.
 """
 import hashlib
+import importlib.metadata
 import json
 import shutil
 import sys
@@ -27,6 +30,10 @@ import participant_selection_lib as PSL     # noqa: E402
 
 STATE_NAME = 'chain_state.json'
 STATE_VERSION = 1
+
+# The packages whose version can move the chain's outputs (the environment is part of the base fingerprint)
+ENV_PACKAGES = ('numpy', 'scipy', 'pandas', 'mne', 'matplotlib', 'specparam', 'statsmodels', 'scikit-learn', 'joblib',
+                'edfio', 'yasa', 'antropy', 'lspopt', 'chardet')
 
 # What a change to which file means for the chain
 BASE_DEPS = [HERE / 'nbdriver.py', HERE / 'pipeline.py', HERE / 'minidb.py', HERE / 'synthetic.py',
@@ -79,8 +86,22 @@ def _hash(paths):
     return h.hexdigest()
 
 
+def environment():
+    """The Python environment running the chain: its folder and the versions of the packages that compute the outputs
+    (a version refresh changes them)."""
+    parts = [sys.prefix]
+    for package in ENV_PACKAGES:
+        try:
+            parts.append(f'{package} {importlib.metadata.version(package)}')
+        except importlib.metadata.PackageNotFoundError:
+            parts.append(f'{package} none')
+    # numpy's BLAS (OpenBLAS or MKL) is a conda package of its own, named by its record (libblas-3.11.0-12_..._openblas)
+    parts += sorted(p.name for p in (Path(sys.prefix) / 'conda-meta').glob('libblas-*.json'))
+    return '; '.join(parts)
+
+
 def fingerprints(dataset):
-    base = _hash(BASE_DEPS) + dataset
+    base = _hash(BASE_DEPS) + hashlib.sha256(environment().encode()).hexdigest() + dataset
     return base, {tool: _hash(deps) for tool, deps in TOOL_DEPS.items()}
 
 

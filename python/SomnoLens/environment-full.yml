@@ -1,0 +1,51 @@
+# SomnoLens, full installation: the light one (environment.yml) + GSSC and SleepFM for the automatic scoring of tool 3bis.
+# A light environment moves to this one with: conda env update -n somnolens -f environment-full.yml
+# Keep the light part identical to environment.yml (tests/test_environment_files.py checks it).
+name: somnolens
+channels:
+  - conda-forge
+dependencies:
+  - python=3.14.*
+  - numpy=2.5.*
+  - libblas=*=*openblas   # not MKL: MKL 2026 with llvm-openmp crashes every matrix product on Windows (SPEC.md)
+  - pandas=2.3.*
+  - scipy=1.18.*
+  - mne-base=1.13.*
+  - matplotlib-base=3.11.*
+  - yasa=0.8.*
+  - antropy=0.1.9     # YASA's sleep staging: its classifiers were trained with antropy < 0.2 (SPEC §3bis)
+  - lspopt=1.4.*      # tool 6's multitaper hypnospectrograms
+  - statsmodels=0.15.*
+  - scikit-learn=1.9.*
+  - joblib=1.6.*
+  - edfio=0.4.*
+  - chardet=5.2.*     # not 7: its confidence on latin-1 / cp1252 headers falls to 0.01-0.04 (tool 1 would refuse them)
+  - openpyxl=3.1.*
+  - voila=0.5.*
+  - ipywidgets=8.1.*
+  - ipyfilechooser=0.6.*
+  - ipyevents=2.0.*
+  - ipykernel=6.31.*  # not 7 yet: tests/nbdriver.py and the planned Stop button depend on the kernel's event loop
+  - ipython=9.*
+  - tk=8.6.*          # tool 1's batch scripts (folder dialog)
+  # --- automatic scoring (tool 3bis): GSSC and SleepFM ---
+  # torch comes from PyPI (below): conda-forge's builds need MKL 2026 (see libblas above). These are torch's pip
+  # requirements, from conda so that pip installs torch alone.
+  - sympy=1.14.*
+  - networkx=3.7.*
+  - filelock=4.2.*
+  - fsspec=2026.9.*
+  - setuptools=84.2.*
+  - typing_extensions=4.16.*
+  - jinja2=3.1.*
+  - importlib_resources=7.*   # imported by GSSC: from conda, so that pip installs nothing beside it
+  - h5py=3.16.*       # SleepFM's input file
+  - einops=0.8.*      # imported by SleepFM's official code
+  - loguru=0.7.*      # imported by SleepFM's official code
+  - pyyaml=6.0.*      # imported by SleepFM's official code
+  - pip
+  - pip:
+    - specparam==2.0.0rc7
+    - curryreader==0.1.2   # MNE's reader of Curry recordings
+    - torch==2.14.*   # the CPU wheel of PyPI, with its own MKL and OpenMP inside
+    - gssc==0.0.9     # pip only; pinned because tool 3bis reproduces its scoring loop (SPEC §3bis)
