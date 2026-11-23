@@ -1300,7 +1300,11 @@ instead of restating them. Only tool-specific deltas are kept inline.
   configuration*, phase 8 of the tool-0 redesign), imported by tool 3 and the libraries (`macrostructure_lib`,
   `preprocessing_lib`, `qc_rejected_epochs_lib`, `spectral_lib`, `autoscoring_lib`, and `quality_lib` since phase 6 of `tools/plan_brainvision.md`):
   `load_custom_stages(folder)`, `parse_custom_field(text)`,
-  and `custom_stage_style(custom_stages) -> (stage_y, stage_colors, ytick_pos, ytick_labels)`. Custom
+  and `custom_stage_style(custom_stages) -> (stage_y, stage_colors, ytick_pos, ytick_labels)`. The same section holds
+  **the labels tool 3 does not write** (2026-11-23): `unexpected_stage_labels(labels, custom_stages) -> {label: epochs}`
+  (anything but W/N1/N2/N3/R, MT, `?` and the custom stages: a hypnogram that skipped tool 3) and `labels_listing`
+  (their text in a warning). Tools 3bis (§3bis *Comparison*), 7 (§7 *Stage event codes*) and 9 (§9 *Stages and
+  aggregation*) warn with it. Tools 0, 5 and 6 had their own warning before and keep it. Custom
   stages stack **below N3** on every hypnogram axis (`N3=0 → -1, -2, …` in declaration order). The
   step-line stays gray with **REM in red** (YASA convention) and each custom stage in a fixed non-red
   palette (`#8dd3c7, #ffffb3, #bebada, #80b1d3, #fdb462, #b3de69, #fccde5, #d9d9d9`), all at the line's own
@@ -2168,6 +2172,14 @@ never scored has an F1 of 0, a stage absent from both sides an empty F1.
   the kappa and MCC across nights*, ticked by default, under the expert suffix) acts only on what summarises several
   nights: the per-participant figure of the database report and Section 4's kappa of each night. The pooled values keep
   their epochs, and no per-night file changes (nothing to record, no Skip question).
+- **Labels tool 3 does not write** (2026-11-23): anything but W/N1/N2/N3/R, MT, `?` and the declared custom stages
+  (`edf_io_lib.unexpected_stage_labels`, the rule tools 7 and 9 use too), found in a hypnogram that skipped tool 3 (`Wake`, `REM`, `S1`, `0` to
+  `5`...). Their epochs are left out like MT, so a night scored in `Wake` / `REM` would otherwise be compared on its NREM
+  only, with no sign of it. Step 1 and Section 4 give a ⚠ that lists these labels and their epoch counts
+  (`unexpected_labels_note`), in the log and in the report (step 1: in the participant's notes, so also in
+  `_scoring_params.json`). Section 4's reader (`read_expert`, from Score_EDF) upper-cases the labels and reads `WAKE` /
+  `REM` as W / R, so its warning lists only the labels it leaves out. A hypnogram written by tool 3 gets no warning and
+  no output changes.
 
 Confusion matrix (rows expert, columns GSSC; colour (full ColorBrewer Greens, white to `#00441b`; text white on the dark cells, luma < 0.5) and bold text = % of the expert row, the main reading,
 comparable across stages and nights; the epoch count in small type below, in parentheses, says how many
@@ -2965,6 +2977,10 @@ produced a `.fif` that saved fine but could not be re-read (`selection must be s
 breaking tools 8 and 9 on any participant with a custom stage or MT. AASM-only hypnograms keep the same five codes,
 so their outputs are byte-identical. No downstream tool reads the codes (they all use the metadata `stage` column).
 Covered by the custom-stage variant test (`tests/test_variants.py`).
+A label tool 3 does not write (`edf_io_lib.unexpected_stage_labels`: not W/N1/N2/N3/R, MT, `?` or a custom stage, so a
+hypnogram that skipped tool 3) gets its code like any other, and a ⚠ in the run log (2026-11-23, `hypnogram_epochs`,
+so also in tool 0's step-6 notes): tools 8, 8bis and 9 then take it for a stage, and tool 9's database figures leave
+it out. The outputs do not change.
 
 **Event flagging when epoch length ≠ 30 s** (see the event method below): the onset-only rule is **kept** (`compute_event_epoch_mask` takes `epoch_sec`, an event flags only the sub-epoch containing its `Start`), and a **prominent amber warning** (`epoch_warn`, shown whenever `dd_epoch_len.value != 30`, plus a per-file `⚠` printed in the run log when event flagging is on) reminds the user that (because annotated durations are unreliable) an event spanning several sub-epochs leaves the others un-flagged, a risk that grows as epochs shrink.
 
@@ -3484,7 +3500,9 @@ tools read tool 7's epochs + a decision* for the decision tables, the sidecar lo
   `offset − log10(knee + f^exponent)`), so it is extrapolated below the fit's lower bound, which is why
   delta sits *below* the fit and its 1/f-corrected value must be read with care.
 - **Stages and aggregation**: one checkbox per stage actually present in the files (AASM + custom, all
-  ON). **No derived groups** (NREM, whole-night…): they are one `groupby` away in the exported tables and
+  ON). A label tool 3 does not write (`edf_io_lib.unexpected_stage_labels`, from a hypnogram that skipped it) also gets
+  a checkbox and its rows in the tables, but the database figures show only AASM + custom: the scan warns with the
+  participants and the epochs per label (2026-11-23). **No derived groups** (NREM, whole-night…): they are one `groupby` away in the exported tables and
   doubled the table size. `Min epochs per cell` (default 20 → the cell is NaN but `n_epochs` is kept, so a
   shortage is visible). It holds **per participant** (a cell = participant × stage × channel): a participant under it
   is missing from the group figure of that stage. **Said before the run (2026-11-17, phase 5 ter)**: after the scan, a

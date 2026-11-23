@@ -26,7 +26,7 @@ import mne
 import participant_selection_lib as PSL     # the excluded-participant banner of the report (same folder)
 from edf_io_lib import (   # one copy, in edf_io_lib (same folder)
     BASE_STAGE_COLORS, CUSTOM_STAGE_PALETTE, load_custom_stages, parse_custom_field, HD_CHANNEL_THRESHOLD,
-    draw_hypnogram,
+    draw_hypnogram, unexpected_stage_labels, labels_listing,
 )
 
 # numpy 2 renamed trapz -> trapezoid (the same function), and numpy 2.5 removed trapz

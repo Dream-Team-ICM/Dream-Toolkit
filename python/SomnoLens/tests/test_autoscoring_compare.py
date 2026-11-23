@@ -125,3 +125,16 @@ def test_section4_writes_the_toolkit_layout_and_a_compare_replaces_the_previous_
         nb.click('btn_compare')
         assert not list(deriv.rglob(f'{second}_*')) and not list(rep.rglob(f'{second}_*'))
         assert read_tsv(rep / 'global_comparison_summary.tsv')['file_id'].tolist() == [first]
+        # An expert label tool 3 does not write (here 'S1') is left out with a warning, in step 1 and in Section 4.
+        expert = next(study.rglob(f'{first}{nb.value("hypno_suffix.value")}'))
+        lines = expert.read_text(encoding='utf-8').splitlines()
+        expert.write_text('\n'.join(['S1'] * 5 + lines[5:]) + '\n', encoding='utf-8')
+        pipeline.select_subset(nb, [first], skip=False)
+        nb.click('btn_run')
+        nb.click('btn_compare_find')
+        nb.click('btn_compare')
+        warning = f"5 of the {len(lines)} expert epochs carry a label tool 3 does not write ('S1' x5)"
+        params = json.loads(next(study.rglob(f'{first}_scoring_params.json')).read_text(encoding='utf-8'))
+        assert any(warning in n for n in params['notes'])
+        assert nb.widget_text().count('carry a label tool 3 does not write') == 2      # the logs of step 1, Section 4
+        assert warning in next(rep.rglob(f'{first}_comparison_report.html')).read_text(encoding='utf-8')

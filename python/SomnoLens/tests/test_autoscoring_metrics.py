@@ -72,6 +72,19 @@ def test_no_comparable_epoch():
     assert res['single_stage_expert'] is False
 
 
+def test_expert_labels_tool3_does_not_write_are_listed():
+    """'Wake' / 'REM' (a hypnogram that skipped tool 3) are left out of the comparison like MT: listed for the
+    warning, while MT, '?' and the declared custom stages are not."""
+    expert = labels(('W', 3), ('Wake', 2), ('N2', 4), ('REM', 1), ('MT', 1), ('?', 1), ('N2a', 1))
+    found = A.unexpected_stage_labels(expert, ['N2a'])
+    assert found == {'Wake': 2, 'REM': 1}
+    assert A.compare_scoring(expert, labels(('W', 13)))[0]['n_excluded_expert'] == 6
+    note = A.unexpected_labels_note(found, len(expert))
+    assert note.startswith("3 of the 13 expert epochs carry a label tool 3 does not write ('Wake' x2, 'REM' x1)")
+    assert A.unexpected_stage_labels(labels(('W', 2), ('MT', 1), ('?', 1)), []) == {}
+    assert A.unexpected_labels_note({}, 4) == ''
+
+
 def test_equal_to_sklearn_when_every_stage_is_present():
     rng = np.random.default_rng(0)
     expert = rng.choice(STAGES, 500)
