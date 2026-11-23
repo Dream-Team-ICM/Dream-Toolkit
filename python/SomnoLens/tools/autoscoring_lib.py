@@ -866,6 +866,14 @@ def score_night_gssc(infer, edf_path, cfg_entry, wanted, one_mode, eog_mode, ref
                                                        eog_mode, reference)
     notes += eog_notes
     stages, onsets, probs, winner, n_comb = run_gssc(infer, raw, eog_data, eog_names, progress=progress)
+    # gssc 0.0.9 (its prepare_inst, also behind its own mne_infer) takes the time of the last sample as the duration:
+    # a recording lasting a whole number of 30-s epochs loses its last, complete, epoch (gssc issue #9, open since
+    # 2025-08-25). Said, not corrected, so that the stages stay gssc's own.
+    whole = int(raw.n_times // (EPOCH_SEC * raw.info['sfreq']))
+    if len(stages) < whole:
+        notes.append(f'GSSC scored {len(stages)} of the {whole} epochs: the recording lasts a whole number of 30-s '
+                     'epochs, and gssc 0.0.9 then leaves out the last one (it takes the time of the last sample as '
+                     'the duration). That epoch has no GSSC stage and stays out of the comparison.')
     checks = channel_checks(edf_path, cfg_entry, refs, eog_used(cfg_entry, eog_mode) if eog_names else {})
     return {'stages': stages, 'onsets': onsets, 'probs': probs, 'winner': winner, 'n_comb': n_comb,
             'present': present, 'eog_names': eog_names, 'reference': ref_text, 'eog_reference': eog_ref,

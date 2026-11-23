@@ -2048,7 +2048,16 @@ EEG (a joint read would upsample to the fastest rate), resampled to the EEG rate
 length. EOG mode: **`L − R bipolar`** (default, Thomas's example script) / `L and R separately` / `Left only` /
 `Right only` / `None` (a side not declared: EEG only, noted).
 No EOG declared → EEG only, with a ⚠. No other preprocessing: GSSC filters 0.3–30 Hz itself and cuts
-2560-sample (30 s) epochs from t = 0, dropping the incomplete tail, so epoch *i* = expert line *i*.
+2560-sample (30 s) epochs from t = 0, dropping the incomplete tail, so epoch *i* = expert line *i*. **A recording lasting
+a whole number of 30-s epochs loses its last, complete, epoch** (found on 2026-11-23, the synthetic nights last exactly
+480 epochs): gssc 0.0.9's `prepare_inst`, behind its own `mne_infer` too, takes the time of the last sample
+(`raw.times[-1]`, one sample short of the duration) as the duration and crops the "overshoot" of 29.996 s; one sample
+more and every epoch is kept. Not in gssc's documentation (its README never describes the cut, the `cut` docstring
+of `EEGInfer` only says that time left over is cut); reported on its repository as issue #9, *Missing epoch when night
+duration is divisible by 30s* (2025-08-25, still open and unanswered on 2026-11-23; `prepare_inst` unchanged on its
+main branch). Said, not corrected, so the stages stay gssc's own (and Score_EDF's): `score_night_gssc`
+adds a note (log, report, `_scoring_params.json`, tool 0) and that epoch stays out of the comparison (step 1 compares
+on the shorter hypnogram, Section 4 counts it in `n_not_predicted`).
 
 **Scoring mode** (`tb_mode`): **Several electrodes (consensus)** (default since 2026-10-27, Score_EDF's choice:
 one checkbox per electrode, `eeg_checks`, ticked by default = the electrodes GSSC was mostly trained on,

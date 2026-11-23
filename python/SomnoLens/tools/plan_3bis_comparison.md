@@ -2,7 +2,16 @@
 
 Status: **confirmed (2026-11-23)**, D1 to D5 accepted as proposed. Phase 1 written: `refactor_check` on the synthetic
 data gives step 1's former columns identical (new columns and `global_autoscoring_pooled.tsv` added, HTML reports
-changed); `-m "quick or ((tool3bis or tool0) and not full)"`: 362 passed. Phase 2 next. Closes the SPEC item *Tool
+changed); `-m "quick or ((tool3bis or tool0) and not full)"`: 362 passed (committed). Phase 2 written: on the
+synthetic data (GSSC + YASA) the epochs, stages and probabilities are identical to the former layout's, YASA's metrics
+too, GSSC's differ only by D1 and now equal step 1's. Found on the way and documented (user decision: a GSSC
+particularity is documented, not corrected): gssc 0.0.9 drops the last, complete, epoch of a recording lasting a whole
+number of 30-s epochs (`score_night_gssc` note, page, SPEC §3bis; gssc issue #9, open since 2025-08-25, not in its
+documentation). `-m "quick or ((tool3bis or tool0) and not full)"`: 363 passed. `score_edf_equivalence.py` (autoscore
+environment, user's go-ahead for night 100) on 2026-11-23: with Score_EDF's settings the same stages for the 5 models
+on the simulated nights, metrics identical except GSSC's 3 epochs not predicted (D1; Score_EDF's epochs scored like
+3bis: within 5e-5); defaults: recalibrations A and B as before (κ 0.893 → 0.911, 0.979 → 0.983); night 100: GSSC and
+YASA identical, SleepFM 1 epoch (tail context). Phase 3 next. Closes the SPEC item *Tool
 3bis: follow-ups of the Score_EDF port → Comparison outputs in the SomnoLens layout*. Asked at the same time and put in
 SPEC as a TODO (*Methods text for a paper*): a notebook or another tool that extracts the essential points to write
 in a paper's methods section.

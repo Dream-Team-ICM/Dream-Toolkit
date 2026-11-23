@@ -4,15 +4,19 @@ Its alignment (sleephd/alignment.py), recalibrations (sleephd/recalibration.py),
 (scoredf/plots.py) are ported here (SPEC §3bis). Reads only step 1's outputs and the
 expert hypnogram (tool 3 format): no EDF.
 
-The output tables keep Score_EDF's layout (epochs_all_stagers.csv, agreement_summary.csv), stage names
-included (Wake, N1, N2, N3, REM), so the two tools can be compared file for file. Changes from Score_EDF, all
-intended:
+The ported computation keeps Score_EDF's names inside (Wake, REM, the models' display names); the outputs follow the
+toolkit (tools/plan_3bis_comparison.md, 2026-11-23): W / R, the models by step 1's keys, one epoch table and one
+agreement table per night, the metrics of step 1 (autoscoring_lib.agreement_metrics) per night and pooled.
+tests/score_edf_equivalence.py maps them back to compare them with Score_EDF. Changes from Score_EDF, all intended:
 - an epoch that no 5-s step overlaps is left out of the recalibration fit instead of turning it to NaN (plan 2.2);
 - the recalibrations fit N3 too when the training nights have N3 (Score_EDF fixed it: its naps had none; 2.7);
 - the thread count of torch is restored after recalibration B (Score_EDF left it at 1; 2.6);
 - for GSSC and YASA (30-s models) the predicted stage is the model's own stage, read from step 1 (Score_EDF
   took the argmax of the same probabilities: identical, except that step 1 stores them rounded to 4 decimals);
-- the stage colours and the hypnogram layout of the rest of the toolkit (W on top, REM in red).
+- the stage colours and the hypnogram layout of the rest of the toolkit (W on top, REM in red);
+- an epoch a model gave no probability for is left out of the metrics and counted (n_not_predicted), as in step 1:
+  Score_EDF counted it as a disagreement (accuracy) and as a sixth class (kappa);
+- the recalibration parameters are returned, to be saved (Score_EDF only logged them).
 """
 import math
 from dataclasses import dataclass
@@ -26,9 +30,11 @@ from matplotlib.colors import ListedColormap
 from matplotlib.patches import Patch
 from scipy.optimize import minimize
 from scipy.special import softmax
-from sklearn.metrics import cohen_kappa_score, f1_score
+from sklearn.metrics import confusion_matrix
 
 from edf_io_lib import draw_hypnogram     # the toolkit's hypnogram, one look everywhere (same folder)
+# step 1's metrics, the same for a night of step 1 and for the comparison of the models (same folder)
+from autoscoring_lib import STAGES, STAGE_COLORS as TOOLKIT_COLORS, agreement_metrics
 
 # Score_EDF's stage names, kept in the output tables (one definition, plan 2.4)
 PROBABILITY_COLUMNS = ['Wake', 'N1', 'N2', 'N3', 'REM']
@@ -43,6 +49,12 @@ NATIVE_30S = {'YASA', 'GSSC'}                                                   
 STAGE_COLORS = {'Wake': '#969696', 'N1': '#9e9ac8', 'N2': '#807dba', 'N3': '#6a51a3', 'REM': '#c994c7'}
 STAGER_COLORS = {'SleepFM': '#2a78d6', 'SleepFM recal A': '#008300', 'SleepFM recal B': '#7b3fb0',
                  'GSSC': '#eb6834', 'YASA': '#1baf7a'}
+# The outputs use the toolkit's names: stages W / N1 / N2 / N3 / R, models by step 1's keys (Score_EDF's names stay
+# inside the ported computation)
+TOOLKIT_STAGE = {'Wake': 'W', 'N1': 'N1', 'N2': 'N2', 'N3': 'N3', 'REM': 'R'}
+MODEL_KEY = {'YASA': 'yasa', 'GSSC': 'gssc', 'SleepFM': 'sleepfm', 'SleepFM recal A': 'sleepfm_recal_a',
+             'SleepFM recal B': 'sleepfm_recal_b'}
+MODEL_NAME = {key: name for name, key in MODEL_KEY.items()}
 
 
 # ---------------------------------------------------------------------------------------------------------
@@ -375,54 +387,119 @@ def refit_five_second(recording, weight, bias):
 
 
 def recalibrate_a(base_recs, free_n3='auto', log=print):
-    """Leave one recording out: each one's recalibrated SleepFM comes from the others' fit."""
-    out = {}
+    """Leave one recording out: each one's recalibrated SleepFM comes from the others' fit.
+    Returns ({recording: recalibrated 5-s table}, [one parameter row per held-out recording])."""
+    out, rows = {}, []
     for held_out in base_recs:
         train = [r for r in base_recs if r.subject != held_out.subject]
         params = fit_temperature(train, free_n3)
         out[held_out.subject] = recalibrated_five_second(held_out, params)
         log(f'  {held_out.subject}: T={params["temperature"]:.3f}, converged={params["converged"]}')
-    return out
+        # bias_N1 ... bias_R under the toolkit's stage names (Wake is the reference, no bias)
+        named = {(f'bias_{TOOLKIT_STAGE[k[5:]]}' if k.startswith('bias_') else k): v for k, v in params.items()}
+        rows.append({'method': 'A', 'file_id': held_out.subject,
+                     'training_nights': ', '.join(r.subject for r in train), **named})
+    return out, rows
 
 
 def recalibrate_b(base_recs, features, fc_weight, fc_bias, free_n3='auto', log=print):
-    """features = {subject: (steps, 128)}. Leave one recording out, penalty chosen by inner cross-validation."""
+    """features = {subject: (steps, 128)}. Leave one recording out, penalty chosen by inner cross-validation.
+    Returns ({recording: recalibrated 5-s table}, [one parameter row per held-out recording],
+    {recording: (refitted final-layer weight (5, 128), bias (5,))})."""
     heads = [prepare_head_recording(r, features[r.subject]) for r in base_recs]
     inner_folds = min(5, len(heads) - 1) if len(heads) > 2 else len(heads) - 1
-    out = {}
+    out, rows, layers = {}, [], {}
     for held_out in heads:
         train = [h for h in heads if h.subject != held_out.subject]
         result = fit_fc_nested(train, fc_weight, fc_bias, inner_folds=max(2, inner_folds), free_n3=free_n3)
         out[held_out.subject] = refit_five_second(held_out, result['weight'], result['bias'])
         log(f'  {held_out.subject}: lambda={result["penalty"]}')
+        rows.append({'method': 'B', 'file_id': held_out.subject,
+                     'training_nights': ', '.join(h.subject for h in train), 'penalty': result['penalty'],
+                     **{f'inner_nll_{p:g}': v for p, v in result['inner_nll'].items()}})
+        layers[held_out.subject] = (result['weight'], result['bias'])
+    return out, rows, layers
+
+
+# ---------------------------------------------------------------------------------------------------------
+# Outputs in the toolkit's layout: one epoch table per night, the agreement per night and pooled
+# ---------------------------------------------------------------------------------------------------------
+METRIC_COLUMNS = ['n_compared', 'accuracy', 'kappa', 'mcc', 'macro_f1', 'balanced_accuracy',
+                  *[f'f1_{s}' for s in STAGES], 'n_stages_expert', 'single_stage_expert']
+
+
+def toolkit_epochs(table, file_id, stager, epoch_seconds=30.0):
+    """One model's epoch table (build_epoch_table) in the toolkit's layout: file_id, model, epoch_idx (counted from
+    the recording start, like step 1's: the window starts on a whole expert epoch), onset_s, stage_expert,
+    expert_coverage, stage_model, p_W ... p_R. A stage is '' where the expert scored no W/N1/N2/N3/R or where the
+    model gave no probability."""
+    out = pd.DataFrame({'file_id': file_id, 'model': MODEL_KEY[stager],
+                        'epoch_idx': np.rint(table['start_seconds'] / epoch_seconds).astype(int),
+                        'onset_s': table['start_seconds'],
+                        'stage_expert': table['manual_stage'].map(TOOLKIT_STAGE).fillna(''),
+                        'expert_coverage': table['manual_coverage'],
+                        'stage_model': table['predicted_stage'].map(TOOLKIT_STAGE).fillna('')})
+    for src, dst in TOOLKIT_STAGE.items():
+        out[f'p_{dst}'] = table[src]
     return out
 
 
-# ---------------------------------------------------------------------------------------------------------
-# Agreement and figures (Score_EDF's scoredf/plots.py, the toolkit's colours)
-# ---------------------------------------------------------------------------------------------------------
-def compute_agreement(scored_df, stagers, subjects):
-    """Per model: epochs, accuracy, pooled kappa, F1 per stage, kappa per recording (Score_EDF, verbatim)."""
-    labels = [s for s in PROBABILITY_COLUMNS if (scored_df['manual_stage'] == s).any()]
+def _models_in(frame):
+    """The models of a table, in Score_EDF's order."""
+    present = set(frame['model'])
+    return [m for m in MODEL_KEY.values() if m in present]
+
+
+def is_true(column):
+    """A True / False column read back from a TSV (bool or text)."""
+    return column.astype(str).str.lower() == 'true'
+
+
+def night_agreement(epochs):
+    """One night's agreement with the expert, model by model, on the epochs where the expert scored W/N1/N2/N3/R and
+    the model gave a stage. An epoch the model gave no probability for (the incomplete tail a 30-s model drops, or the
+    last epoch gssc 0.0.9 drops, see SPEC §3bis) is left out and counted in n_not_predicted: Score_EDF counted it as
+    a disagreement, step 1 compares on the epochs both scored. Returns (one row per model, the long confusion matrix
+    model, expert, predicted, n)."""
+    rows, confusion = [], []
+    for model in _models_in(epochs):
+        g = epochs[epochs['model'] == model]
+        scored = g['stage_expert'].isin(STAGES)
+        predicted = g['stage_model'].isin(STAGES)
+        both = scored & predicted
+        cm = (confusion_matrix(g.loc[both, 'stage_expert'], g.loc[both, 'stage_model'], labels=STAGES)
+              if both.any() else np.zeros((5, 5), dtype=int))
+        res = agreement_metrics(cm)
+        rows.append({'model': model, 'n_compared': res['n_compared'], 'n_excluded_expert': int((~scored).sum()),
+                     'n_not_predicted': int((scored & ~predicted).sum()), **{c: res[c] for c in METRIC_COLUMNS}})
+        confusion += [{'model': model, 'expert': e, 'predicted': p, 'n': int(cm[i, j])}
+                      for i, e in enumerate(STAGES) for j, p in enumerate(STAGES)]
+    return pd.DataFrame(rows), pd.DataFrame(confusion)
+
+
+def summed_confusion(confusion, model):
+    """One model's 5 x 5 confusion matrix (rows expert, columns model), summed over the nights of `confusion`."""
+    g = confusion[confusion['model'] == model].groupby(['expert', 'predicted'])['n'].sum()
+    return g.unstack().reindex(index=STAGES, columns=STAGES).fillna(0).astype(int).to_numpy()
+
+
+def pooled_agreement(confusion, summary):
+    """Every night pooled, model by model: the metrics of the summed confusion matrix (the same function as a
+    night's), the number of nights and the epochs left out. `summary` = the per-night rows."""
     rows = []
-    for name in stagers:
-        g = scored_df.loc[scored_df['stager'] == name]
-        if g.empty:
-            continue
-        row = {'stager': name, 'epochs': len(g),
-               'accuracy': (g['manual_stage'] == g['predicted_stage']).mean(),
-               'kappa_pooled': cohen_kappa_score(g['manual_stage'], g['predicted_stage'])}
-        f1_vals = f1_score(g['manual_stage'], g['predicted_stage'], labels=labels, average=None, zero_division=0)
-        for stage, val in zip(labels, f1_vals):
-            row[f'F1_{stage}'] = val
-        for sid in subjects:
-            sub = g.loc[g['subject'] == sid]
-            if len(sub) >= 2:
-                row[f'kappa_{sid}'] = cohen_kappa_score(sub['manual_stage'], sub['predicted_stage'])
-        rows.append(row)
-    return pd.DataFrame(rows).set_index('stager')
+    for model in _models_in(confusion):
+        nights = summary[summary['model'] == model]
+        res = agreement_metrics(summed_confusion(confusion, model))
+        rows.append({'model': model, 'n_nights': len(nights), 'n_compared': res['n_compared'],
+                     'n_excluded_expert': int(pd.to_numeric(nights['n_excluded_expert']).sum()),
+                     'n_not_predicted': int(pd.to_numeric(nights['n_not_predicted']).sum()),
+                     **{c: res[c] for c in METRIC_COLUMNS if c != 'single_stage_expert'}})
+    return pd.DataFrame(rows)
 
 
+# ---------------------------------------------------------------------------------------------------------
+# Figures (Score_EDF's scoredf/plots.py, the toolkit's names and colours)
+# ---------------------------------------------------------------------------------------------------------
 def _manual_hypnogram(ax, minutes, stage_names):
     """Expert hypnogram: the toolkit's hypnogram (edf_io_lib.draw_hypnogram), Score_EDF's 'Wake' / 'REM' read as W / R.
     `minutes` = the start of each epoch."""
@@ -433,116 +510,130 @@ def _manual_hypnogram(ax, minutes, stage_names):
     draw_hypnogram(ax, edges, labels, fontsize=8)
 
 
-def plot_hypnodensities(epochs_df, stagers, subject):
-    """One recording: each model's hypnodensity (stacked probabilities) above the expert hypnogram."""
-    n_panels = len(stagers) + 1
+def _stage_legend():
+    return [Patch(color=TOOLKIT_COLORS[s], label=s) for s in STAGES]
+
+
+def plot_hypnodensities(epochs, file_id):
+    """One night: each model's hypnodensity (stacked probabilities) above the expert hypnogram."""
+    night = epochs[epochs['file_id'] == file_id]
+    models = _models_in(night)
+    n_panels = len(models) + 1
     fig, axes = plt.subplots(n_panels, 1, figsize=(13, 1.4 * n_panels), sharex=True,
-                             gridspec_kw={'height_ratios': [1] * len(stagers) + [1.1]})
-    for ax, name in zip(axes, stagers):
-        g = epochs_df.loc[(epochs_df['subject'] == subject) & (epochs_df['stager'] == name)]
-        ax.set_ylabel(name, rotation=0, ha='right', va='center', fontsize=9)
-        if g.empty:
-            ax.text(0.5, 0.5, 'not available', transform=ax.transAxes, ha='center', va='center', color='grey')
-            continue
-        ax.stackplot(g['minutes_from_start'], *[g[s] for s in PROBABILITY_COLUMNS],
-                     colors=[STAGE_COLORS[s] for s in PROBABILITY_COLUMNS], step='post', alpha=0.9)
-        ax.set(ylim=(0, 1), yticks=[0, 1], xlim=(0, g['minutes_from_start'].max()))
-    g = epochs_df.loc[(epochs_df['subject'] == subject) & (epochs_df['stager'] == stagers[0])]
-    if not g.empty:
-        _manual_hypnogram(axes[-1], g['minutes_from_start'], g['manual_stage'])
-        axes[-1].set_ylabel('Expert', rotation=0, ha='right', va='center', fontsize=9)
-        axes[-1].set_xlabel('Minutes from the first scored epoch')
-    axes[0].legend(handles=[Patch(color=c, label=s) for s, c in STAGE_COLORS.items()], ncol=5,
-                   loc='lower center', bbox_to_anchor=(0.5, 1.02), frameon=False, fontsize=8)
-    fig.suptitle(f'{subject}: hypnodensity comparison', y=1.0, fontsize=11)
+                             gridspec_kw={'height_ratios': [1] * len(models) + [1.1]})
+    start = night['onset_s'].min()
+    for ax, model in zip(axes, models):
+        g = night[night['model'] == model]
+        minutes = (g['onset_s'] - start) / 60
+        ax.set_ylabel(MODEL_NAME[model], rotation=0, ha='right', va='center', fontsize=9)
+        ax.stackplot(minutes, *[g[f'p_{s}'] for s in STAGES], colors=[TOOLKIT_COLORS[s] for s in STAGES],
+                     step='post', alpha=0.9)
+        ax.set(ylim=(0, 1), yticks=[0, 1], xlim=(0, minutes.max()))
+    first = night[night['model'] == models[0]]
+    _manual_hypnogram(axes[-1], (first['onset_s'] - start) / 60, first['stage_expert'])
+    axes[-1].set_ylabel('Expert', rotation=0, ha='right', va='center', fontsize=9)
+    axes[-1].set_xlabel('Minutes from the first scored epoch')
+    axes[0].legend(handles=_stage_legend(), ncol=5, loc='lower center', bbox_to_anchor=(0.5, 1.02), frameon=False,
+                   fontsize=8)
+    fig.suptitle(f'{file_id}: hypnodensity comparison', y=1.0, fontsize=11)
     fig.tight_layout()
     return fig
 
 
-def plot_confusion_matrices(scored_df, stagers):
-    """One confusion matrix per model, all recordings pooled: % of each expert stage (row)."""
-    n = len(stagers)
-    cols = min(n, 4)
-    rows = (n + cols - 1) // cols
+def plot_confusion_matrices(confusion, title):
+    """One confusion matrix per model (`confusion`: model, expert, predicted, n; one night, or several summed):
+    % of each expert stage (row)."""
+    models = _models_in(confusion)
+    cols = min(len(models), 4)
+    rows = (len(models) + cols - 1) // cols
     fig, axes = plt.subplots(rows, cols, figsize=(4 * cols, 3.5 * rows), squeeze=False)
-    labels = [s for s in PROBABILITY_COLUMNS if (scored_df['manual_stage'] == s).any()]
     greens = plt.cm.Greens
-    for idx, name in enumerate(stagers):
+    for idx, model in enumerate(models):
         ax = axes.flat[idx]
-        g = scored_df.loc[scored_df['stager'] == name]
-        ax.set_title(name)
-        if g.empty:
+        ax.set_title(MODEL_NAME[model])
+        cm = summed_confusion(confusion, model)
+        present = cm.sum(axis=1) > 0
+        if not present.any():
             ax.text(0.5, 0.5, 'no data', transform=ax.transAxes, ha='center', color='grey')
             continue
-        counts = pd.crosstab(g['manual_stage'], g['predicted_stage']).reindex(
-            index=labels, columns=PROBABILITY_COLUMNS, fill_value=0)
-        pct = counts.div(counts.sum(axis=1).replace(0, 1), axis=0) * 100
-        ax.imshow(pct.values, cmap=greens, vmin=0, vmax=100, aspect='auto')
+        labels = [s for s, p in zip(STAGES, present) if p]
+        pct = cm[present] / cm[present].sum(axis=1, keepdims=True) * 100
+        ax.imshow(pct, cmap=greens, vmin=0, vmax=100, aspect='auto')
         for i in range(pct.shape[0]):
             for j in range(pct.shape[1]):
-                r, gg, b, _ = greens(pct.values[i, j] / 100)
+                r, gg, b, _ = greens(pct[i, j] / 100)
                 color = 'white' if 0.2126 * r + 0.7152 * gg + 0.0722 * b < 0.5 else '#222222'
-                ax.text(j, i, f'{pct.values[i, j]:.1f}', ha='center', va='center', fontsize=8, color=color)
-        ax.set_xticks(range(len(PROBABILITY_COLUMNS)))
-        ax.set_xticklabels(PROBABILITY_COLUMNS, fontsize=8)
+                ax.text(j, i, f'{pct[i, j]:.1f}', ha='center', va='center', fontsize=8, color=color)
+        ax.set_xticks(range(len(STAGES)))
+        ax.set_xticklabels(STAGES, fontsize=8)
         ax.set_yticks(range(len(labels)))
         ax.set_yticklabels(labels, fontsize=8)
         ax.set(xlabel='Predicted', ylabel='Expert')
-    for idx in range(len(stagers), axes.size):
+    for idx in range(len(models), axes.size):
         axes.flat[idx].axis('off')
-    fig.suptitle('Confusion matrices, % of the expert stage (all recordings pooled)', y=1.01, fontsize=11)
+    fig.suptitle(title, y=1.01, fontsize=11)
     fig.tight_layout()
     return fig
 
 
-def plot_agreement_summary(agreement_df, stagers, subjects):
-    """F1 per stage (left) and kappa per recording (right)."""
-    labels = [s for s in PROBABILITY_COLUMNS if f'F1_{s}' in agreement_df.columns]
+def plot_agreement_summary(pooled, summary, single_stage_out=True):
+    """F1 per stage with every night pooled (left) and the kappa of each night (right). single_stage_out: a night
+    where the expert scored a single stage is left out of the right panel (its kappa is 0 whatever the model)."""
+    models = _models_in(pooled)
+    names = [MODEL_NAME[m] for m in models]
     fig, axes = plt.subplots(1, 2, figsize=(14, 4.5), gridspec_kw={'width_ratios': [1.3, 1]})
-    present = [s for s in stagers if s in agreement_df.index]
-    f1 = agreement_df.loc[present, [f'F1_{s}' for s in labels]].rename(columns=lambda c: c.removeprefix('F1_'))
-    f1.T.plot.bar(ax=axes[0], color=[STAGER_COLORS.get(s, '#888888') for s in present], width=0.8, rot=0)
-    axes[0].set(ylim=(0, 1), ylabel='F1 (pooled)', title='Agreement per stage')
-    axes[0].legend(title='', ncol=min(4, len(present)), fontsize=7, loc='lower center',
+    f1 = pooled.set_index('model').loc[models, [f'f1_{s}' for s in STAGES]].astype(float).dropna(axis=1, how='all')
+    f1.index = names
+    f1.columns = [c.removeprefix('f1_') for c in f1.columns]
+    f1.T.plot.bar(ax=axes[0], color=[STAGER_COLORS.get(n, '#888888') for n in names], width=0.8, rot=0)
+    axes[0].set(ylim=(0, 1), ylabel='F1 (all nights pooled)', title='Agreement per stage')
+    axes[0].legend(title='', ncol=min(4, len(names)), fontsize=7, loc='lower center',
                    bbox_to_anchor=(0.5, 1.05), frameon=False)
+    nights = summary[~is_true(summary['single_stage_expert'])] if single_stage_out else summary
+    file_ids = sorted(nights['file_id'].astype(str).unique())
     markers = ['o', 's', '^', 'D', 'v', 'P', 'X', '*', 'h', '+']
-    kappa_cols = [c for c in agreement_df.columns if c.startswith('kappa_') and c != 'kappa_pooled']
-    for i, col in enumerate(kappa_cols):
-        axes[1].plot(range(len(present)), agreement_df.loc[present, col].values, color='#8a8a8a', lw=0.8,
-                     marker=markers[i % len(markers)], ms=7, label=col.removeprefix('kappa_'))
-    axes[1].scatter(range(len(present)), agreement_df.loc[present, 'kappa_pooled'], marker='_', s=700,
-                    color='black', zorder=3, label='pooled')
-    axes[1].set(xticks=range(len(present)), ylim=(0, 1), ylabel="Cohen's kappa", title='Agreement per recording')
-    axes[1].set_xticklabels(present, rotation=30, ha='right', fontsize=8)
-    axes[1].legend(title='', fontsize=7)
+    low = 0.0
+    for i, fid in enumerate(file_ids):
+        k = (nights[nights['file_id'].astype(str) == fid].set_index('model')['kappa'].reindex(models)
+             .astype(float))
+        low = min(low, np.nanmin(k.values)) if np.isfinite(k.values).any() else low
+        axes[1].plot(range(len(models)), k.values, color='#8a8a8a', lw=0.8, marker=markers[i % len(markers)], ms=7,
+                     label=fid)
+    axes[1].scatter(range(len(models)), pooled.set_index('model').loc[models, 'kappa'].astype(float), marker='_',
+                    s=700, color='black', zorder=3, label='pooled')
+    axes[1].set(xticks=range(len(models)), ylim=(low - 0.05 if low < 0 else 0, 1), ylabel="Cohen's kappa",
+                title='Agreement per night')
+    axes[1].set_xticklabels(names, rotation=30, ha='right', fontsize=8)
+    if len(file_ids) <= 12:                       # beyond, a legend of every night hides the figure
+        axes[1].legend(title='', fontsize=7)
     fig.tight_layout()
     return fig
 
 
-def plot_hypnogram_grid(epochs_df, stagers, subjects):
-    """Colour-coded epochs: the expert then each model, one panel per recording."""
-    stage_code = {s: i for i, s in enumerate(PROBABILITY_COLUMNS)}
-    cmap = ListedColormap([STAGE_COLORS[s] for s in PROBABILITY_COLUMNS]).with_extremes(bad='#e0e0e0')
-    fig, axes = plt.subplots(len(subjects), 1, figsize=(13, 2.6 * len(subjects)))
+def plot_hypnogram_grid(epochs, file_ids):
+    """Colour-coded epochs: the expert then each model, one panel per night (grey = no stage)."""
+    stage_code = {s: i for i, s in enumerate(STAGES)}
+    cmap = ListedColormap([TOOLKIT_COLORS[s] for s in STAGES]).with_extremes(bad='#e0e0e0')
+    fig, axes = plt.subplots(len(file_ids), 1, figsize=(13, 2.6 * len(file_ids)))
     axes_arr = np.atleast_1d(axes)
-    for ax, sid in zip(axes_arr, subjects):
-        g = epochs_df.loc[epochs_df['subject'] == sid]
-        first = next((s for s in stagers if s in g['stager'].unique()), None)
-        if first is None:
-            ax.text(0.5, 0.5, f'{sid}: no model output', transform=ax.transAxes, ha='center')
+    for ax, fid in zip(axes_arr, file_ids):
+        g = epochs[epochs['file_id'].astype(str) == fid]
+        models = _models_in(g)
+        if not models:
+            ax.text(0.5, 0.5, f'{fid}: no model output', transform=ax.transAxes, ha='center')
             continue
-        manual = g.loc[g['stager'] == first].set_index('epoch')['manual_stage'].map(stage_code)
-        present = [s for s in stagers if s in g['stager'].unique()]
-        predicted = (g.assign(code=g['predicted_stage'].map(stage_code))
-                     .pivot(index='stager', columns='epoch', values='code').reindex(present))
+        manual = g[g['model'] == models[0]].set_index('epoch_idx')['stage_expert'].map(stage_code)
+        predicted = (g.assign(code=g['stage_model'].map(stage_code))
+                     .pivot(index='model', columns='epoch_idx', values='code').reindex(models))
         image = np.vstack([manual.to_numpy(float), predicted.to_numpy(float)])
         ax.imshow(np.ma.masked_invalid(image), aspect='auto', cmap=cmap, vmin=-0.5, vmax=4.5,
                   interpolation='nearest', extent=(0, image.shape[1] / 2, image.shape[0], 0))
-        ax.set(yticks=np.arange(image.shape[0]) + 0.5, yticklabels=['Expert', *present], title=sid)
+        ax.set(yticks=np.arange(image.shape[0]) + 0.5, yticklabels=['Expert', *[MODEL_NAME[m] for m in models]],
+               title=fid)
         ax.axhline(1, color='white', lw=3)
         ax.grid(False)
     axes_arr[-1].set_xlabel('Minutes from the first scored epoch')
-    axes_arr[0].legend(handles=[Patch(color=c, label=s) for s, c in STAGE_COLORS.items()], ncol=5,
-                       loc='lower right', bbox_to_anchor=(1, 1.02), frameon=False, fontsize=8)
+    axes_arr[0].legend(handles=_stage_legend(), ncol=5, loc='lower right', bbox_to_anchor=(1, 1.02), frameon=False,
+                       fontsize=8)
     fig.tight_layout()
     return fig

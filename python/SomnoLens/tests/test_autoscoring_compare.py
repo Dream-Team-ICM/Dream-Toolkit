@@ -1,6 +1,9 @@
 """Tool 3bis's comparison with the expert hypnogram across nights (tools/plan_3bis_comparison.md): the database report of
 step 1 with a night where the expert scored a single stage and a night compared before the macro-F1, the balanced
-accuracy and the MCC were added, both ways of the Section 1 option."""
+accuracy and the MCC were added, both ways of the Section 1 option. Then Section 4 in the toolkit's layout, on a copy
+of the synthetic study: its files, the same metrics as step 1, a second comparison replacing the first."""
+import json
+import shutil
 import sys
 from pathlib import Path
 
@@ -10,11 +13,14 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / 'tools'))
 import autoscoring_lib as A          # noqa: E402
+import minidb                        # noqa: E402
+import pipeline                      # noqa: E402
 from nbdriver import NotebookSession  # noqa: E402
 
 pytestmark = [pytest.mark.tool3bis]
 T3BIS = 'tools/3bis_autoscoring_voila.ipynb'
 NEW_COLUMNS = ['macro_f1', 'balanced_accuracy', 'mcc', 'n_stages_expert', 'single_stage_expert']
+INPUT_SUFFIXES = ('.edf', '.txt', '.csv', '.xml', '.tsv')
 
 
 def write_night(rep, fid, expert, model, old=False):
@@ -57,3 +63,65 @@ def test_database_report_with_a_single_stage_night_and_a_night_compared_before(t
         nb.run(f'rebuild_database_summary(Path(r"{tmp_path}"), "GSSC", False)')
         report = (rep / 'global_autoscoring_report.html').read_text(encoding='utf-8')
         assert 'kept in the kappa and the MCC, where they count as 0 whatever the model' in report
+
+
+def study_inputs(chain, dest):
+    """The study INPUTS of the chain (recordings, companions, config_param) copied to `dest`."""
+    data = Path(chain['data'])
+    dest.mkdir(parents=True, exist_ok=True)
+    for f in data.iterdir():
+        if f.is_file() and f.suffix.lower() in INPUT_SUFFIXES:
+            shutil.copy2(f, dest / f.name)
+    shutil.copytree(data / 'config_param', dest / 'config_param')
+    return dest
+
+
+def read_tsv(path):
+    return pd.read_csv(path, sep='\t', dtype={'file_id': str, 'stage_expert': str, 'stage_model': str})
+
+
+def test_section4_writes_the_toolkit_layout_and_a_compare_replaces_the_previous_one(chain, tmp_path):
+    pytest.importorskip('gssc')
+    if chain['dataset'] != 'synthetic':
+        pytest.skip('one dataset is enough: the layout and the rules do not depend on the recordings')
+    study = study_inputs(chain, tmp_path / 'study')
+    first, second = minidb.PARTICIPANTS['synthetic'][:2]
+    deriv = study / 'derivatives' / 'autoscoring_comparison'
+    rep = study / 'reports_autoscoring_comparison'
+    with NotebookSession(T3BIS) as nb:
+        nb.pick('fc_data', study)
+        nb.click('btn_scan')
+        pipeline.select_subset(nb, [first, second], skip=False)
+        nb.click('btn_run')
+        nb.click('btn_compare_find')
+        assert nb.value("[k for k, cb in cmp_checks.items() if cb.value]") == ['GSSC']
+        nb.click('btn_compare')
+        for fid in (first, second):
+            assert next(deriv.rglob(f'{fid}_comparison_epochs.tsv'), None) is not None, fid
+            for suffix in ('_comparison.tsv', '_confusion.tsv', '_comparison_report.html'):
+                assert next(rep.rglob(f'{fid}{suffix}'), None) is not None, fid + suffix
+        for name in ('global_comparison_summary.tsv', 'global_comparison_pooled.tsv', 'global_confusion.tsv',
+                     'global_comparison_report.html'):
+            assert (rep / name).exists(), name
+        assert not (study / 'autoscore_outputs').exists()                       # Score_EDF's layout no longer written
+        epochs = read_tsv(next(deriv.rglob(f'{first}_comparison_epochs.tsv')))
+        assert set(epochs['model']) == {'gssc'}
+        assert set(epochs['stage_expert'].fillna('')) <= {'W', 'N1', 'N2', 'N3', 'R', ''}
+        assert (epochs['epoch_idx'] == (epochs['onset_s'] / 30).round().astype(int)).all()   # from the recording start
+        # The synthetic nights last exactly 480 epochs: gssc 0.0.9 leaves out the last one (said in step 1's notes),
+        # which Section 4 counts as not predicted; its metrics are then step 1's.
+        params = json.loads(next(study.rglob(f'{first}_scoring_params.json')).read_text(encoding='utf-8'))
+        assert any('GSSC scored 479 of the 480 epochs' in n for n in params['notes'])
+        s4 = read_tsv(rep / 'global_comparison_summary.tsv').set_index('file_id')
+        s1 = read_tsv(study / 'reports_autoscoring_gssc' / 'global_autoscoring_summary.tsv').set_index('file_id')
+        assert (s4['n_not_predicted'] == 1).all()
+        cols = ['n_compared', 'accuracy', 'kappa', 'mcc', 'macro_f1', 'balanced_accuracy',
+                *[f'f1_{s}' for s in A.STAGES]]
+        np.testing.assert_allclose(s4.loc[[first, second], cols].astype(float),
+                                   s1.loc[[first, second], cols].astype(float), atol=1e-4)
+        # A comparison is one set of nights: comparing the first night alone replaces the two-night comparison.
+        pipeline.select_subset(nb, [first], skip=True)
+        nb.click('btn_compare_find')
+        nb.click('btn_compare')
+        assert not list(deriv.rglob(f'{second}_*')) and not list(rep.rglob(f'{second}_*'))
+        assert read_tsv(rep / 'global_comparison_summary.tsv')['file_id'].tolist() == [first]
