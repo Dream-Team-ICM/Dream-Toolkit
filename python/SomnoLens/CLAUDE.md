@@ -212,7 +212,9 @@ The "what to do / what not to break" reminders, grouped by theme. Each points to
   / `help_html` / `text_block` (a long widget text needs one: a widget HTML spaces wrapped lines by 28 px),
   progress bars, suffix menus (`suffix_menu`: the field stays what the tool reads), the **Inputs found** list
   (`input_row`: the study folder is the only picker to use, the tool finds the rest, **the picker stays what the run
-  reads**), the **Advanced** box (`advanced_box`). **No button that only reveals widgets**: a section builds itself after the step it
+  reads**), the **Advanced** box (`advanced_box`), the **Recent studies** row under every study folder picker but 1bis's
+  (`recent_studies_row` + `SF.remember_study` first in the picker's callback; the list is the user's, tests set it `off`).
+  **No button that only reveals widgets**: a section builds itself after the step it
   needs (`waiting_html` until then). A new page or widget follows it; `tests/test_ui_lib.py` guards the pages.
   → SPEC *Cross-cutting → Voila page conventions*.
 
@@ -394,9 +396,9 @@ The "what to do / what not to break" reminders, grouped by theme. Each points to
   A format-specific need goes into the reader (`brainvision_lib`, `curry_lib`), never into a copy of a tool.
 - **Tool 6's computation = `tools/quality_lib.py`** (shared with tool 0's step 5): edit the library, never the
   notebook. → SPEC §6.
-- **Canonical launch cwd = repo root, and shared-module imports must be cwd-independent**: every tool is run
-  from `SomnoLens/` (see SPEC *How to run*), but the shared-module import must still resolve from either
-  cwd: each page probes `cwd`, `cwd/tools` and `dirname(cwd)/tools`, never the old
+- **Launch = `voila` from `tools/` (the list of the tools) or `voila tools/<app>.ipynb` from `SomnoLens/`, and
+  shared-module imports must be cwd-independent**: Voila runs every page's kernel in `tools/`, the tests run it from
+  `SomnoLens/` (see SPEC *How to run*), so each page probes `cwd`, `cwd/tools` and `dirname(cwd)/tools`, never the old
   `os.path.dirname(os.path.abspath('__file__'))` (= cwd only, breaks from the repo root).
 
 ## Working agreements

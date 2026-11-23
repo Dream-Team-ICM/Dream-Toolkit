@@ -607,6 +607,76 @@ def inputs_list(children):
     return widgets.VBox([wait, box_]), show
 
 
+# ---------------------------------------------------------------------------
+# Recent studies: under the study folder's picker, the study folders picked lately and a field to paste a path
+# ---------------------------------------------------------------------------
+PASTE_PLACEHOLDER = r'e.g. D:\studies\my_study or \\server\share\my_study'
+
+
+def recent_studies_row(picker, studies, warning=None):
+    """The 'Recent studies' menu and the 'Or paste a path' field, put right under the study folder's `picker`. studies,
+    warning = what study_files_lib.recent_studies() returns (the menu hidden when there is no study, the warning shown
+    under it):  recent_row, recent_note = UI.recent_studies_row(fc_data, *SF.recent_studies())
+
+    Choosing a study, or pasting a folder's path then 'Use', selects it in `picker` the way its dialog does: the tool's
+    own callback runs (and remembers the folder). A folder that cannot be reached is refused with a message, the picker
+    unchanged; nothing is checked before, a disconnected network share can take tens of seconds to answer.
+
+    Returns (row, note): put `row` in the page; note(text) shows a warning under it (the warnings of study_files_lib),
+    note(None) clears it."""
+    options = [('(choose)', '')] + [(f'{s["path"]}  (tool {s.get("tool", "?")}, {str(s.get("last_used", ""))[:10]})',
+                                     str(s['path'])) for s in studies]
+    menu = widgets.Dropdown(description='Recent studies:', options=options, value='', style=LABEL_STYLE,
+                            layout=widgets.Layout(width=WIDE_WIDTH, display='' if studies else 'none'))
+    field = widgets.Text(description='Or paste a path:', placeholder=PASTE_PLACEHOLDER, style=LABEL_STYLE,
+                         layout=widgets.Layout(width=FIELD_WIDTH))
+    use = button('Use', 'helper', tooltip='Select this folder as the study folder')
+    line = widgets.HTML('')
+    state = {'busy': False}
+
+    def note(text):
+        line.value = msg('warn', text) if text else ''
+
+    def _select(folder):
+        if not os.path.isabs(folder):
+            line.value = msg('error', f'paste the full path of the study folder: <code>{folder}</code>')
+            return False
+        if not os.path.isdir(folder):
+            line.value = msg('error', f'not reachable: <code>{folder}</code> (a disconnected network drive? a file '
+                                      'instead of a folder?)')
+            return False
+        line.value = ''
+        try:
+            picker.reset(path=folder, filename='')
+            picker._show_dialog()          # then its own Select: the selection, then the tool's callback (ipyfilechooser 0.6)
+            picker._on_select_click(None)
+        except Exception as e:
+            line.value = msg('error', f'could not select <code>{folder}</code>: {e}')
+            return False
+        return True
+
+    def _on_menu(change):
+        if state['busy'] or not change['new']:
+            return
+        _select(change['new'])
+        state['busy'] = True               # back on '(choose)': the picker shows the folder, the same study can be chosen again
+        try:
+            menu.value = ''
+        finally:
+            state['busy'] = False
+
+    def _on_use(_):
+        # 'Copy as path' in the Windows Explorer puts the path between quotes
+        if _select(field.value.strip().strip('"').strip()):
+            field.value = ''
+
+    menu.observe(_on_menu, names='value')
+    use.on_click(_on_use)
+    row = widgets.VBox([menu, widgets.HBox([field, use], layout=widgets.Layout(align_items='center')), line])
+    note(warning)
+    return row, note
+
+
 def custom_stages_html(stages, loaded):
     """The custom stages line of the 'Inputs found' list: `stages` = the non-AASM stages the run will use (the field
     of the Advanced box), `loaded` = the ones read from config_param/custom_stages.json (tool 3)."""

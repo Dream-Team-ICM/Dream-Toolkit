@@ -19,6 +19,7 @@ import pytest
 import minidb
 import pipeline
 import snapshot
+from nbdriver import NotebookSession
 
 pytestmark = pytest.mark.tool9
 
@@ -116,3 +117,27 @@ def test_tool9_night_thirds_count_their_own_epochs(chain):
                 assert pd.isna(row['pct_rejected']), (fid, stage, third)
             else:
                 assert row['pct_rejected'] == pytest.approx(100.0 * n_rej / (n_kept + n_rej), abs=0.01)
+
+
+def test_tool9_scan_names_a_stage_label_tool3_does_not_write(chain, tmp_path):
+    """A stage label tool 3 does not write (a hypnogram that skipped it: here 'Wake' on 5 epochs of one participant's
+    .fif, on a copy) is computed as a stage of its own, but the database figures leave it out: the scan says so."""
+    if chain['dataset'] != 'synthetic':
+        pytest.skip('one dataset is enough: the warning does not depend on the recordings')
+    fid = minidb.PARTICIPANTS[chain['dataset']][0]
+    raw_dir = tmp_path / 'derivatives' / 'preproc_epo'
+    shutil.copytree(chain['data'] / 'derivatives' / 'preproc_epo', raw_dir)
+    fif = raw_dir / f'{fid}_all-epo.fif'
+    ep = mne.read_epochs(str(fif), preload=True, verbose=False)
+    meta = ep.metadata.copy()
+    meta['stage'] = meta['stage'].astype(str)
+    meta.loc[meta.index[:5], 'stage'] = 'Wake'
+    ep.metadata = meta
+    ep.save(str(fif), overwrite=True, verbose=False)
+    with NotebookSession(pipeline.T9) as nb:
+        nb.pick('fc_data', tmp_path)
+        nb.pick('fc_raw', raw_dir)
+        nb.set('decision_menu', '')
+        nb.click('btn_scan')
+        text = nb.widget_text()
+    assert f"1 participant(s) with a stage label tool 3 does not write ('Wake' x5 in all): {fid}." in text, text[-3000:]

@@ -72,11 +72,12 @@ repository the first time, and checks them.
 
 ```bash
 conda activate somnolens
-cd path/to/SomnoLens
-voila tools/1_inspect_edf_voila.ipynb
+cd path/to/SomnoLens/tools
+voila
 ```
+It opens a web browser where you can open each tool by simply clicking on it.
 
-The app opens in the web browser. Launch every tool from the `SomnoLens` folder, with
+To launch a single tool from the `SomnoLens` folder, use:
 `voila tools/<app>.ipynb` (quote the names that contain a `&`:
 `voila "tools/2_select&remap_channels_edf_voila.ipynb"`).
 
@@ -95,6 +96,11 @@ my_study/                      <- pick this folder in every tool
 ├── reports_inspection/        <- tool 1's report
 └── reports_<step>/            <- one HTML report folder per tool
 ```
+
+Each tool remembers the study folders you picked: under the folder picker, **Recent studies** gives them back in one
+click (the list belongs to your Windows account and stays on this PC). For a study far from the toolkit, copy its path
+from the Windows Explorer address bar and paste it in **Or paste a path**: it also reaches a network share
+(`\\server\share\...`) that is not mapped to a drive letter.
 
 Keep the study path short: Windows limits paths to 260 characters.
 

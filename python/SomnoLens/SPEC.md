@@ -219,11 +219,14 @@ Key packages:
 
 ## How to run the tools
 
-**Canonical working directory = the repo root (`SomnoLens/`).** Launch every tool from there (paths below
-are relative to it). This keeps one consistent cwd for the shared libraries, `config_param/*.json`, hypnogram
-lookups and outputs across the whole suite. As a safety net the tools also resolve their shared modules
-independent of cwd (the shared modules of `tools/` are found whether Voila is launched from the repo root **or**
-from the tool's own folder) but the repo root is the documented, recommended launch directory.
+**Two ways to launch, the same pages.** From `tools/`, `voila` alone opens the browser on the list of the tools, and a
+click opens one (in its own tab, with its own kernel): what the README and `tutorials/1_install_python.docx` teach.
+From the repo root (`SomnoLens/`), `voila tools/<app>.ipynb` opens one tool (the list below). Either way Voila runs
+each page's kernel in the notebook's own folder, `tools/` (checked in Voila 0.5.13: `handler.py` starts the kernel in
+the notebook's directory). Nothing of a study depends on that folder: every input and output is found from the study
+folder the user picks (*Study folder layout*), and the working directory only sets where the file pickers open. The
+tests start their kernels from the repo root (`tests/nbdriver.py`), so each page finds the shared modules of `tools/`
+from either folder (it probes `cwd`, `cwd/tools` and `dirname(cwd)/tools`).
 
 ### Study folder layout
 
@@ -268,6 +271,10 @@ my_study/                               <- pick this folder in every tool
 - **The study folder is the only thing to pick** (phase 3 of the file selection, 2026-11-04; every tool but 1 and 1bis):
   each tool finds its inputs in it and lists them (*Cross-cutting → Voila page conventions → Inputs found*). Tool 2's file is now called `config_param/channel_config.json`; a study already processed keeps
   `remap_reref_persubject.json`, and every reader finds either (`study_files_lib.find_input`).
+- **The study folders are remembered** (2026-11-23): under the study folder's picker of every tool (but 1bis), a
+  **Recent studies** menu gives the studies picked lately in one click, and **Or paste a path** reaches a folder far from
+  the toolkit, a network share included. The list is the user's, outside every study (*Cross-cutting → Voila page
+  conventions → Recent studies*).
 - **Several runs of tool 7**: tool 7's *New version* keeps what exists and writes `derivatives/preproc_epo_v2/` +
   `reports_preproc_v2/`, then tools 8, 8bis and 9 write `rejection_manual_v2`, `rejection_auto_v2`, `features_spectral_v2`
   and their reports (*Cross-cutting → Runs of tool 7*). A study with one run sees none of this.
@@ -285,6 +292,12 @@ my_study/                               <- pick this folder in every tool
 ### Interactive Voila apps (no-code mode)
 ```bash
 conda activate somnolens
+cd path/to/SomnoLens/tools
+voila                     # the list of the tools in the browser: click one
+```
+
+One tool at a time, from `SomnoLens/` (quote the names that contain a `&`):
+```bash
 voila tools/0_live_explore_1file_voila.ipynb
 voila tools/1_inspect_edf_voila.ipynb
 voila tools/1bis_anonymize_edf_voila.ipynb
@@ -411,8 +424,10 @@ test must point it at a copied `preproc_epo`.
 - `test_ui_lib.py` (quick): `ui_lib`'s messages, section headers, picker titles, text blocks, button roles,
   progress bar, suffix menu (it follows its text field both ways, *Other suffix…*, the recordings missing), input row
   (found / not found / chosen by hand, the other pickers stay visible), inputs list, custom stages line, Advanced box,
-  and the guard that every Voila page keeps to the conventions (imports `ui_lib`, opens on
-  `# Tool `, no `info` button, the same section rule).
+  the Recent studies row (a study chosen in the menu or pasted between quotes runs the picker's callback; an unreachable,
+  relative or file path refused, the picker unchanged), and the guard that every Voila page keeps to the conventions
+  (imports `ui_lib`, opens on `# Tool `, no `info` button, the same section rule; every page but 1bis builds the Recent
+  studies row, places it and remembers its study folder).
 - `test_tool0.py` (marker `tool0`, standard on synthetic, full adds real; each test on a copy of the study
   inputs): step 1 gives tool 7's epoch count, stage sequence, EEG channels (tool 7 minus the dropped M2
   reference) and mapped event onsets for every participant; a hypnogram moved and renamed out of the detection
@@ -446,11 +461,15 @@ test must point it at a copied `preproc_epo`.
   unreadable file never overwritten), the counting of the companion suffixes (participants 1, 2, 10, 20: no false
   `0_…` suffix) and the hypnogram pre-choice (the toolkit's own hypnograms never win, a recorded name is followed,
   a study keeps its output names), where each input is found, the light read of each input, the name a tool writes
-  in `config_param/`. `test_inputs_found.py` (standard, markers `tool0` to `tool9`): Section 1 of each tool in its
+  in `config_param/`, the recent studies (the latest on top, a folder once whatever its case and slashes, 8 kept, an
+  unreadable list never overwritten, `off`, the default file under `LOCALAPPDATA`). `test_inputs_found.py` (standard,
+  markers `tool0` to `tool9`): Section 1 of each tool in its
   notebook on empty `.edf` files: the inputs found, a recorded name followed, a file chosen by hand, the refusal
   when a required input is missing, the Advanced box; on the chain's study, the files found are the ones the chain
   picks by hand (so the outputs are the chain's); tool 5's table noted when written outside the study, and found by
-  tool 5bis; the runs of tool 7 (menu, reports paired by name), the most recent decision pre-chosen by tool 9, `none`. `test_hypno_prechoice.py` (standard, markers `tool3`, `tool3bis`, `tool5` to
+  tool 5bis; the runs of tool 7 (menu, reports paired by name), the most recent decision pre-chosen by tool 9, `none`;
+  a study chosen in tool 9's *Recent studies* menu finds the inputs like a pick and goes on top of the list (a file of
+  the test). `test_hypno_prechoice.py` (standard, markers `tool3`, `tool3bis`, `tool5` to
   `tool7`): the same pre-choice in the five notebooks, on empty `.edf` files beside the raw export, the remapped
   hypnogram, tool 3bis's and tool 0's outputs. `test_quality_lib.py` (quick): tool 6's signal-preparation label and the rule that warns on a
   skipped participant prepared differently.
@@ -627,6 +646,27 @@ instead of restating them. Only tool-specific deltas are kept inline.
     `menu, fill = UI.choice_menu(description, on_choose)` goes in front of a row when the study holds several candidates
     (the runs of tool 7, the decisions): hidden with fewer than two options, `fill` selects the first without calling
     `on_choose`. `locate(..., note=…)` replaces *not found: …* when having no file is the user's choice (*none*).
+  - **Recent studies** (2026-11-23, every page but 1bis, whose folder holds the identifying originals): right under the
+    study folder's picker, `recent_row, recent_note = UI.recent_studies_row(picker, *SF.recent_studies())` puts a menu
+    **Recent studies** (hidden while the list is empty, on `(choose)` when the page opens: nothing is chosen or scanned on
+    its own) and a field **Or paste a path** + *Use* (a path copied from the Windows Explorer, the quotes of *Copy as
+    path* removed; the only way to reach a network share `\\server\share\...` not mapped to a drive letter). Choosing a
+    study or pasting a folder selects it in the picker the way its dialog does (`reset`, open, *Select*), so the tool's own
+    callback runs unchanged, and the menu goes back to `(choose)`. The study callback's first line is
+    `recent_note(SF.remember_study(picker.selected_path, '<tool>'))`: a folder enters the list as soon as it is picked
+    (dialog, menu or pasted path). The list (`study_files_lib`) is one file per Windows user,
+    `%LOCALAPPDATA%/DreamToolkit/recent_studies.json` (beside SleepFM's cache, `~/.cache/DreamToolkit` without
+    `LOCALAPPDATA`): `{"studies": [{"path", "last_used", "tool"}]}`, the most recent first, at most `RECENT_STUDIES_MAX` = 8,
+    a folder once (`normcase` + `abspath`). Only folder paths: nothing leaves the PC, nothing is written in a study. The
+    folders are **not checked when the page opens** (Windows can take tens of seconds to answer about a disconnected share):
+    a study that cannot be reached is refused when chosen (`❌ not reachable: …`, the picker unchanged), like a pasted path
+    that is relative or not a folder. The list is a convenience, never a step: an unreadable file gives an empty menu and a
+    ⚠ line, and is never overwritten; a failed save is a ⚠ line, the tool goes on. The list is read when the page opens (a
+    study remembered by another page meanwhile shows after a reload). The picker itself still opens on the launch folder:
+    opened on the last study, ipyfilechooser would list it while the page is built (an unreachable share would freeze or
+    break the page). The variable `SOMNOLENS_RECENT_STUDIES` names another file, or `off` (nothing read nor remembered;
+    not an empty value, which Windows drops from some child processes): `tests/nbdriver.py` sets `off` for every kernel it
+    starts, so no test or script touches the user's list.
   - **Advanced box** (2026-11-04): `box, mark = UI.advanced_box(children)`, closed by default, holds what most studies
     leave alone (tool 2: the JSON file name; 3: the output suffix and the custom stages field, whose stages in use stay
     shown on a line outside the box; 3bis: the three output suffixes; 4: the mapping file
@@ -678,7 +718,7 @@ instead of restating them. Only tool-specific deltas are kept inline.
     a change upstream puts the sections after it back on hold (`invalidate_after`). (*Choose another…* is not one:
     it opens a file list, for a choice most users never have to make.)
   - Guarded by `tests/test_ui_lib.py`: every page imports `ui_lib`, opens on `# Tool `, uses no `info` button and
-    the same section rule.
+    the same section rule; every page but 1bis has the Recent studies row and remembers its study folder.
 - **Shared computation libraries (`tools/*_lib.py`)**: the computation of the batch tools lives in libraries
   that the batch notebook and tool 0 both import (the tool-0 redesign, 2026-10-09 → 15), so tool 0 shows the
   batch tools' numbers by construction and a fix reaches every tool at once. **Edit the library, never a
@@ -1300,7 +1340,11 @@ instead of restating them. Only tool-specific deltas are kept inline.
   configuration*, phase 8 of the tool-0 redesign), imported by tool 3 and the libraries (`macrostructure_lib`,
   `preprocessing_lib`, `qc_rejected_epochs_lib`, `spectral_lib`, `autoscoring_lib`, and `quality_lib` since phase 6 of `tools/plan_brainvision.md`):
   `load_custom_stages(folder)`, `parse_custom_field(text)`,
-  and `custom_stage_style(custom_stages) -> (stage_y, stage_colors, ytick_pos, ytick_labels)`. Custom
+  and `custom_stage_style(custom_stages) -> (stage_y, stage_colors, ytick_pos, ytick_labels)`. The same section holds
+  **the labels tool 3 does not write** (2026-11-23): `unexpected_stage_labels(labels, custom_stages) -> {label: epochs}`
+  (anything but W/N1/N2/N3/R, MT, `?` and the custom stages: a hypnogram that skipped tool 3) and `labels_listing`
+  (their text in a warning). Tools 3bis (§3bis *Comparison*), 7 (§7 *Stage event codes*) and 9 (§9 *Stages and
+  aggregation*) warn with it. Tools 0, 5 and 6 had their own warning before and keep it. Custom
   stages stack **below N3** on every hypnogram axis (`N3=0 → -1, -2, …` in declaration order). The
   step-line stays gray with **REM in red** (YASA convention) and each custom stage in a fixed non-red
   palette (`#8dd3c7, #ffffb3, #bebada, #80b1d3, #fdb462, #b3de69, #fccde5, #d9d9d9`), all at the line's own
@@ -2168,6 +2212,14 @@ never scored has an F1 of 0, a stage absent from both sides an empty F1.
   the kappa and MCC across nights*, ticked by default, under the expert suffix) acts only on what summarises several
   nights: the per-participant figure of the database report and Section 4's kappa of each night. The pooled values keep
   their epochs, and no per-night file changes (nothing to record, no Skip question).
+- **Labels tool 3 does not write** (2026-11-23): anything but W/N1/N2/N3/R, MT, `?` and the declared custom stages
+  (`edf_io_lib.unexpected_stage_labels`, the rule tools 7 and 9 use too), found in a hypnogram that skipped tool 3 (`Wake`, `REM`, `S1`, `0` to
+  `5`...). Their epochs are left out like MT, so a night scored in `Wake` / `REM` would otherwise be compared on its NREM
+  only, with no sign of it. Step 1 and Section 4 give a ⚠ that lists these labels and their epoch counts
+  (`unexpected_labels_note`), in the log and in the report (step 1: in the participant's notes, so also in
+  `_scoring_params.json`). Section 4's reader (`read_expert`, from Score_EDF) upper-cases the labels and reads `WAKE` /
+  `REM` as W / R, so its warning lists only the labels it leaves out. A hypnogram written by tool 3 gets no warning and
+  no output changes.
 
 Confusion matrix (rows expert, columns GSSC; colour (full ColorBrewer Greens, white to `#00441b`; text white on the dark cells, luma < 0.5) and bold text = % of the expert row, the main reading,
 comparable across stages and nights; the epoch count in small type below, in parentheses, says how many
@@ -2965,6 +3017,10 @@ produced a `.fif` that saved fine but could not be re-read (`selection must be s
 breaking tools 8 and 9 on any participant with a custom stage or MT. AASM-only hypnograms keep the same five codes,
 so their outputs are byte-identical. No downstream tool reads the codes (they all use the metadata `stage` column).
 Covered by the custom-stage variant test (`tests/test_variants.py`).
+A label tool 3 does not write (`edf_io_lib.unexpected_stage_labels`: not W/N1/N2/N3/R, MT, `?` or a custom stage, so a
+hypnogram that skipped tool 3) gets its code like any other, and a ⚠ in the run log (2026-11-23, `hypnogram_epochs`,
+so also in tool 0's step-6 notes): tools 8, 8bis and 9 then take it for a stage, and tool 9's database figures leave
+it out. The outputs do not change.
 
 **Event flagging when epoch length ≠ 30 s** (see the event method below): the onset-only rule is **kept** (`compute_event_epoch_mask` takes `epoch_sec`, an event flags only the sub-epoch containing its `Start`), and a **prominent amber warning** (`epoch_warn`, shown whenever `dd_epoch_len.value != 30`, plus a per-file `⚠` printed in the run log when event flagging is on) reminds the user that (because annotated durations are unreliable) an event spanning several sub-epochs leaves the others un-flagged, a risk that grows as epochs shrink.
 
@@ -3484,7 +3540,9 @@ tools read tool 7's epochs + a decision* for the decision tables, the sidecar lo
   `offset − log10(knee + f^exponent)`), so it is extrapolated below the fit's lower bound, which is why
   delta sits *below* the fit and its 1/f-corrected value must be read with care.
 - **Stages and aggregation**: one checkbox per stage actually present in the files (AASM + custom, all
-  ON). **No derived groups** (NREM, whole-night…): they are one `groupby` away in the exported tables and
+  ON). A label tool 3 does not write (`edf_io_lib.unexpected_stage_labels`, from a hypnogram that skipped it) also gets
+  a checkbox and its rows in the tables, but the database figures show only AASM + custom: the scan warns with the
+  participants and the epochs per label (2026-11-23). **No derived groups** (NREM, whole-night…): they are one `groupby` away in the exported tables and
   doubled the table size. `Min epochs per cell` (default 20 → the cell is NaN but `n_epochs` is kept, so a
   shortage is visible). It holds **per participant** (a cell = participant × stage × channel): a participant under it
   is missing from the group figure of that stage. **Said before the run (2026-11-17, phase 5 ter)**: after the scan, a
@@ -3935,11 +3993,10 @@ first release, whatever the distribution route; re-run the tests of every tool t
   names, study names and night numbers in SPEC's validation notes).
 - **Links outside the folder**, broken by a split: `README.md` → `../../README.md` (Dream-Toolkit), SPEC's
   `python/Score_EDF/…` references.
-- **`tutorials/1_install_python.docx`**: its SSL workaround turns certificate checks off (`conda config --set
-  ssl_verify no`); use `conda config --set ssl_verify truststore` (the system's certificates, what works on ICM's
-  network) and put network-specific advice in a clearly marked "behind an institutional proxy" note. It also cites
-  an internal IT document (DSI `migration-to-miniforge.pdf`) and an author / date line. The light / full install
-  goes in at the same time (*Conda environment*: its three commands).
+- **`tutorials/1_install_python.docx`**: it cites an internal IT document (DSI `migration-to-miniforge.pdf`) and an
+  author / date line. (Done on 2026-11-23: the SSL workaround uses `ssl_verify truststore` in a note for institutional
+  networks, the light / full install and the fallback to the light one are in, the stale Jupyter / Spyder passages
+  are gone.)
 - **A `LICENSE` file** in the folder (today only on GitHub), once the licence is settled (*Distribution and
   licensing*).
 - **Only what git tracks is distributed**: the folder also holds untracked files that must never leave the lab

@@ -26,6 +26,11 @@ from nbclient import NotebookClient
 
 REPO_ROOT = Path(__file__).resolve().parent.parent      # SomnoLens/ = the canonical launch cwd
 
+# The study folders the pages pick are never added to the user's list of recent studies: the kernels started here
+# inherit this variable ('off': nothing remembered). A test that checks the list names its own file
+# (monkeypatch.setenv before its NotebookSession).
+os.environ.setdefault('SOMNOLENS_RECENT_STUDIES', 'off')
+
 # Windows: the Selector event loop is the one zmq supports natively (the default Proactor loop makes
 # it run an extra selector thread). Not enough on its own against the hangs: see _repoll_channel.
 if sys.platform == 'win32':

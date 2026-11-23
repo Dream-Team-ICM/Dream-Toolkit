@@ -261,6 +261,41 @@ def test_inputs_list_waits_for_the_study_folder():
     assert box.layout.display == 'none' and wait.layout.display == ''
 
 
+def test_recent_studies_select_the_study_like_the_dialog(tmp_path):
+    from ipyfilechooser import FileChooser
+    tmp_path = tmp_path.resolve()          # the picker gives the long names of Windows (not YVAN~1.NED)
+    first, second = tmp_path / 'first', tmp_path / 'second study'
+    first.mkdir()
+    second.mkdir()
+    picker, picked = FileChooser(), []
+    picker.show_only_dirs = True
+    picker.register_callback(lambda fc: picked.append(fc.selected_path))
+    studies = [{'path': str(first), 'last_used': '2026-11-20 09:00', 'tool': '7'},
+               {'path': str(tmp_path / 'gone'), 'last_used': '2026-11-19 09:00', 'tool': '2'}]
+    row, note = UI.recent_studies_row(picker, studies)
+    menu, (field, use), line = row.children[0], row.children[1].children, row.children[2]
+    assert menu.layout.display == '' and menu.value == ''                           # nothing chosen on its own
+    assert menu.options[1] == (f'{first}  (tool 7, 2026-11-20)', str(first)) and picked == []
+    menu.value = str(first)                                                         # the tool's callback runs
+    assert picked == [str(first)] and Path(picker.selected_path) == first and menu.value == ''
+    menu.value = str(tmp_path / 'gone')                                             # a study no longer reachable
+    assert 'not reachable' in line.value and UI.ERROR in line.value and picked == [str(first)]
+    field.value = f'  "{second}" '                                                  # Copy as path: between quotes
+    use.click()
+    assert picked[-1] == str(second) and field.value == '' and line.value == ''
+    for wrong in ('second study', str(tmp_path / 'nowhere')):                       # relative, or not a folder
+        field.value = wrong
+        use.click()
+        assert UI.ERROR in line.value and picked[-1] == str(second) and field.value == wrong
+    note('the list of recent studies is unreadable')
+    assert UI.WARN in line.value and 'unreadable' in line.value
+    note(None)
+    assert line.value == ''
+    empty, _ = UI.recent_studies_row(FileChooser(), [], 'the list of recent studies is unreadable')
+    assert empty.children[0].layout.display == 'none' and empty.children[1].layout.display != 'none'
+    assert 'unreadable' in empty.children[2].value                                  # the warning of the list, at once
+
+
 def test_custom_stages_line_says_where_they_come_from():
     assert 'custom_stages.json' in UI.custom_stages_html(['N4'], ['N4']) and UI.OK in UI.custom_stages_html(['N4'], ['N4'])
     assert 'changed in Advanced' in UI.custom_stages_html(['N4', 'N5'], ['N4'])
@@ -306,3 +341,15 @@ def test_page_follows_the_conventions(page):
             assert text.count('<details ') == text.count(f'<summary style="{UI.DETAILS_TITLE_STYLE}">')
         if kind == 'markdown' and re.search(r'^## ', text, re.M):
             assert text.startswith(UI.SECTION_RULE + '\n\n## '), f'section cell without the thick rule: {text[:60]!r}'
+
+
+# Every page whose first picker is the study folder: all but tool 1bis (its folder holds the identifying originals)
+STUDY_PAGES = [p for p in PAGES if not p.name.startswith('1bis_')]
+
+
+@pytest.mark.parametrize('page', STUDY_PAGES, ids=lambda p: p.name)
+def test_page_remembers_its_study_folder(page):
+    code = '\n'.join(text for kind, text in cells(page) if kind == 'code')
+    assert 'UI.recent_studies_row(' in code, 'the study folder picker gets the Recent studies row'
+    assert 'SF.remember_study(' in code, "the study folder's callback remembers the folder"
+    assert len(re.findall(r'\brecent_row\b', code)) >= 2, 'the Recent studies row is placed in the page'

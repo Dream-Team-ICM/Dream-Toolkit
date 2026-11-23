@@ -22,7 +22,7 @@ from specparam import SpectralModel
 from statsmodels.nonparametric.smoothers_lowess import lowess
 from edf_io_lib import (   # one copy, in edf_io_lib (same folder)
     BASE_STAGE_COLORS, CUSTOM_STAGE_PALETTE, load_custom_stages, parse_custom_field, custom_stage_style,
-    HD_CHANNEL_THRESHOLD, draw_hypnogram,
+    HD_CHANNEL_THRESHOLD, draw_hypnogram, unexpected_stage_labels, labels_listing,
 )
 
 
@@ -736,6 +736,14 @@ def hypnogram_epochs(expert_hypno, raw, sf, epoch_factor, custom_stages, file_id
     elif n_over != 0:
         raise StepFailed('hypno/EEG length mismatch', f'[{file_id}] Hypnogram/EEG length mismatch ({n_hyp} '
                                                       f'vs {expected_epochs} epochs): skipped.')
+    # A label tool 3 does not write (a hypnogram that skipped it) gets a stage code of its own below, so the tools
+    # after this one take it for a stage: said here, where the hypnogram enters the epochs.
+    unexpected = unexpected_stage_labels(expert_hypno, custom_stages)
+    if unexpected:
+        warn(f'[{file_id}] ⚠ {sum(unexpected.values())} of the {len(expert_hypno)} epochs carry a stage label tool 3 '
+             f'does not write ({labels_listing(unexpected)}): each one is kept as a stage of its own, which tools 8, '
+             '8bis and 9 treat as a stage and tool 9 leaves out of its database figures. Map them with tool 3 '
+             '(3_remap_hypno), then reprocess.')
 
     # Re-cut the 30 s scored hypnogram into sub-epochs: each sub-epoch inherits the sleep
     # stage of its parent 30 s epoch (epoch_factor == 1 for the classic 30 s case → no change).

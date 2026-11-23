@@ -1,7 +1,7 @@
 """Where the files of a study are and what they are called.
 
 Format-agnostic (no EDF or Curry reading, no MNE), so every Voila page and Curry twin can import it next to
-ui_lib. Four things live here:
+ui_lib. Five things live here:
 
 - the **names registry** `config_param/file_names.json`: each tool notes the names it wrote (or read), e.g. the
   suffix of the hypnograms tool 3 remapped, so the later tools follow a name the user changed;
@@ -9,7 +9,9 @@ ui_lib. Four things live here:
   `<recording name><suffix>`, and the tools pre-choose the suffix to read among the ones found;
 - the **inputs of a tool** (tool 2's channel configuration, tool 4's event mapping...): where each is looked for
   in the study folder, and a light read of the file found, for the 'Inputs found' list of the pages;
-- the **runs of tool 7** and the decisions made on them, found from the study folder (tools 8, 8bis, 9).
+- the **runs of tool 7** and the decisions made on them, found from the study folder (tools 8, 8bis, 9);
+- the **recent studies**: the study folders this user picked lately, in a file of the user (not of a study), for the
+  'Recent studies' menu of every page (ui_lib.recent_studies_row).
 """
 import csv
 import datetime
@@ -141,6 +143,67 @@ def write_names(study, tool, values):
         os.replace(tmp, path)
     except Exception as e:
         return f'could not write config_param/{NAMES_FILE}: {e}'
+    return None
+
+
+# ---------------------------------------------------------------------------------------------------------
+# Recent studies: one file per user of the PC, outside the toolkit and outside every study
+# ---------------------------------------------------------------------------------------------------------
+RECENT_STUDIES_ENV = 'SOMNOLENS_RECENT_STUDIES'     # another file, or 'off': nothing is remembered (the tests)
+RECENT_STUDIES_MAX = 8
+
+
+def recent_studies_file():
+    """The file of the recent studies, beside SleepFM's download cache (%LOCALAPPDATA%/DreamToolkit/). The environment
+    variable SOMNOLENS_RECENT_STUDIES names another file; set to 'off', it gives None (nothing read, nothing
+    remembered). Not an empty value: Windows drops an empty variable from the environment of some child processes."""
+    env = os.environ.get(RECENT_STUDIES_ENV, '').strip()
+    if env.lower() == 'off':
+        return None
+    if env:
+        return Path(env)
+    base = os.environ.get('LOCALAPPDATA') or str(Path.home() / '.cache')
+    return Path(base) / 'DreamToolkit' / 'recent_studies.json'
+
+
+def recent_studies():
+    """The study folders picked lately, the most recent first, as (list of {'path', 'last_used', 'tool'}, warning).
+    No file gives ([], None); an unreadable one gives ([], warning). The folders are not checked here: asking Windows
+    about a disconnected network share can take tens of seconds, the page would open that late."""
+    path = recent_studies_file()
+    try:
+        if path is None or not path.is_file() or path.stat().st_size == 0:
+            return [], None
+        data = json.loads(path.read_text(encoding='utf-8'))
+        studies = data.get('studies') if isinstance(data, dict) else None
+        if not isinstance(studies, list):
+            raise ValueError('no list of studies')
+        return [s for s in studies if isinstance(s, dict) and s.get('path')], None
+    except Exception as e:
+        return [], f'the list of recent studies is unreadable ({path}: {e})'
+
+
+def remember_study(folder, tool):
+    """Put `folder` at the top of the recent studies, with the date and the `tool` that picked it ('7', '8bis'...). A
+    folder is kept once (case and slashes ignored) and the list keeps the RECENT_STUDIES_MAX latest. An unreadable file
+    is never overwritten. Returns None, or a warning to show."""
+    path = recent_studies_file()
+    if path is None or not folder:
+        return None
+    studies, warn = recent_studies()
+    if warn:
+        return f'{warn}; it was not updated'
+    folder = os.path.abspath(str(folder))
+    entry = {'path': folder, 'last_used': datetime.datetime.now().strftime('%Y-%m-%d %H:%M'), 'tool': str(tool)}
+    others = [s for s in studies if _norm(os.path.abspath(str(s['path']))) != _norm(folder)]
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        tmp = path.with_name(path.name + '.tmp')
+        tmp.write_text(json.dumps({'studies': [entry] + others[:RECENT_STUDIES_MAX - 1]}, indent=1, ensure_ascii=False)
+                       + '\n', encoding='utf-8')
+        os.replace(tmp, path)
+    except Exception as e:
+        return f'could not save the list of recent studies ({path}: {e})'
     return None
 
 

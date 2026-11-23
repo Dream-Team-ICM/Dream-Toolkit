@@ -38,7 +38,7 @@ import mne
 from sklearn.metrics import accuracy_score, cohen_kappa_score, f1_score, confusion_matrix, matthews_corrcoef
 from edf_io_lib import (   # one copy, in edf_io_lib (same folder)
     CUSTOM_STAGE_PALETTE, load_custom_stages, drop_suffix_duplicates, adapt_remap_dict_to_suffixes, load_json_lenient,
-    context_divisors, context_gain, draw_hypnogram,
+    context_divisors, context_gain, draw_hypnogram, unexpected_stage_labels, labels_listing,
 )
 import recording_lib as RL
 import channel_check_lib as CC
@@ -104,6 +104,17 @@ def non_aasm_order(groups, custom_stages):
             return (0, custom_stages.index(g))
         return (1, 0) if g == 'MT' else (2, 0)
     return sorted(dict.fromkeys(groups), key=rank)
+
+
+def unexpected_labels_note(found, n_epochs):
+    """The warning for the expert labels tool 3 does not write (found = edf_io_lib.unexpected_stage_labels; '' when
+    there is none). Their epochs are left out of the comparison, so a hypnogram that skipped tool 3 would otherwise
+    be compared on part of the night only."""
+    if not found:
+        return ''
+    return (f'{sum(found.values())} of the {n_epochs} expert epochs carry a label tool 3 does not write '
+            f'({labels_listing(found)}): they are left out of the comparison. Pass this hypnogram through tool 3 '
+            '(3_remap_hypno) to map them.')
 
 
 def non_aasm_color(group, custom_stages):

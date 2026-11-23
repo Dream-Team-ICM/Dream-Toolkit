@@ -532,6 +532,23 @@ def test_tool9_preselects_the_most_recent_decision(tmp_path):
 
 
 @pytest.mark.tool9
+def test_tool9_a_recent_study_is_one_click_away(tmp_path, monkeypatch):
+    study = make_study(tmp_path / 'study')
+    raw = make_run(study)
+    listed = tmp_path / 'recent_studies.json'                             # never the user's list (nbdriver: 'off')
+    listed.write_text(json.dumps({'studies': [{'path': str(study), 'last_used': '2026-11-20 09:00', 'tool': '7'}]}),
+                      encoding='utf-8')
+    monkeypatch.setenv('SOMNOLENS_RECENT_STUDIES', str(listed))           # the kernel inherits it
+    with NotebookSession(pipeline.T9) as nb:
+        assert not shown(nb) and nb.value('recent_row.children[0].value') == ''   # nothing chosen on its own
+        nb.set('recent_row.children[0]', str(study))                      # the menu, like a pick in the dialog
+        assert shown(nb) and Path(nb.value('fc_raw.selected_path')).resolve() == raw.resolve()
+        assert Path(nb.value('fc_data.selected_path')).resolve() == study.resolve()
+    studies = json.loads(listed.read_text(encoding='utf-8'))['studies']
+    assert len(studies) == 1 and Path(studies[0]['path']).resolve() == study.resolve() and studies[0]['tool'] == '9'
+
+
+@pytest.mark.tool9
 def test_tool9_lists_the_decisions_of_the_run_chosen(tmp_path):
     study = make_study(tmp_path / 'study')
     first, second = make_run(study, date=1000), make_run(study, 'preproc_epo_v2', date=2000)

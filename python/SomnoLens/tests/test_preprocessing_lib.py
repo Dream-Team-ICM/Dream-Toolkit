@@ -220,3 +220,22 @@ def test_a_deselected_channel_in_a_recording_without_one_stage():
     assert bad_names == ['O1'] and epochs.ch_names == ['C3', 'C4'] and n == n_epochs
     PL.put_bads_back(epochs, bad_epochs, bad_names, order)
     assert epochs.ch_names == ['C3', 'C4', 'O1'] and epochs.info['bads'] == ['O1'] and len(epochs) == n_epochs
+
+
+def test_a_stage_label_tool3_does_not_write_is_said():
+    # A hypnogram that skipped tool 3: 'Wake' and 'REM' become stages of their own, with a warning; MT, '?' and a
+    # declared custom stage get none.
+    from types import SimpleNamespace
+    import numpy as np
+    sf = 100.0
+    raw = SimpleNamespace(n_times=int(8 * 30 * sf))       # hypnogram_epochs reads only the length of the signal
+    said = []
+    hypno = np.array(['Wake', 'Wake', 'N1', 'N2', 'REM', 'MT', '?', 'N2a'])
+    hypno_sub, stage_mapping, _ = PL.hypnogram_epochs(hypno, raw, sf, 1, ['N2a'], 'p', warn=said.append)
+    assert len(said) == 1 and said[0].startswith("[p] ⚠ 3 of the 8 epochs carry a stage label tool 3 does not write "
+                                                 "('Wake' x2, 'REM' x1)")
+    assert {'Wake', 'REM'} <= set(stage_mapping)                 # kept as stages of their own, as before
+    said.clear()
+    PL.hypnogram_epochs(np.array(['W', 'N1', 'N2', 'N3', 'R', 'MT', '?', 'N2a']), raw, sf, 1, ['N2a'], 'p',
+                        warn=said.append)
+    assert said == []

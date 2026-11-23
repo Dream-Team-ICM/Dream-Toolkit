@@ -803,6 +803,20 @@ def custom_stage_style(custom_stages):
     return stage_y, stage_colors, ytick_pos, ytick_labels
 
 
+def unexpected_stage_labels(labels, custom_stages=()):
+    """The stage labels tool 3 does not write, as {label: number of epochs}: anything but W/N1/N2/N3/R, MT, '?' and
+    the declared custom stages. They come from a hypnogram that skipped tool 3 ('Wake', 'REM', 'S1', 0 to 5...);
+    tools 3bis, 7 and 9 warn about them, each saying what it does with them."""
+    known = {'W', 'N1', 'N2', 'N3', 'R', 'MT', '?'} | set(custom_stages)
+    found, counts = np.unique(np.asarray(labels, dtype=str), return_counts=True)
+    return {str(lab): int(n) for lab, n in zip(found, counts) if lab not in known}
+
+
+def labels_listing(found):
+    """{label: number of epochs} -> "'Wake' x2, 'REM' x1" (the most frequent first), for a warning."""
+    return ', '.join(f"'{lab}' x{n}" for lab, n in sorted(found.items(), key=lambda kv: -kv[1]))
+
+
 # ---------------------------------------------------------------------------------------------------------
 # The hypnogram: one look for every hypnogram of the toolkit (SPEC *Cross-cutting -> Display conventions*). Tools 3bis,
 # 5, 6, 7, 8, 8bis, 9 and 0 draw it with draw_hypnogram; an overlay on a coloured image (tool 0's navigator, tool 3bis's
