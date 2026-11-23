@@ -72,11 +72,12 @@ repository the first time, and checks them.
 
 ```bash
 conda activate somnolens
-cd path/to/SomnoLens
-voila tools/1_inspect_edf_voila.ipynb
+cd path/to/SomnoLens/tools
+voila
 ```
+It opens a web browser where you can open each tool by simply clicking on it.
 
-The app opens in the web browser. Launch every tool from the `SomnoLens` folder, with
+To launch a single tool from the `SomnoLens` folder, use:
 `voila tools/<app>.ipynb` (quote the names that contain a `&`:
 `voila "tools/2_select&remap_channels_edf_voila.ipynb"`).
 

@@ -219,11 +219,14 @@ Key packages:
 
 ## How to run the tools
 
-**Canonical working directory = the repo root (`SomnoLens/`).** Launch every tool from there (paths below
-are relative to it). This keeps one consistent cwd for the shared libraries, `config_param/*.json`, hypnogram
-lookups and outputs across the whole suite. As a safety net the tools also resolve their shared modules
-independent of cwd (the shared modules of `tools/` are found whether Voila is launched from the repo root **or**
-from the tool's own folder) but the repo root is the documented, recommended launch directory.
+**Two ways to launch, the same pages.** From `tools/`, `voila` alone opens the browser on the list of the tools, and a
+click opens one (in its own tab, with its own kernel): what the README and `tutorials/1_install_python.docx` teach.
+From the repo root (`SomnoLens/`), `voila tools/<app>.ipynb` opens one tool (the list below). Either way Voila runs
+each page's kernel in the notebook's own folder, `tools/` (checked in Voila 0.5.13: `handler.py` starts the kernel in
+the notebook's directory). Nothing of a study depends on that folder: every input and output is found from the study
+folder the user picks (*Study folder layout*), and the working directory only sets where the file pickers open. The
+tests start their kernels from the repo root (`tests/nbdriver.py`), so each page finds the shared modules of `tools/`
+from either folder (it probes `cwd`, `cwd/tools` and `dirname(cwd)/tools`).
 
 ### Study folder layout
 
@@ -285,6 +288,12 @@ my_study/                               <- pick this folder in every tool
 ### Interactive Voila apps (no-code mode)
 ```bash
 conda activate somnolens
+cd path/to/SomnoLens/tools
+voila                     # the list of the tools in the browser: click one
+```
+
+One tool at a time, from `SomnoLens/` (quote the names that contain a `&`):
+```bash
 voila tools/0_live_explore_1file_voila.ipynb
 voila tools/1_inspect_edf_voila.ipynb
 voila tools/1bis_anonymize_edf_voila.ipynb
