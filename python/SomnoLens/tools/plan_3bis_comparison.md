@@ -11,7 +11,12 @@ documentation). `-m "quick or ((tool3bis or tool0) and not full)"`: 363 passed. 
 environment, user's go-ahead for night 100) on 2026-11-23: with Score_EDF's settings the same stages for the 5 models
 on the simulated nights, metrics identical except GSSC's 3 epochs not predicted (D1; Score_EDF's epochs scored like
 3bis: within 5e-5); defaults: recalibrations A and B as before (κ 0.893 → 0.911, 0.979 → 0.983); night 100: GSSC and
-YASA identical, SleepFM 1 epoch (tail context). Phase 3 next. Closes the SPEC item *Tool
+YASA identical, SleepFM 1 epoch (tail context). Committed. Phase 3 written: SPEC §3bis (*Comparison*: the one metrics
+function, the macro-F1 rule and the literature behind it, single-stage nights and `cb_single_stage_out`; *Section 4's
+outputs in the SomnoLens layout*; the validation of 2026-11-23; the output lists), *Tests* (the two test files,
+`outside_chain`, `score_edf_equivalence`), the TODO item closed (noted in *Order of the TODOs*), the sentence of
+*Standalone comparison of hypnograms*; TESTS.md (a row of *Smaller checks*). README (no output detail) and CLAUDE.md (no
+cross-cutting rule moves) unchanged. Once confirmed: this plan deleted in its own commit. Closes the SPEC item *Tool
 3bis: follow-ups of the Score_EDF port → Comparison outputs in the SomnoLens layout*. Asked at the same time and put in
 SPEC as a TODO (*Methods text for a paper*): a notebook or another tool that extracts the essential points to write
 in a paper's methods section.

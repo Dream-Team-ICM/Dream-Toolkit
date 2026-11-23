@@ -458,15 +458,24 @@ test must point it at a copied `preproc_epo`.
   `%TEMP%/dtk_outside_chain/<dataset>/data`, so `refactor_check.py` can compare its outputs before / after a
   move (`DTK_TEST_ROOT` / `DTK_REFACTOR_ROOT` pointed at that folder and a save folder): `1` (tool 1, its
   defaults), `3` (tool 3 on the raw hypnogram exports when there are some, written under `_Hypnogram_tool3.txt`),
-  `3bis` (tool 3bis, the default), `6variant` (tool 6 with resampling to 128 Hz + high-pass 0.5 Hz, options the chain leaves
+  `3bis` (tool 3bis, the default, then its Section 4 on every night), `6variant` (tool 6 with resampling to 128 Hz + high-pass 0.5 Hz, options the chain leaves
   off) and `7variant` (tool 7 with resampling to 128 Hz, 10 s epochs, no notch, LOWESS-only smoothing, events
   on, channels from the configuration), e.g. `outside_chain.py 6variant 7variant`. `refactor_check` also ignores tool 3bis's `scored_at` date.
 - `score_edf_equivalence.py` (a script, run with the **`autoscore`** python): tool 3bis against
   `python/Score_EDF` in the same environment (§3bis *Validation against Score_EDF*). `build` (3 simulated 2-h
   nights with a full PSG montage + night 100 of `tools/test_data`, in `%TEMP%/dtk_scoreedf`), `baseline-sim`
   (Score_EDF's notebook, untouched), `baseline-real` (its functions on night 100, timed), `run-3bis-sim`,
-  `run-3bis-real`, `compare` (→ `compare_report.md`). With Score_EDF's settings every predicted stage and the
-  agreement table must be identical.
+  `run-3bis-real`, `compare` (→ `compare_report.md`). With Score_EDF's settings every predicted stage must be identical,
+  and Score_EDF's epochs scored the way tool 3bis does (an epoch a model did not predict left out) must give tool 3bis's
+  metrics; tool 3bis's tables are mapped back to Score_EDF's names (its comparison is in the SomnoLens layout since
+  2026-11-23).
+- `test_autoscoring_metrics.py` (quick, markers `tool3bis`, `tool0`): `autoscoring_lib.agreement_metrics`, a nap worked
+  by hand (macro-F1 0.875 over the expert's two stages, 0.583 with the union), a single-stage night (κ undefined or 0,
+  MCC 0, flagged, the note of the metrics table), MT / `?` left out, equality with sklearn when every stage is present,
+  the pooled values = the summed matrix. `test_autoscoring_compare.py` (standard, marker `tool3bis`): step 1's
+  database report with a single-stage nap and a night compared before these metrics (both positions of
+  `cb_single_stage_out`), then Section 4 with GSSC on two synthetic nights: the SomnoLens layout, its metrics = step 1's,
+  gssc's dropped last epoch said and counted, a second *Compare* on one night replacing the two-night comparison.
 - `test_edf_io_sync.py` (quick): the copies of `edf_io_lib`'s functions that tools still carry (tool 1bis's
   `detect_encoding`; tool 2's header parser; tool 4's start datetime / companions; tool 6's suffix helpers and
   physical bounds; tool 7's event chain and suffix helpers; `quality_lib`'s custom-stage helpers) are the same code
@@ -1985,21 +1994,46 @@ SleepFM recal A with ≥ 2 nights, recal B with ≥ 3 nights having the features
 averaged over each epoch (overlap weights); predicted = the most probable stage, except GSSC and YASA (30-s
 models) whose own step-1 stage is taken (the same argmax, before the 4-decimal rounding of the TSV). **Recal A**:
 temperature + biases (Wake reference), leave one recording out; **recal B**: refit of SleepFM's final layer on the
-saved features, penalty by inner cross-validation, leave one out. Outputs = **Score_EDF's files**, in
-`<study>/autoscore_outputs/`: `epochs_all_stagers.csv` (Score_EDF's columns and stage names Wake/N1/N2/N3/REM,
-its empty `tet` column included), `agreement_summary.csv` (epochs, accuracy, pooled kappa, F1 per stage, kappa
-per night), `agreement_by_stager.png`, `confusion_by_stager.png`, `hypnograms_by_stager.png`,
-`hypnodensities_<id>.png` (toolkit stage colours, expert hypnogram W on top with REM red, Greens confusion), plus
-`channels_used.csv` (not in Score_EDF; also shown under the agreement table): per night and model, the EEG, EOG,
-chin EMG, other channels (GSSC: mode and number of combinations; SleepFM: ECG, respiration) and EEG reference,
-read from step 1's `_scoring_params.json`. Each model is given its own training channels, so two models may not
-see the same EEG (night 100: YASA on C4-M1 fails, κ 0.11, a poor C4-A1; GSSC's consensus does not): to compare
-them on equal inputs, give them the same electrode in Section 2.
+saved features, penalty by inner cross-validation, leave one out. Each model is given its own training channels, so two
+models may not see the same EEG (night 100: YASA on C4-M1 fails, κ 0.11, a poor C4-A1; GSSC's consensus does not): to
+compare them on equal inputs, give them the same electrode in Section 2.
 Intended changes from Score_EDF: an epoch with no 5-s step is left out of the recalibration fit (Score_EDF divided
 by 0); **N3 is fitted** by both recalibrations when the training nights have N3 (`RECAL_FREE_N3 = 'auto'` in
 cell 10; Score_EDF fixed it, its naps had none; `False` reproduces it); torch's thread count is restored after
-recal B (Score_EDF left it at 1, slowing a second run). The outputs keep Score_EDF's layout until their
-harmonisation (*Planned modules*).
+recal B (Score_EDF left it at 1, slowing a second run); **an epoch a model gave no probability for** (the incomplete
+tail a 30-s model drops, the last epoch gssc drops on a night of a whole number of 30-s epochs) is **left out of its
+metrics and counted** (`n_not_predicted`), as step 1 compares on the epochs both scored: Score_EDF counted it as a
+disagreement (accuracy) and as a sixth class `Unknown` (κ). GSSC's metrics in Section 4 are then step 1's.
+
+**Section 4's outputs in the SomnoLens layout** (`tools/plan_3bis_comparison.md`, 2026-11-23; Score_EDF's
+`autoscore_outputs/` before: a former one is left as it is, one log line says it is no longer written). The ported
+computation keeps Score_EDF's names inside (`Wake`, `REM`, the display names); the outputs use W / R and step 1's model
+keys (`gssc`, `yasa`, `sleepfm`, `sleepfm_recal_a`, `sleepfm_recal_b`; `MODEL_KEY` / `MODEL_NAME`), Score_EDF's empty
+`tet` column dropped:
+- `derivatives/autoscoring_comparison/<subtree>/{id}_comparison_epochs.tsv` (`toolkit_epochs`): one row per epoch and
+  model, `file_id, model, epoch_idx` (from the recording start, as step 1's: the window starts on a whole expert epoch),
+  `onset_s, stage_expert, expert_coverage, stage_model, p_W … p_R` (full precision; a stage is empty where the expert
+  scored no W/N1/N2/N3/R or the model gave no probability); `{id}_recal_b_layer.npz` (recal B's refitted final layer
+  for that night, `weight` 5 × 128, `bias` 5); `derivatives/autoscoring_comparison/recalibration_params.tsv` (one row per
+  method and held-out night: `training_nights`, A's temperature, `bias_N1 … bias_R`, train log-loss, convergence; B's
+  penalty and inner log-loss per penalty; Score_EDF only logged them).
+- `reports_autoscoring_comparison/<subtree>/{id}_comparison.tsv` (`night_agreement`, one row per model: `n_compared,
+  n_excluded_expert, n_not_predicted`, every metric of step 1, `n_stages_expert, single_stage_expert`, then the channels
+  used, read from step 1's `_scoring_params.json`: `eeg_used, eog_used, emg_used, other_channels` (GSSC: mode and number
+  of combinations; SleepFM: ECG, respiration), `eeg_reference`; a recalibrated SleepFM gets SleepFM's), `{id}_confusion.tsv`
+  (long `file_id, model, expert, predicted, n`) and `{id}_comparison_report.html` (agreement table, each model's
+  hypnodensity over the expert hypnogram, confusion matrices, channels; the single-stage note when it applies).
+- `reports_autoscoring_comparison/` root, rebuilt from the per-night files on disk: `global_comparison_summary.tsv`,
+  `global_comparison_pooled.tsv` (`pooled_agreement`: per model, `n_nights` and the metrics of the summed confusion
+  matrix), `global_confusion.tsv` (summed per model), `global_comparison_report.html` (pooled table, agreement figure: F1
+  per stage pooled and κ of each night, single-stage nights left out when `cb_single_stage_out` is ticked; pooled
+  confusion matrices; hypnogram grid in figures of `HYPNODENSITY_ROWS_PER_FIG` nights; per-night table; recalibration
+  parameters), `failed_comparison.tsv` when a night could not be read.
+- **A comparison is one set of nights, no Skip**: the recalibrations learn each night from the others, so a night's
+  results belong to the nights compared with it. Each *Compare*, once the inputs are read, **empties both folders** and
+  writes every chosen night (data, then per-night tables, then reports, then the database), so the database tables are
+  that comparison. The page shows the database view (pooled table, agreement figure, confusion matrices, hypnogram grid)
+  and where the reports are; the hypnodensities of each night are in its report.
 
 **Validation against Score_EDF** (`tests/score_edf_equivalence.py`, run by hand in the `autoscore` environment,
 2026-10-27): Score_EDF's untouched notebook on 3 simulated 2-h nights with a full PSG montage (every model, both
@@ -2014,6 +2048,14 @@ context, intended). With the defaults, recalibrations A and B change as intended
 made Score_EDF's all-channel read upsample every 256-Hz EEG channel to 512 Hz (tool 3bis reads them at 256 Hz; on
 the original file 5 / 2 / 59 epochs differed for GSSC / YASA / SleepFM). Time on night 100: tool 3bis 89 s for the
 three models (GSSC 43 s, YASA 7 s, SleepFM 39 s) against Score_EDF's 259 s (544 s and a 17-GB peak with `DHR`).
+**Since the SomnoLens layout** (2026-11-23) the script maps tool 3bis's tables back to Score_EDF's names and compares
+values: the epochs (stages, probabilities) as before, and the metrics through Score_EDF's own epochs scored the way
+tool 3bis does (`agreement_metrics`, an epoch not predicted left out), which must give tool 3bis's pooled and per-night
+values. Run on 2026-11-23: with Score_EDF's settings the same stages for the 5 models on the 720 simulated epochs
+(probabilities within 5e-5, recal B identical), metrics identical except GSSC's: the simulated nights last exactly 2 h, so
+gssc drops the last epoch of each (3 epochs not predicted; accuracy 0.7208 → 0.7238, κ 0.6245 → 0.6281; Score_EDF's
+epochs scored like tool 3bis: within 5e-5, the 4 decimals of the TSV); the defaults' recalibrations as above; night
+100: GSSC and YASA identical (no epoch not predicted), SleepFM 1 epoch (the tail context).
 
 **Same models in the user environment** (`somnolens`: python 3.12, numpy 2.2, torch 2.8, YASA 0.6.5, antropy
 0.1.9) against the `autoscore` run above (python 3.10, numpy 1.26, torch 2.5.1, YASA 0.7.0, antropy 0.2.3), night
@@ -2102,8 +2144,32 @@ torch ≥ 2.6 refuses the weights packaged with gssc (`weights_only=True`):
 `TORCH_FORCE_NO_WEIGHTS_ONLY_LOAD=1` is set before the model loads.
 
 **Comparison**: on `min(n_gssc, n_expert)` epochs (⚠ when they differ by > 1), restricted to expert labels
-W/N1/N2/N3/R (MT, custom stages, `?` left out and counted). Accuracy, Cohen's κ, per-stage F1
-(`sklearn`), confusion matrix (rows expert, columns GSSC; colour (full ColorBrewer Greens, white to `#00441b`; text white on the dark cells, luma < 0.5) and bold text = % of the expert row, the main reading,
+W/N1/N2/N3/R (MT, custom stages, `?` left out and counted). **One function, `autoscoring_lib.agreement_metrics(cm)`**
+(`tools/plan_3bis_comparison.md`, 2026-11-23), gives every metric from the 5 × 5 confusion matrix (rows expert, columns
+model): the same for one night, for every night pooled (the summed matrix) and in Section 4. Accuracy, Cohen's κ and
+per-stage F1 (`sklearn`, `labels=` the five stages, on the pairs rebuilt from the counts: the values of the epochs
+themselves), **MCC** (`matthews_corrcoef`, multiclass), **macro-F1** and **balanced accuracy** (mean F1, mean recall,
+over the stages the **expert** scored), `n_stages_expert`, `single_stage_expert`. A stage the model gives but the expert
+never scored has an F1 of 0, a stage absent from both sides an empty F1.
+- **Macro-F1 over the expert's stages** (option A, user decision 2026-11-23). There is no standard: YASA's evaluation
+  code (its validation notebooks) and U-Sleep's (U-Time's `evaluate.py`) take the 5 stages with a stage absent from both
+  sides counted as F1 = 1 (sklearn's `zero_division=1`), YASA's second validation and U-Time's pooled `cm.py` the union
+  of expert and model stages (sklearn's default), deep-learning benchmarks a macro-F1 pooled over every test epoch. On
+  a night with the 5 stages the three agree; they part on naps and on nights without N3. Over the expert's stages the
+  value stays stable (on a nap of 40 epochs, one epoch given to a stage the expert never scored costs 0.29 with the
+  union, 0.008 when it goes to a stage the expert scored), every model of a night is averaged on the same stages, and it
+  follows the balanced accuracy's logic. The per-stage columns keep the other conventions computable.
+- **Single-stage nights**: the expert scored one stage only (strict rule, `n_stages_expert == 1`; a nap where the
+  participant stays awake). κ is then 0 (undefined when the model gives that stage everywhere) and MCC 0 by construction,
+  whatever the model; accuracy, balanced accuracy and macro-F1 all give the share of epochs given the expert's stage. Such
+  a night is flagged (the column, a ⚠ log line, a note in its report and in tool 0's table), never left out of its own
+  table. The literature meets the same wall on 40-min MWT recordings (Malafeev et al. 2021, *Front. Neurosci.*: no
+  per-patient kappa, a pooled one only). The Section 1 option `cb_single_stage_out` (*Leave single-stage nights out of
+  the kappa and MCC across nights*, ticked by default, under the expert suffix) acts only on what summarises several
+  nights: the per-participant figure of the database report and Section 4's kappa of each night. The pooled values keep
+  their epochs, and no per-night file changes (nothing to record, no Skip question).
+
+Confusion matrix (rows expert, columns GSSC; colour (full ColorBrewer Greens, white to `#00441b`; text white on the dark cells, luma < 0.5) and bold text = % of the expert row, the main reading,
 comparable across stages and nights; the epoch count in small type below, in parentheses, says how many
 epochs that % rests on).
 Measured on two real test nights with C3 (+ EOG L−R for 100): κ 0.71 (100) and 0.79 (731).
@@ -2145,7 +2211,10 @@ refuses an output suffix equal to the expert one):
   EEG/EOG used, EOG mode, reference, declared EOG, expert suffix, gssc/torch versions, device,
   `recording_start` (ISO or null), notes, date.
 - `reports_autoscoring_gssc/<subtree>/{id}_autoscoring_comparison.tsv` (one row: epoch counts,
-  `accuracy, kappa, f1_<stage>, mean_confidence, scoring_mode, eeg_used, eog_used, status`),
+  `accuracy, kappa, f1_<stage>, macro_f1, balanced_accuracy, mcc, n_stages_expert, single_stage_expert, mean_confidence,
+  scoring_mode, eeg_used, eog_used, status`; the five columns after `f1_R` added on 2026-11-23, absent from a night
+  compared before: `–` in the database tables, which say how many such nights there are and point to Section 4 or to
+  Skip unticked),
   `{id}_confusion.tsv` (long `file_id, expert, gssc, n`, removed when no comparison is possible) and
   `{id}_autoscoring_report.html` (parameters, hypnograms expert/GSSC (grey line, REM red at the line's width, as every tool),
   hypnodensity with the expert hypnogram as a black line over it (stage names on the right axis),
@@ -2156,8 +2225,12 @@ refuses an output suffix equal to the expert one):
   (`aasm_reference` / `custom` / `MT` / `other`)`, n_epochs, p_W … p_R` (mean hypnodensity)`,
   pct_gssc_W … pct_gssc_R`, `labels` (the raw labels grouped in `other`).
 - `reports_autoscoring_gssc/` root: `global_autoscoring_summary.tsv`, `global_confusion.tsv` (pooled),
-  `global_autoscoring_report.html` (pooled confusion matrix, κ / accuracy per participant, **every
-  participant's hypnodensity stacked** on one shared **clock-time** axis with its κ (see *Clock time*), the expert hypnogram drawn
+  `global_autoscoring_pooled.tsv` (one row: `n_nights`, the counts and every metric of the pooled confusion matrix),
+  `global_autoscoring_report.html` (the pooled metrics, pooled confusion matrix, κ / MCC / accuracy / balanced accuracy /
+  macro-F1 per participant with their medians (single-stage nights out of κ and MCC when `cb_single_stage_out` is
+  ticked, their number written under the figure), **every
+  participant's hypnodensity stacked** on one shared **clock-time** axis with its κ (`κ –, 1 stage` for a single-stage
+  night; see *Clock time*), the expert hypnogram drawn
   over it as a black step line when available (W on top, then R, N1, N2, N3; a gap where the expert label
   is outside W/N1/N2/N3/R), split into figures of `HYPNODENSITY_ROWS_PER_FIG` = 20 rows, read from the
   `_hypnodensity.tsv` files on disk; the pooled non-AASM section; then the table),
@@ -3621,7 +3694,9 @@ a section below. Update this list when an item is done.
    were closed by phase 6 of `tools/plan_brainvision.md`: *Recording formats*. The *Code review of 2026-10-24* was
    closed on 2026-11-19: #10 in *Cross-cutting → Event sourcing*, #20 in §5, #8 / #16 = tool 4 reads its text export
    with `Path.read_bytes()`, #11 needed no change. *Tool 7: band-pass phase* and *Lighter conda environments* were
-   closed on 2026-11-20 by `tools/plan_bandpass_and_envs.md`: §7 *The band-pass phase* and *Conda environment*.)
+   closed on 2026-11-20 by `tools/plan_bandpass_and_envs.md`: §7 *The band-pass phase* and *Conda environment*. The
+   item *Comparison outputs in the SomnoLens layout* of *Tool 3bis: follow-ups* was closed on 2026-11-23 by
+   `tools/plan_3bis_comparison.md`: §3bis *Section 4's outputs in the SomnoLens layout*.)
 
 Still to check by hand, not covered by the tests: a real participant table through tools 5 and 9.
 
@@ -3880,13 +3955,6 @@ first release, whatever the distribution route; re-run the tests of every tool t
 ### Tool 3bis: follow-ups of the Score_EDF port (TODO)
 
 Left out of the port of 2026-10-27 (`tools/plan_score_edf_fixes.md`, deleted once done: see the git history).
-- **Comparison outputs in the SomnoLens layout.** Section 4 keeps Score_EDF's output layout on purpose (user
-  decision, plan Q6): `<study>/autoscore_outputs/` with `epochs_all_stagers.csv`, `agreement_summary.csv`,
-  `channels_used.csv` and PNG figures, Score_EDF's stage names (Wake, REM) and its empty `tet` column (a measure
-  of the nap study it came from). To harmonise: data in `derivatives/autoscoring_comparison/` and an HTML report in
-  `reports_autoscoring_comparison/` (TSV, the toolkit's stage names W / R, per-night tables globbed for the
-  database ones), the recalibration parameters saved (today only in the log), and the "Skip already processed" /
-  cumulative logic of the other tools.
 - **Speed** (plan 3.1, 3.5, 3.6; measured on night 100: 89 s for the three models, reading is not the bottleneck):
   one EDF read per night shared by the models (today one read of its own channels per model); torch's thread count
   and SleepFM encoder batches > 1 (memory to watch); YASA scored in parallel across nights.
@@ -3935,8 +4003,9 @@ with its own minimal environment, like *Standalone Score_EDF* above; without a s
 in the names registry); which label formats (tool-3 labels only, or raw exports through a mapping) and how MT,
 custom and unscored epochs count; hypnograms of different lengths or start times; which hypnogram the rescoring
 starts from; whether the rescorer sees who gave which stage (blind adjudication or not); several nights (database
-tables and figures, the group statistics); whether Section 4 of tool 3bis ends up sharing these metrics when its
-outputs are harmonised.
+tables and figures, the group statistics); whether it shares tool 3bis's metrics (since 2026-11-23 Section 4 has
+accuracy, κ, MCC, F1 per stage, macro-F1 and balanced accuracy per night and pooled, from `autoscoring_lib.agreement_metrics`,
+always against one reference hypnogram).
 
 ### Methods text for a paper (TODO, asked on 2026-11-23)
 
