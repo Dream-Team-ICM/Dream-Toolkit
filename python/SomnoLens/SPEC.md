@@ -17,7 +17,9 @@ The former code-visible Jupyter versions of tools 0–4 are archived, frozen, in
 ```
 SomnoLens/
 ├── README.md                    # User-facing presentation: tools, installation, quick start (start here)
-├── environment.yml              # Conda environment definition (somnolens)
+├── environment.yml              # Conda environment somnolens, light: every tool, YASA alone in tool 3bis
+├── environment-full.yml         # light + GSSC and SleepFM (tool 3bis)
+├── environment-dev.yml          # full + pytest, notebook (developers, the test suite)
 ├── CLAUDE.md                    # Development rules and design decisions
 ├── SPEC.md                      # This file: project specification
 ├── TESTS.md                     # What the test suite checks, in plain words (for researchers)
@@ -79,7 +81,8 @@ tests/                                         # pytest suite: the Voila noteboo
 ├── outside_chain.py / refactor_check.py       # scripts: what the chain does not run + before / after
 │                                              # comparison of a code move into a library
 ├── score_edf_equivalence.py                   # script: tool 3bis against python/Score_EDF (run by hand)
-├── test_*.py                                  # golden, known answers, tools 1/3/4, variants, invariants, notebooks execute
+├── test_*.py                                  # golden, known answers, tools 1/3/4, variants, invariants, notebooks execute,
+│                                              # the environment files
 └── golden/synthetic/ (versioned), golden/real/ (git-ignored: real participant data)
 ```
 
@@ -121,28 +124,98 @@ notebooks, rename around the extension blocks (**rename-to-`.txt`** method):
 
 ## Conda environment
 
-Defined in `environment.yml`. Key packages:
-- **Python 3.12.10**
-- **MNE 1.12**: EDF reading, epoching, signal processing (bumped from 1.9 for Curry `.cdt` support, the EDF tools run unchanged on it)
-- **YASA 0.6**: sleep staging, hypnogram handling, spectral helpers. Its sleep staging depends on the version of
-  **antropy**, pinned to **0.1.9** in `environment.yml` (2026-10-29; YASA 0.6.5 accepts any antropy, so a new
-  install would otherwise take 0.2.x): the computation YASA's classifiers were trained with (§3bis, *Same models in
-  the user environment*)
-- **pandas 2.2, numpy 2.2**: data manipulation
-- **voila 0.5, ipywidgets 8.1, ipyfilechooser 0.6**: interactive GUI layer
-- **chardet 5.2**: encoding detection for EDF headers
-- **edfio**: EDF read/write (used directly for export with per-channel physical range control)
-- **specparam**: aperiodic/periodic spectral decomposition (1/f fitting)
-- **statsmodels 0.14**: LOWESS smoother (`smoothers_lowess.lowess`), used by tool 7 (and `qc_rejected_epochs_lib.py`) for the optional PSD smoothing before the 1/f fit (see tool 7)
-- **pytorch-cpu + gssc 0.0.9** (pip, pinned): tool 3bis's automatic sleep scoring. Install: `conda install -n somnolens -c conda-forge pytorch-cpu`, then `python -m pip install gssc==0.0.9`
-- **h5py, einops, loguru, pyyaml**: tool 3bis's SleepFM (imported by its official code; listed explicitly for the
-  coming light / full split, see *Planned modules*). Its model files are not a package: tool 3bis downloads them.
-  SleepFM gives the same results here as in the autoscoring environment `autoscore` (python 3.10, torch 2.5.1,
-  `python/Score_EDF/environment_autoscore_debugyn.yml`): night 100, max difference 2e-6, same stage on 5,652 / 5,652
-  5-s steps (2026-10-27). Without these packages the tool greys SleepFM out with an install message. SleepFM's
-  official code starts a multiprocessing pool: from a plain Python script on Windows, the calling code must sit
-  under `if __name__ == '__main__':` (no issue in Voila / Jupyter).
-- **openpyxl 3.1**: writes tool 9's `.xlsx` workbook (via `pandas.ExcelWriter`). Its absence is non-fatal (the TSV tables stay complete)
+Three files, one environment name, `somnolens` (since 2026-11-20, `tools/plan_bandpass_and_envs.md` in the git history):
+- **`environment.yml`, light** (1.3 GB): every tool. Tool 3bis scores with YASA alone: GSSC and SleepFM are greyed out,
+  their message points to the full installation.
+- **`environment-full.yml`, full** (2 GB): light + GSSC and SleepFM for tool 3bis (torch, gssc, h5py, einops, loguru,
+  pyyaml, importlib_resources).
+- **`environment-dev.yml`, developers**: full + `pytest` (the test suite runs in it) and `notebook` (the archived
+  code-visible notebooks). The former single environment weighed 4.6 GB (`mne` metapackage with its 3D / Qt stack,
+  Spyder, conda's torch with MKL).
+
+**Why two user installations** (discussed on 2026-11-23, the split kept for now): not the size, since 0.7 GB more
+changes nothing on today's computers. The reasons:
+- **The light one is the fallback when torch does not install.** torch is the fragile dependency on Windows: every
+  environment problem so far came from it (the retired `pytorch` channel, libtorch's DLLs that stopped loading, the
+  rename that broke it, MKL 2026 with llvm-openmp, *Windows gotchas* below). In a single environment, a torch
+  failure would stop every user, even those who never score automatically. With the split, only the full
+  installation is affected: a user whose full install fails installs the light one and has every tool, tool 3bis
+  with YASA.
+- **GSSC (AGPL-3.0) stays an optional install** until the licence is decided (*Distribution and licensing*). Not a
+  full protection: `autoscoring_lib.gssc_combination_logits` reproduces its loop whatever the installation.
+
+The cost is a choice for the user (and GSSC / SleepFM greyed out for whoever took the light one without knowing);
+keeping the three files in step costs nothing (`test_environment_files.py`). Considered and not done for now: the
+full installation as the default of the README and the tutorial (the light one documented as the fallback), or a
+single user file (full) + the dev one.
+
+From the SomnoLens folder (on ICM's network, `CONDA_SSL_VERIFY=truststore` for the command):
+```powershell
+conda env create -n somnolens -f environment.yml        # light
+conda env create -n somnolens -f environment-full.yml   # full
+conda env update -n somnolens -f environment-full.yml   # a light environment becomes full
+```
+Replace an environment by removing it and creating it again: a clone or a rename breaks torch and the pip launchers.
+
+conda has no include: each file repeats the list of the one below it. **`tests/test_environment_files.py`** (quick)
+checks that light ⊂ full ⊂ dev with the same pins, that every pin is set, and that every third-party import of the
+tools (Voila pages, `*_lib.py`, batch scripts) is declared: in the light file, except the autoscoring packages, which
+belong to the full file and never to the light one. A tool that imports a new package adds it to the three files (to
+the full and dev files only for the autoscoring).
+
+**Versions: pinned, refreshed deliberately** (user decision, 2026-10-29). Each pin is `x.y.*` (the pip ones `==`),
+refreshed one or two times a year or when a need arises, a few weeks after a release (not the day it comes out),
+between two studies (a study is processed from start to end with one version), each refresh validated by the full
+test suite and noted here. Not "always the latest" (results can change silently, as antropy 0.2 moves YASA's stages,
+and one update drags others along), nor frozen for good (old versions vanish from the channels, as the `pytorch` one
+did, and a late jump of several versions costs more than following them). **Refresh of 2026-11-20**: python 3.14,
+numpy 2.5, pandas 2.3 (pandas 3: its own task), scipy 1.18, mne-base 1.13, matplotlib-base 3.11, YASA 0.8, statsmodels
+0.15, scikit-learn 1.9, torch 2.14. Measured against the former environment: no flag, decision, exclusion or
+macrostructure metric changes, on the synthetic and on the real nights; a float noise in tool 9 (up to 2e-7 dB) and on
+the flat end of the real nights (rounding noise, every epoch rejected: *Flat epochs in the comparison with the median
+channel*, *Planned modules*); tool 3bis's stages identical (night 100: YASA 0.8.1 = 0.6.5, GSSC and SleepFM the same
+941 stages); the images redrawn. Code adapted: YASA 0.8 (§3bis), `np.trapz` → `np.trapezoid` (numpy 2.5),
+`boxplot(tick_labels=)` and `with_extremes(bad=)` (matplotlib 3.11). The real goldens were taken again.
+
+Key packages:
+- **mne-base**: EDF reading, epoching, signal processing. The `mne` metapackage adds a 3D / GUI stack (PySide6,
+  VTK, PyVista...) that no tool uses.
+- **YASA 0.8** with **antropy 0.1.9**: sleep staging, hypnogram handling. YASA's stages depend on antropy's version:
+  its classifiers were trained with antropy < 0.2 (§3bis, *Same models in the user environment*), recorded as
+  `antropy_version` in YASA's `_scoring_params.json`. **lspopt**: tool 6's multitaper hypnospectrograms (the
+  function `yasa.plotting` re-exports, imported directly).
+- **numpy, pandas, scipy, statsmodels** (LOWESS smoother of the PSD before the 1/f fit, tools 7, 8, 9), **scikit-learn**.
+- **numpy's BLAS = OpenBLAS** (`libblas=*=*openblas`), see the Windows gotchas below.
+- **voila 0.5, ipywidgets 8.1, ipyfilechooser 0.6, ipyevents**: the interactive layer. **ipykernel 6** (not 7:
+  `tests/nbdriver.py` and the planned Stop button depend on its event loop).
+- **chardet 5.2**: encoding detection for EDF headers. **Not 7**: its confidence on latin-1 / cp1252 headers falls to
+  0.01-0.04, so tool 1 (which asks 0.6) would refuse the Compumedics exports with accents.
+- **edfio**: EDF read/write (used directly for export with per-channel physical range control).
+- **specparam** (pip, `2.0.0rc7`: still no final 2.0): aperiodic/periodic spectral decomposition (1/f fitting).
+- **curryreader** (pip): MNE's reader of Curry recordings.
+- **openpyxl 3.1**: writes tool 9's `.xlsx` workbook (via `pandas.ExcelWriter`). Its absence is non-fatal (the TSV
+  tables stay complete). **tk**: the folder dialog of tool 1's batch scripts.
+- *Full*: **torch** (pip, the CPU wheel of PyPI) + **gssc 0.0.9** (pip, pinned: tool 3bis reproduces its scoring
+  loop). **h5py, einops, loguru, pyyaml**: tool 3bis's SleepFM (imported by its official code). Its model files are
+  not a package: tool 3bis downloads them. Without these packages the tool greys GSSC / SleepFM out with an install
+  message. SleepFM's official code starts a multiprocessing pool: from a plain Python script on Windows, the calling
+  code must sit under `if __name__ == '__main__':` (no issue in Voila / Jupyter).
+- The **`autoscore`** environment (python 3.10, Score_EDF's versions, `python/Score_EDF/environment_autoscore_debugyn.yml`)
+  only runs `tests/score_edf_equivalence.py`.
+
+**Windows gotchas**:
+- **MKL 2026 crashes numpy**: on Windows conda-forge picks the MKL BLAS by default, and MKL 2026.1 with llvm-openmp
+  crashes Python at the first matrix product (`0xc06d007f`: `mkl_intel_thread.3.dll` delay-imports
+  `__atomic_compare_exchange` / `__atomic_load`, which llvm-openmp's `libiomp5md.dll` does not export; 23.1.4 to 23.1.6
+  alike, found 2026-11-20). Hence `libblas=*=*openblas` in every file (no MKL, no OpenMP in the BLAS, lighter). A
+  change of BLAS moves the results by a float noise only.
+- **torch from PyPI**: every Windows build of conda-forge's torch is `cpu_mkl` / `cuda_mkl` and needs MKL 2026. The
+  PyPI CPU wheel carries its own MKL and Intel OpenMP; checked in one process with YASA's lightgbm (MSVC's `vcomp`):
+  one Intel OpenMP loaded, no `OMP Error #15`. Torch's pip requirements (sympy, networkx, filelock, fsspec,
+  setuptools, typing_extensions, jinja2) come from conda, so pip installs torch alone.
+- The `pytorch` conda channel is retired (HTTP 403).
+- When an env's `Scripts` folder is on the user PATH (here `somnolens\Scripts`), a bare `voila` runs that env
+  whatever env the user meant: launchers must call the env's own Voila.
 
 ## How to run the tools
 
@@ -259,7 +332,8 @@ A plain-language description of every check, for researchers, is in **`TESTS.md`
 a test is added or changed).
 
 **Three levels** (markers declared in `pytest.ini`, `--strict-markers` refuses an unknown one):
-- **quick** (`-m quick`, ~1.5 min): unit tests (registry, selector, chain cache, the BrainVision and Curry readers), and
+- **quick** (`-m quick`, ~2 min): unit tests (registry, selector, chain cache, the BrainVision and Curry readers, the
+  environment files: `test_environment_files.py`, *Conda environment*), and
   `test_notebooks_execute.py`, which runs every `tools/*_voila.ipynb` top to
   bottom without clicking anything (no traceback, no `Import error`). The archived Jupyter notebooks (`tools/jupyter_notebook/`) are not run.
 - **standard** (`-m "not full"`, ~32 min from scratch, ~28 min with the chain reused, measured on 2026-11-06): quick + the chain on the **synthetic** database (golden
@@ -284,8 +358,10 @@ batch tools, so a change to a tool it mirrors also runs `tool0` (`test_tool0.py`
 
 **Chain reuse** (`tests/chaincache.py`): the chain fixture does not rerun the whole chain each session. It
 fingerprints (sha256) the test harness (`BASE_DEPS`: `nbdriver`, `pipeline`, `minidb`, `synthetic`,
-`chaincache`, `tools/generate_test_data.py`) and each tool's notebook + the shared modules it imports
-(`TOOL_DEPS`), stored in `%TEMP%/dtk_tests/<dataset>/chain_state.json` after each tool. Next session, it
+`chaincache`, `tools/generate_test_data.py`), the Python environment (`chaincache.environment()`: its folder, the
+versions of the packages that compute the outputs, `ENV_PACKAGES`, and numpy's BLAS, read from the `libblas` record of
+`conda-meta`: a chain made in another environment is rerun, never reused) and each tool's notebook + the shared modules
+it imports (`TOOL_DEPS`), stored in `%TEMP%/dtk_tests/<dataset>/chain_state.json` after each tool. Next session, it
 reruns **from the first tool whose fingerprint changed** (a harness change: from scratch), after deleting
 that tool's and the later tools' outputs (`TOOL_OUTPUTS`) and their own registry rows
 (`TOOL_REGISTRY_SOURCES`). `--fresh-chain` forces a full rerun. A test that writes must therefore work on a
@@ -382,15 +458,24 @@ test must point it at a copied `preproc_epo`.
   `%TEMP%/dtk_outside_chain/<dataset>/data`, so `refactor_check.py` can compare its outputs before / after a
   move (`DTK_TEST_ROOT` / `DTK_REFACTOR_ROOT` pointed at that folder and a save folder): `1` (tool 1, its
   defaults), `3` (tool 3 on the raw hypnogram exports when there are some, written under `_Hypnogram_tool3.txt`),
-  `3bis` (tool 3bis, the default), `6variant` (tool 6 with resampling to 128 Hz + high-pass 0.5 Hz, options the chain leaves
+  `3bis` (tool 3bis, the default, then its Section 4 on every night), `6variant` (tool 6 with resampling to 128 Hz + high-pass 0.5 Hz, options the chain leaves
   off) and `7variant` (tool 7 with resampling to 128 Hz, 10 s epochs, no notch, LOWESS-only smoothing, events
   on, channels from the configuration), e.g. `outside_chain.py 6variant 7variant`. `refactor_check` also ignores tool 3bis's `scored_at` date.
 - `score_edf_equivalence.py` (a script, run with the **`autoscore`** python): tool 3bis against
   `python/Score_EDF` in the same environment (§3bis *Validation against Score_EDF*). `build` (3 simulated 2-h
   nights with a full PSG montage + night 100 of `tools/test_data`, in `%TEMP%/dtk_scoreedf`), `baseline-sim`
   (Score_EDF's notebook, untouched), `baseline-real` (its functions on night 100, timed), `run-3bis-sim`,
-  `run-3bis-real`, `compare` (→ `compare_report.md`). With Score_EDF's settings every predicted stage and the
-  agreement table must be identical.
+  `run-3bis-real`, `compare` (→ `compare_report.md`). With Score_EDF's settings every predicted stage must be identical,
+  and Score_EDF's epochs scored the way tool 3bis does (an epoch a model did not predict left out) must give tool 3bis's
+  metrics; tool 3bis's tables are mapped back to Score_EDF's names (its comparison is in the SomnoLens layout since
+  2026-11-23).
+- `test_autoscoring_metrics.py` (quick, markers `tool3bis`, `tool0`): `autoscoring_lib.agreement_metrics`, a nap worked
+  by hand (macro-F1 0.875 over the expert's two stages, 0.583 with the union), a single-stage night (κ undefined or 0,
+  MCC 0, flagged, the note of the metrics table), MT / `?` left out, equality with sklearn when every stage is present,
+  the pooled values = the summed matrix. `test_autoscoring_compare.py` (standard, marker `tool3bis`): step 1's
+  database report with a single-stage nap and a night compared before these metrics (both positions of
+  `cb_single_stage_out`), then Section 4 with GSSC on two synthetic nights: the SomnoLens layout, its metrics = step 1's,
+  gssc's dropped last epoch said and counted, a second *Compare* on one night replacing the two-night comparison.
 - `test_edf_io_sync.py` (quick): the copies of `edf_io_lib`'s functions that tools still carry (tool 1bis's
   `detect_encoding`; tool 2's header parser; tool 4's start datetime / companions; tool 6's suffix helpers and
   physical bounds; tool 7's event chain and suffix helpers; `quality_lib`'s custom-stage helpers) are the same code
@@ -414,9 +499,10 @@ test must point it at a copied `preproc_epo`.
   `read_edf_header_custom`'s (code review #20).
 - *Skip* and the settings (*Cross-cutting → Skip + cumulative-merge*): `test_settings_skip.py` (standard, tools 6, 7, 8bis, 8, 9, each
   scenario in a **new session** on a light copy of the chain's outputs: same settings skipped, other settings stop before
-  anything is written, the three answers, what follows tool 7, a new participant made like the others),
-  `test_quality_lib.py`, `test_preprocessing_lib.py`, `test_autoreject_settings.py`, `test_spectral_settings.py` and
-  `test_study_files_lib.py` (quick: the comparisons, the records, the fingerprint).
+  anything is written, the three answers, what follows tool 7, a new participant made like the others, a study whose
+  band-pass ran twice before 2026-11-19), `test_quality_lib.py`, `test_preprocessing_lib.py` (+ tool 7's band-pass equal to
+  MNE's zero-phase filter), `test_autoreject_settings.py`, `test_spectral_settings.py` and `test_study_files_lib.py` (quick:
+  the comparisons, the records, the fingerprint).
 - `refactor_check.py` (a script, not a test) + `test_refactor_check.py` (quick): the **before / after check**
   of the tool-0 redesign, which moves code into shared libraries. `save <label>` copies every output of the
   chain folders (`%TEMP%/dtk_tests/<dataset>/data`, recordings excluded) to `%TEMP%/dtk_refactor/<label>/`;
@@ -448,8 +534,8 @@ the run. Changing `nbdriver.py` changes `BASE_DEPS`, so the chain reruns once.
 `nbdriver.click_labelled(description)` clicks a button built inside a callback (no global name), found by
 its label like a user would (the most recent `Button` with that description).
 
-A pytest suite (added for the exclusion refactor, at the user's request; pytest installed with pip, as
-conda hits an SSL certificate error on the ICM network) runs the chain **5 → 5bis → 6 → 7 → 8bis → 8 →
+A pytest suite (added for the exclusion refactor, at the user's request; pytest comes with
+`environment-dev.yml`) runs the chain **5 → 5bis → 6 → 7 → 8bis → 8 →
 9** through the **real notebook widgets**: `nbdriver.py` executes every cell in a Jupyter kernel
 (`nbclient`), then injects driver cells that pick folders in the FileChoosers (`reset` + the dialog's
 Select, callbacks included), set widget values and click buttons. Results are read from the files the
@@ -464,8 +550,13 @@ bursts; every recording uses the M2 reference of a clinical montage):
 A golden snapshot (TSV/JSON outputs gzipped with a fixed timestamp, `.fif` summarised as channels + bads +
 metadata, run paths replaced by `<DATA>`) is taken with `make_golden.py` **on trusted code only, before a
 change**. `test_pipeline.py` compares every tool's outputs to it (added columns/files allowed, a removed
-column/file or a changed value fails, naming the first differing value); intended changes are listed in
-`INTENDED_CHANGES` / `EXPECTED_MISSING` and each has its own dedicated test.
+column/file or a changed value fails, naming the first differing value; tool 9's `*_ap_removed_db` columns within
+1e-5 dB, `snapshot.AP_REMOVED_ATOL_DB`); intended changes are listed in `INTENDED_CHANGES` / `EXPECTED_MISSING` and
+each has its own dedicated test. **`make_golden.py` replaces the whole folder** (`snapshot.take`): copy the real golden
+aside first (not versioned). Both goldens were taken again on 2026-11-19 (tool 7's band-pass phase, measured first with
+`refactor_check`): until then they dated from before the exclusion refactor, and three checks compared with that
+former content (the clean-epo copies of tools 8 / 8bis, tool 9's former route, tool 6 before the 50-ms flat rule); they
+retired with it (git history), and `INTENDED_CHANGES` / `EXPECTED_MISSING` are empty.
 
 ## Cross-cutting procedures (shared across tools)
 
@@ -1762,8 +1853,8 @@ button that reloads the written files. Until then a section shows *Complete sect
 ### 3bis. Automatic sleep scoring: GSSC, YASA, SleepFM and their comparison (`3bis_autoscoring_voila.ipynb`)
 
 Scores every 30-s epoch automatically with up to three published models: **GSSC** (Greifswald Sleep Stage
-Classifier, `gssc==0.0.9`, pip-only, CPU torch from conda-forge), **YASA** (`SleepStaging`, 0.6 in `somnolens`,
-0.7 in `autoscore`) and **SleepFM-Clinical** (official checkpoints, `sleepfm_lib`), for nights without an expert
+Classifier, `gssc==0.0.9`, pip-only, PyPI's CPU torch), **YASA** (`SleepStaging`, 0.8 in `somnolens`, 0.7 in
+`autoscore`) and **SleepFM-Clinical** (official checkpoints, `sleepfm_lib`), for nights without an expert
 hypnogram and to compare with the expert one where it exists. Two steps: **step 1** (Sections 1-3) runs each
 ticked model on each night and writes that model's outputs; **step 2** (Section 4) compares the models with the
 expert hypnogram on every night together, the computation of `python/Score_EDF` ported on 2026-10-27
@@ -1903,21 +1994,46 @@ SleepFM recal A with ≥ 2 nights, recal B with ≥ 3 nights having the features
 averaged over each epoch (overlap weights); predicted = the most probable stage, except GSSC and YASA (30-s
 models) whose own step-1 stage is taken (the same argmax, before the 4-decimal rounding of the TSV). **Recal A**:
 temperature + biases (Wake reference), leave one recording out; **recal B**: refit of SleepFM's final layer on the
-saved features, penalty by inner cross-validation, leave one out. Outputs = **Score_EDF's files**, in
-`<study>/autoscore_outputs/`: `epochs_all_stagers.csv` (Score_EDF's columns and stage names Wake/N1/N2/N3/REM,
-its empty `tet` column included), `agreement_summary.csv` (epochs, accuracy, pooled kappa, F1 per stage, kappa
-per night), `agreement_by_stager.png`, `confusion_by_stager.png`, `hypnograms_by_stager.png`,
-`hypnodensities_<id>.png` (toolkit stage colours, expert hypnogram W on top with REM red, Greens confusion), plus
-`channels_used.csv` (not in Score_EDF; also shown under the agreement table): per night and model, the EEG, EOG,
-chin EMG, other channels (GSSC: mode and number of combinations; SleepFM: ECG, respiration) and EEG reference,
-read from step 1's `_scoring_params.json`. Each model is given its own training channels, so two models may not
-see the same EEG (night 100: YASA on C4-M1 fails, κ 0.11, a poor C4-A1; GSSC's consensus does not): to compare
-them on equal inputs, give them the same electrode in Section 2.
+saved features, penalty by inner cross-validation, leave one out. Each model is given its own training channels, so two
+models may not see the same EEG (night 100: YASA on C4-M1 fails, κ 0.11, a poor C4-A1; GSSC's consensus does not): to
+compare them on equal inputs, give them the same electrode in Section 2.
 Intended changes from Score_EDF: an epoch with no 5-s step is left out of the recalibration fit (Score_EDF divided
 by 0); **N3 is fitted** by both recalibrations when the training nights have N3 (`RECAL_FREE_N3 = 'auto'` in
 cell 10; Score_EDF fixed it, its naps had none; `False` reproduces it); torch's thread count is restored after
-recal B (Score_EDF left it at 1, slowing a second run). The outputs keep Score_EDF's layout until their
-harmonisation (*Planned modules*).
+recal B (Score_EDF left it at 1, slowing a second run); **an epoch a model gave no probability for** (the incomplete
+tail a 30-s model drops, the last epoch gssc drops on a night of a whole number of 30-s epochs) is **left out of its
+metrics and counted** (`n_not_predicted`), as step 1 compares on the epochs both scored: Score_EDF counted it as a
+disagreement (accuracy) and as a sixth class `Unknown` (κ). GSSC's metrics in Section 4 are then step 1's.
+
+**Section 4's outputs in the SomnoLens layout** (`tools/plan_3bis_comparison.md`, 2026-11-23; Score_EDF's
+`autoscore_outputs/` before: a former one is left as it is, one log line says it is no longer written). The ported
+computation keeps Score_EDF's names inside (`Wake`, `REM`, the display names); the outputs use W / R and step 1's model
+keys (`gssc`, `yasa`, `sleepfm`, `sleepfm_recal_a`, `sleepfm_recal_b`; `MODEL_KEY` / `MODEL_NAME`), Score_EDF's empty
+`tet` column dropped:
+- `derivatives/autoscoring_comparison/<subtree>/{id}_comparison_epochs.tsv` (`toolkit_epochs`): one row per epoch and
+  model, `file_id, model, epoch_idx` (from the recording start, as step 1's: the window starts on a whole expert epoch),
+  `onset_s, stage_expert, expert_coverage, stage_model, p_W … p_R` (full precision; a stage is empty where the expert
+  scored no W/N1/N2/N3/R or the model gave no probability); `{id}_recal_b_layer.npz` (recal B's refitted final layer
+  for that night, `weight` 5 × 128, `bias` 5); `derivatives/autoscoring_comparison/recalibration_params.tsv` (one row per
+  method and held-out night: `training_nights`, A's temperature, `bias_N1 … bias_R`, train log-loss, convergence; B's
+  penalty and inner log-loss per penalty; Score_EDF only logged them).
+- `reports_autoscoring_comparison/<subtree>/{id}_comparison.tsv` (`night_agreement`, one row per model: `n_compared,
+  n_excluded_expert, n_not_predicted`, every metric of step 1, `n_stages_expert, single_stage_expert`, then the channels
+  used, read from step 1's `_scoring_params.json`: `eeg_used, eog_used, emg_used, other_channels` (GSSC: mode and number
+  of combinations; SleepFM: ECG, respiration), `eeg_reference`; a recalibrated SleepFM gets SleepFM's), `{id}_confusion.tsv`
+  (long `file_id, model, expert, predicted, n`) and `{id}_comparison_report.html` (agreement table, each model's
+  hypnodensity over the expert hypnogram, confusion matrices, channels; the single-stage note when it applies).
+- `reports_autoscoring_comparison/` root, rebuilt from the per-night files on disk: `global_comparison_summary.tsv`,
+  `global_comparison_pooled.tsv` (`pooled_agreement`: per model, `n_nights` and the metrics of the summed confusion
+  matrix), `global_confusion.tsv` (summed per model), `global_comparison_report.html` (pooled table, agreement figure: F1
+  per stage pooled and κ of each night, single-stage nights left out when `cb_single_stage_out` is ticked; pooled
+  confusion matrices; hypnogram grid in figures of `HYPNODENSITY_ROWS_PER_FIG` nights; per-night table; recalibration
+  parameters), `failed_comparison.tsv` when a night could not be read.
+- **A comparison is one set of nights, no Skip**: the recalibrations learn each night from the others, so a night's
+  results belong to the nights compared with it. Each *Compare*, once the inputs are read, **empties both folders** and
+  writes every chosen night (data, then per-night tables, then reports, then the database), so the database tables are
+  that comparison. The page shows the database view (pooled table, agreement figure, confusion matrices, hypnogram grid)
+  and where the reports are; the hypnodensities of each night are in its report.
 
 **Validation against Score_EDF** (`tests/score_edf_equivalence.py`, run by hand in the `autoscore` environment,
 2026-10-27): Score_EDF's untouched notebook on 3 simulated 2-h nights with a full PSG montage (every model, both
@@ -1932,6 +2048,14 @@ context, intended). With the defaults, recalibrations A and B change as intended
 made Score_EDF's all-channel read upsample every 256-Hz EEG channel to 512 Hz (tool 3bis reads them at 256 Hz; on
 the original file 5 / 2 / 59 epochs differed for GSSC / YASA / SleepFM). Time on night 100: tool 3bis 89 s for the
 three models (GSSC 43 s, YASA 7 s, SleepFM 39 s) against Score_EDF's 259 s (544 s and a 17-GB peak with `DHR`).
+**Since the SomnoLens layout** (2026-11-23) the script maps tool 3bis's tables back to Score_EDF's names and compares
+values: the epochs (stages, probabilities) as before, and the metrics through Score_EDF's own epochs scored the way
+tool 3bis does (`agreement_metrics`, an epoch not predicted left out), which must give tool 3bis's pooled and per-night
+values. Run on 2026-11-23: with Score_EDF's settings the same stages for the 5 models on the 720 simulated epochs
+(probabilities within 5e-5, recal B identical), metrics identical except GSSC's: the simulated nights last exactly 2 h, so
+gssc drops the last epoch of each (3 epochs not predicted; accuracy 0.7208 → 0.7238, κ 0.6245 → 0.6281; Score_EDF's
+epochs scored like tool 3bis: within 5e-5, the 4 decimals of the TSV); the defaults' recalibrations as above; night
+100: GSSC and YASA identical (no epoch not predicted), SleepFM 1 epoch (the tail context).
 
 **Same models in the user environment** (`somnolens`: python 3.12, numpy 2.2, torch 2.8, YASA 0.6.5, antropy
 0.1.9) against the `autoscore` run above (python 3.10, numpy 1.26, torch 2.5.1, YASA 0.7.0, antropy 0.2.3), night
@@ -1943,9 +2067,17 @@ fractal dimension (`range(1, n_max)` → `range(1, n_max + 1)`), one of YASA's f
 are equal), while YASA's classifiers (the `_0.5.0` files, 2021, byte-identical up to YASA 0.8.1) were trained
 with the former computation. Hence **`antropy<0.2`** wherever YASA scores: the model then sees its features as
 trained, and a study scores the same in every environment. YASA's results depend on that version, so it belongs
-in the provenance (today `_scoring_params.json` records `yasa_version` only: add `antropy_version` at the version
-refresh, *Planned modules*). **YASA 0.8 removes `SleepStaging.predict_proba()`** (deprecated in 0.7), which
-`score_night_yasa` calls: keep `yasa=0.6.*` until that refresh moves it to `predict().proba`.
+in the provenance: YASA's `_scoring_params.json` records `antropy_version` beside `yasa_version` (since 2026-11-20).
+
+**YASA 0.8** (version refresh of 2026-11-20, *Conda environment*): `SleepStaging.predict_proba()` is removed, so
+`score_night_yasa` takes the probabilities from `predict().proba` (a `yasa.Hypnogram`; its `WAKE` / `REM` columns
+renamed `W` / `R` as before), and silences YASA through `logging.getLogger('yasa')` (`yasa.logger` is gone). Its
+classifiers are the same `_0.5.0` files but its feature computation was rewritten; measured on night 100 with
+`score_edf_equivalence`'s settings, former `somnolens` (YASA 0.6.5, torch 2.8) against the new one (YASA 0.8.1, torch
+2.14 from PyPI): YASA identical on C4 and on C3 (stages and stored probabilities), GSSC and SleepFM the same 941 stages
+(probabilities within 1e-4), the three hypnograms byte-identical; against Score_EDF, YASA still differs on 5 / 941
+epochs (antropy 0.2). On the synthetic nights, YASA 0.8's probabilities move by at most 0.01 on 12 epochs, stages
+unchanged. Time on night 100: 86 s for the three models (117 s before).
 
 **Code location** (tool-0 redesign, phase 2): the computation and the figures live in
 **`tools/autoscoring_lib.py`**, moved verbatim from the notebook's former cell 2, with the guarded GSSC import
@@ -1974,7 +2106,16 @@ EEG (a joint read would upsample to the fastest rate), resampled to the EEG rate
 length. EOG mode: **`L − R bipolar`** (default, Thomas's example script) / `L and R separately` / `Left only` /
 `Right only` / `None` (a side not declared: EEG only, noted).
 No EOG declared → EEG only, with a ⚠. No other preprocessing: GSSC filters 0.3–30 Hz itself and cuts
-2560-sample (30 s) epochs from t = 0, dropping the incomplete tail, so epoch *i* = expert line *i*.
+2560-sample (30 s) epochs from t = 0, dropping the incomplete tail, so epoch *i* = expert line *i*. **A recording lasting
+a whole number of 30-s epochs loses its last, complete, epoch** (found on 2026-11-23, the synthetic nights last exactly
+480 epochs): gssc 0.0.9's `prepare_inst`, behind its own `mne_infer` too, takes the time of the last sample
+(`raw.times[-1]`, one sample short of the duration) as the duration and crops the "overshoot" of 29.996 s; one sample
+more and every epoch is kept. Not in gssc's documentation (its README never describes the cut, the `cut` docstring
+of `EEGInfer` only says that time left over is cut); reported on its repository as issue #9, *Missing epoch when night
+duration is divisible by 30s* (2025-08-25, still open and unanswered on 2026-11-23; `prepare_inst` unchanged on its
+main branch). Said, not corrected, so the stages stay gssc's own (and Score_EDF's): `score_night_gssc`
+adds a note (log, report, `_scoring_params.json`, tool 0) and that epoch stays out of the comparison (step 1 compares
+on the shorter hypnogram, Section 4 counts it in `n_not_predicted`).
 
 **Scoring mode** (`tb_mode`): **Several electrodes (consensus)** (default since 2026-10-27, Score_EDF's choice:
 one checkbox per electrode, `eeg_checks`, ticked by default = the electrodes GSSC was mostly trained on,
@@ -2003,8 +2144,32 @@ torch ≥ 2.6 refuses the weights packaged with gssc (`weights_only=True`):
 `TORCH_FORCE_NO_WEIGHTS_ONLY_LOAD=1` is set before the model loads.
 
 **Comparison**: on `min(n_gssc, n_expert)` epochs (⚠ when they differ by > 1), restricted to expert labels
-W/N1/N2/N3/R (MT, custom stages, `?` left out and counted). Accuracy, Cohen's κ, per-stage F1
-(`sklearn`), confusion matrix (rows expert, columns GSSC; colour (full ColorBrewer Greens, white to `#00441b`; text white on the dark cells, luma < 0.5) and bold text = % of the expert row, the main reading,
+W/N1/N2/N3/R (MT, custom stages, `?` left out and counted). **One function, `autoscoring_lib.agreement_metrics(cm)`**
+(`tools/plan_3bis_comparison.md`, 2026-11-23), gives every metric from the 5 × 5 confusion matrix (rows expert, columns
+model): the same for one night, for every night pooled (the summed matrix) and in Section 4. Accuracy, Cohen's κ and
+per-stage F1 (`sklearn`, `labels=` the five stages, on the pairs rebuilt from the counts: the values of the epochs
+themselves), **MCC** (`matthews_corrcoef`, multiclass), **macro-F1** and **balanced accuracy** (mean F1, mean recall,
+over the stages the **expert** scored), `n_stages_expert`, `single_stage_expert`. A stage the model gives but the expert
+never scored has an F1 of 0, a stage absent from both sides an empty F1.
+- **Macro-F1 over the expert's stages** (option A, user decision 2026-11-23). There is no standard: YASA's evaluation
+  code (its validation notebooks) and U-Sleep's (U-Time's `evaluate.py`) take the 5 stages with a stage absent from both
+  sides counted as F1 = 1 (sklearn's `zero_division=1`), YASA's second validation and U-Time's pooled `cm.py` the union
+  of expert and model stages (sklearn's default), deep-learning benchmarks a macro-F1 pooled over every test epoch. On
+  a night with the 5 stages the three agree; they part on naps and on nights without N3. Over the expert's stages the
+  value stays stable (on a nap of 40 epochs, one epoch given to a stage the expert never scored costs 0.29 with the
+  union, 0.008 when it goes to a stage the expert scored), every model of a night is averaged on the same stages, and it
+  follows the balanced accuracy's logic. The per-stage columns keep the other conventions computable.
+- **Single-stage nights**: the expert scored one stage only (strict rule, `n_stages_expert == 1`; a nap where the
+  participant stays awake). κ is then 0 (undefined when the model gives that stage everywhere) and MCC 0 by construction,
+  whatever the model; accuracy, balanced accuracy and macro-F1 all give the share of epochs given the expert's stage. Such
+  a night is flagged (the column, a ⚠ log line, a note in its report and in tool 0's table), never left out of its own
+  table. The literature meets the same wall on 40-min MWT recordings (Malafeev et al. 2021, *Front. Neurosci.*: no
+  per-patient kappa, a pooled one only). The Section 1 option `cb_single_stage_out` (*Leave single-stage nights out of
+  the kappa and MCC across nights*, ticked by default, under the expert suffix) acts only on what summarises several
+  nights: the per-participant figure of the database report and Section 4's kappa of each night. The pooled values keep
+  their epochs, and no per-night file changes (nothing to record, no Skip question).
+
+Confusion matrix (rows expert, columns GSSC; colour (full ColorBrewer Greens, white to `#00441b`; text white on the dark cells, luma < 0.5) and bold text = % of the expert row, the main reading,
 comparable across stages and nights; the epoch count in small type below, in parentheses, says how many
 epochs that % rests on).
 Measured on two real test nights with C3 (+ EOG L−R for 100): κ 0.71 (100) and 0.79 (731).
@@ -2046,7 +2211,10 @@ refuses an output suffix equal to the expert one):
   EEG/EOG used, EOG mode, reference, declared EOG, expert suffix, gssc/torch versions, device,
   `recording_start` (ISO or null), notes, date.
 - `reports_autoscoring_gssc/<subtree>/{id}_autoscoring_comparison.tsv` (one row: epoch counts,
-  `accuracy, kappa, f1_<stage>, mean_confidence, scoring_mode, eeg_used, eog_used, status`),
+  `accuracy, kappa, f1_<stage>, macro_f1, balanced_accuracy, mcc, n_stages_expert, single_stage_expert, mean_confidence,
+  scoring_mode, eeg_used, eog_used, status`; the five columns after `f1_R` added on 2026-11-23, absent from a night
+  compared before: `–` in the database tables, which say how many such nights there are and point to Section 4 or to
+  Skip unticked),
   `{id}_confusion.tsv` (long `file_id, expert, gssc, n`, removed when no comparison is possible) and
   `{id}_autoscoring_report.html` (parameters, hypnograms expert/GSSC (grey line, REM red at the line's width, as every tool),
   hypnodensity with the expert hypnogram as a black line over it (stage names on the right axis),
@@ -2057,8 +2225,12 @@ refuses an output suffix equal to the expert one):
   (`aasm_reference` / `custom` / `MT` / `other`)`, n_epochs, p_W … p_R` (mean hypnodensity)`,
   pct_gssc_W … pct_gssc_R`, `labels` (the raw labels grouped in `other`).
 - `reports_autoscoring_gssc/` root: `global_autoscoring_summary.tsv`, `global_confusion.tsv` (pooled),
-  `global_autoscoring_report.html` (pooled confusion matrix, κ / accuracy per participant, **every
-  participant's hypnodensity stacked** on one shared **clock-time** axis with its κ (see *Clock time*), the expert hypnogram drawn
+  `global_autoscoring_pooled.tsv` (one row: `n_nights`, the counts and every metric of the pooled confusion matrix),
+  `global_autoscoring_report.html` (the pooled metrics, pooled confusion matrix, κ / MCC / accuracy / balanced accuracy /
+  macro-F1 per participant with their medians (single-stage nights out of κ and MCC when `cb_single_stage_out` is
+  ticked, their number written under the figure), **every
+  participant's hypnodensity stacked** on one shared **clock-time** axis with its κ (`κ –, 1 stage` for a single-stage
+  night; see *Clock time*), the expert hypnogram drawn
   over it as a black step line when available (W on top, then R, N1, N2, N3; a gap where the expert label
   is outside W/N1/N2/N3/R), split into figures of `HYPNODENSITY_ROWS_PER_FIG` = 20 rows, read from the
   `_hypnodensity.tsv` files on disk; the pooled non-AASM section; then the table),
@@ -2442,7 +2614,7 @@ a value keeps it, `Missing value excludes` behaves, and the notebook executes cl
 ### 6. Quality overview (`6_quality_overview_voila.ipynb`)
 
 *(Stable tool: formerly “Phase 1” of the preprocessing pipeline.)*
-Implemented as `tools/6_quality_overview_voila.ipynb`. Produces one `mne.Report` HTML per participant. For each EEG channel: signal amplitude histogram with Savitzky-Golay smooth + peak detection, time series, metrics table, and a YASA hypnospectrogram (0.1–40 Hz bandpass applied per-channel just before plotting). Flags suspect channels for priority inspection. At the end of each run, generates `dataset_overview.html`: a single-page dataset-level summary with statistics and distribution plots per electrode, consumed by Phase 2 to identify channels to exclude.
+Implemented as `tools/6_quality_overview_voila.ipynb`. Produces one `mne.Report` HTML per participant. For each EEG channel: signal amplitude histogram with Savitzky-Golay smooth + peak detection, time series, metrics table, and a YASA hypnospectrogram (0.1–40 Hz bandpass applied per-channel just before plotting, zero phase like tool 7's since 2026-11-19: figures only). Flags suspect channels for priority inspection. At the end of each run, generates `dataset_overview.html`: a single-page dataset-level summary with statistics and distribution plots per electrode, consumed by Phase 2 to identify channels to exclude.
 
 **BrainVision recordings (2026-11-06)**: three rules, deduced from what the recording says and not from its format, so Curry will
 follow them without anything of its own.
@@ -2603,7 +2775,7 @@ clean channels of a BrainVision recording at 3.5-5.6 %, a quiet synthetic mastoi
 flagged (the 30-min flat segment 7.4 %, the dead channels 41-98 %, the quantization 99.6 %), the false alerts go to 0-1.7 %; on the
 local EDF, 4 channels at 3.7-7.1 % lose the flag (no still stretch of 50 ms). The clipped Fp1 of the synthetic chain goes from 4.9 to
 1.9 % and stays flagged by `bounds_pct` / `hist_extreme_pct`, so the `exclude` decision, and tool 7, are unchanged on the test chain
-(`test_pipeline.py::test_tool6_matches_golden_but_the_flat_rule`). A study processed before keeps its former values while Skip
+(checked against the former golden until it was taken again on 2026-11-19; the rule itself: `test_quality_lib.py`). A study processed before keeps its former values while Skip
 keeps its tables: untick Skip to reprocess it. `bounds_pct` = fraction of samples within 0.5 µV of the EDF physical_min/max header limits, reconstructed in µV by `get_phys_bounds_uV()`. **Unit handling**: MNE keeps `_raw_extras['physical_max']`/`['offsets']` in each channel's *native* EDF physical unit (µV, mV, V…), not in µV, whereas the signal is read as `raw.get_data() * 1e6` (always µV). `get_phys_bounds_uV()` therefore multiplies both bounds by `extras['units'][ch_idx] * 1e6` (MNE's native-unit→volts factor: `1e-6` µV, `1e-3` mV, `1.0` V) so the comparison is unit-consistent. This is essential for non-EEG channels: Compumedics EOG/EMG/ECG are declared in **mV** (e.g. `physical_max = 1.0 mV`), so without the conversion they are compared against a 1.0 µV bound (1000× too small) and `bounds_pct` flags ~98–100 % of a perfectly healthy signal. EEG channels (declared in µV) are unaffected. `hist_extreme_pct` = fraction of samples in the outermost histogram bins (computed on a **full-range** histogram, independent of the percentile-clipped histogram that feeds the Savitzky-Golay curve + peak detection, see *Distribution histogram (robust range for peak detection)* above). **Kurtosis is intentionally NOT used as a flagging criterion**: normal PSG EEG has physiologically high kurtosis (spindles, K-complexes produce values of 100–500), making it unreliable without per-subject normalization. `p99_abs_uV` and `p999_abs_uV` (99th and 99.9th percentile of |amplitude|) are recorded as informational metrics in `quality_summary.tsv` but are not currently used for flagging. They are useful for cross-channel and cross-dataset amplitude comparison.
 
 **`dataset_overview.html` (dataset-level summary)**: generated at the end of every run from the full cumulative `quality_summary.tsv` (reflects all participants processed to date, not just the current run) **minus the excluded participants** (exclusion registry): they stay in the TSV tables (`participant_excluded = True`) but are left out of every statistic and figure of the overview, whose header names them with their reason (`generate_dataset_overview(..., excluded=)`). Contains two levels:
@@ -2763,11 +2935,25 @@ The two tools then differ only in what follows:
 1. **Resampling**: `raw.resample(target_freq, npad='auto')`. Target frequency chosen by user. Applied **before** filtering. `raw.resample` already anti-aliases (FFT method), so resampling first introduces no aliasing. The order is chosen because filtering the already-downsampled signal runs on far fewer samples (faster), not to prevent aliasing (both steps are linear, so the order does not change the result). Step is skipped if checkbox is unchecked.
 2. **Re-referencing**, applied as specified in JSON config per participant: `'average'` → common average reference (over the good channels). `[list]` → subtract listed channel(s) then drop them (a deselected one is not used). Empty → no re-referencing. The bad (deselected) channels get the same reference signal subtracted (see above).
 3. **Notch filter** *(optional, **ON by default**)*: removes power-line noise via `raw.notch_filter(freqs=notch_freq_val)` using **MNE's default method** (FIR, `method=` is left unset). Single editable frequency (`cb_notch` / `txt_notch_freq`, default **50 Hz**). Applied **after re-referencing, before the bandpass** ("notch then band-pass" convention). **Fatal** on failure (like the bandpass step). Defaults ON because a power-line notch is the norm for most databases. Untick `cb_notch` to reproduce the former byte-identical no-notch output. The frequency box's initial visibility follows `cb_notch.value` (checkbox-revealed-widgets rule), so the pre-ticked box shows correctly.
-4. **Bandpass filter**: FIR zero-double-pass Hamming window, defaults `l_freq=0.1 Hz, h_freq=50 Hz`. Applied via `raw.filter(..., method='fir', phase='zero-double', fir_window='hamming', fir_design='firwin')`.
+4. **Bandpass filter**: FIR Hamming window applied once, zero phase (MNE's default), defaults `l_freq=0.1 Hz, h_freq=50 Hz`. Applied via `raw.filter(..., method='fir', phase=BANDPASS_PHASE, fir_window='hamming', fir_design='firwin')`, `preprocessing_lib.BANDPASS_PHASE = 'zero'`.
 
 Section 2.1 states each filter's method in a grey help line under it (band-pass: FIR, Hamming, `firwin`, automatic
-length, forward then backward; notch: FIR with MNE's `notch_filter` defaults, zero phase). The two phases differ
-(`zero-double` vs MNE's current default `zero`): see *Planned modules → Tool 7: band-pass phase*.
+length, applied once, zero phase; notch: FIR with MNE's `notch_filter` defaults, zero phase), and the report's parameter
+table names the phase.
+
+**The band-pass phase (changed on 2026-11-19)**: until then the band-pass ran with `phase='zero-double'` (forward then
+backward: the designed filter applied twice, its magnitude response squared), MNE's default before MNE 0.13. It now runs
+once with `phase='zero'`, like the notch and every other filter of the toolkit (tool 6's display filter followed, §6), with
+no choice on the page. At the defaults (0.1–50 Hz, 256 or 512 Hz, 33 s filter) the two differ by less than 0.1 dB between
+0.15 and 48 Hz (the 1/f fit band, the slow waves, every band of tool 9). Only the transition bands move: −23 dB instead
+of −45 dB at 0.02 Hz (a very slow drift is attenuated about half as much in dB: for a DC-coupled recording with a large
+drift, the lever is `l_freq`), −6 instead of −12 dB at 56 Hz, and an impulse response half as long (a shorter edge effect
+at the start and end of the night). Measured on the test chains (`refactor_check`): on the synthetic nights no flag
+changes and tool 9 moves by less than 0.03 dB; on the real nights 0.5–1.5 % more (epoch, channel) pairs are flagged,
+spread over the night and almost only added (gradient +10 to +30 pairs a night: more of 50–64 Hz passes; amplitude +8 to
++13: more infra-slow drift; 1/f +6 to +8), and tool 8bis rejects 2 to 4 more epochs a night. **A study processed before is reprocessed once**: its sidecars hold no phase (=
+`zero-double`), so with *Skip* ticked the run asks (answer *Reprocess*), and *Use the recorded settings* cannot put the
+former phase back (named: *no longer offered, reprocess these participants*). Tools 8bis and 9 see the fingerprint change.
 
 **Epoching (configurable epoch length)**: epochs are created with `mne.make_fixed_length_epochs(raw, duration=epoch_sec)`. `epoch_sec` is user-selectable via a Section-2 **`Epoch length`** dropdown (`dd_epoch_len`) offering the **divisors of 30 ≥ 5 s** (`30 (classic, default) / 15 / 10 / 6 / 5`) so the classic 30 s scored epoch re-cuts into a whole number of sub-epochs and the 4 s Welch window used by the 1/f fit still fits. The hypnogram is scored at 30 s (one label per 30 s epoch): the 30 s length validation/trim against the recording is **unchanged**, then each 30 s label is **expanded** to fill its sub-epochs (`hypno_sub = np.repeat(expert_hypno, epoch_factor)` with `epoch_factor = 30 // epoch_sec`) so each sub-epoch simply inherits its parent 30 s stage (no re-scoring, no interpolation). All flagging/summary/plot code keys on `hypno_epochs`/`n_epochs` generically, so it adapts automatically. The Welch window is `n_per_seg = int(min(4, epoch_sec) * sf)` (byte-identical to `4·sf` for every allowed size). Amplitude p-p thresholds stay the **same absolute µV** across sizes (artefact p-p does not scale with window length). Default 30 s keeps every output byte-identical to the pre-feature tool. Sleep stage assigned to each epoch from the (expanded) hypnogram. Epochs at the tail beyond the hypnogram length are discarded.
 
@@ -2903,7 +3089,8 @@ the editor, except for a participant modified in this session (`start_channels`)
 (`7_manual` + suffix) belongs to the run: one that holds for every run goes in tool 5bis.
 
 **Skip and the settings (2026-11-06, *Cross-cutting → Skip + cumulative-merge*)**: `preprocessing_lib.settings_differences(sidecar,
-current)` compares the sidecar with the page: `epoch_length_s` (absent = 30), `resample` and `filter` (the values asked for),
+current)` compares the sidecar with the page: `epoch_length_s` (absent = 30), `resample` and `filter` (the values asked for,
+the band-pass with its phase: absent = `zero-double`, see *The band-pass phase* above),
 `notch` and `psd_smoothing` (absent = off: they did not exist), the methods (`methods_run` without `event`, which varies with
 each file's annotations: the events are compared through `event_rejection`), the thresholds only if their method ran on both
 sides (the 1/f ones, the fit range and the smoothing with the 1/f method; amplitude: only the stages both sides know, a custom
@@ -2923,7 +3110,7 @@ chosen only (a run `_v2` raised a false alert), without those about to be made a
 
 **Outputs per participant**: the `.fif` + its params sidecar + the optional context companion under `<output_folder>/derivatives/preproc_epo/<edf_subtree>/` (a **sibling of the `rejection_manual/`** decision tables written by tool 8 and **`rejection_auto/`** written by tool 8bis, so the epochs and their decisions sit side by side under `derivatives/`). The per-file TSV/HTML reports under `<output_folder>/reports_preproc/<edf_subtree>/`, **both mirror the EDF subfolder tree** (as `6_quality_overview` does for `reports_quality_overview/<edf_subtree>/`, an EDF sitting in the data-folder root has `<edf_subtree> == '.'` so its reports collapse back to the flat root, keeping subfolder-less datasets byte-identical to the pre-mirror tool). The skip-checks and the global-table rebuild therefore search **recursively** (`reports_dir.rglob(...)`), so a report written in a subfolder is still found. When a file previously processed by the old **flat** layout is reprocessed into its subfolder, tool 7 first deletes any stale **root-level** copies of that file_id's three report files (only when `<edf_subtree> != '.'`) so the globbed globals never double-count it:
 - `{file_id}_all-epo.fif`, all epochs **and every montage channel** (the deselected ones included, listed in `info['bads']`, never flagged) with `epochs.metadata` DataFrame (columns: `epoch_idx`, `stage`, `reject_flag`, `reject_method`, `flag_amplitude`, `flag_flat`, `flag_gradient`, `flag_1f_error`, `flag_1f_r2`, plus `flag_event` **when event flagging ran**, and one `evt_<canonical>` bool per canonical event type **when event flagging ran**, a per-epoch flag naming *which* event type flagged the epoch, since `flag_event` is only the OR, read by **tool 8**'s per-epoch inspector to show the culprit event(s)). The `flag_<method>` columns are **per-epoch "any channel" booleans** (the naive epoch-level decision, read by tool 8). The full per-(epoch, channel) mask **is** now persisted separately, in `{file_id}_epoch_channel_rejection.tsv` (below). The per-epoch/per-stage TSVs and `global_rejection_by_stage.tsv` gain the matching `flag_event` / `event` entries the same way: additively, so event-free runs stay byte-compatible with earlier outputs.
-- `{file_id}_preprocessing_params.json`: `channels` (the flagged ones) + the additive `bad_channels` (deselected: in the `.fif` marked bad, never flagged) + the resampling / notch / bandpass filter settings (the notch as an additive `notch: {applied, freq_hz}` key, provenance only) + the additive `epoch_length_s` (the selected epoch length, **30 assumed when absent**, so older sidecars stay compatible) + the per-stage rejection thresholds actually used (amplitude p-p per stage, flat, gradient, 1/f MAE/R²) + `methods_run` + the optional additive `psd_smoothing` block (see above, omitted-safe on older sidecars) + the additive `manual_events`, `reference` (tool 2's `ref_channels`) and `hypnogram_file`, for the Skip check. Read back by **tool 8** (QC of rejected epochs) to draw threshold reference lines, recompute per-channel margins, label the epoch length (`qc_rejected_epochs_lib.load_params → info['epoch_length_s']`), and honour the PSD smoothing when recomputing PSDs (`info['psd_smoothing']`). Written non-fatally.
+- `{file_id}_preprocessing_params.json`: `channels` (the flagged ones) + the additive `bad_channels` (deselected: in the `.fif` marked bad, never flagged) + the resampling / notch / bandpass filter settings (the notch as an additive `notch: {applied, freq_hz}` key, provenance only; the band-pass's additive `filter.phase`, `zero` since 2026-11-19, absent = `zero-double`) + the additive `epoch_length_s` (the selected epoch length, **30 assumed when absent**, so older sidecars stay compatible) + the per-stage rejection thresholds actually used (amplitude p-p per stage, flat, gradient, 1/f MAE/R²) + `methods_run` + the optional additive `psd_smoothing` block (see above, omitted-safe on older sidecars) + the additive `manual_events`, `reference` (tool 2's `ref_channels`) and `hypnogram_file`, for the Skip check. Read back by **tool 8** (QC of rejected epochs) to draw threshold reference lines, recompute per-channel margins, label the epoch length (`qc_rejected_epochs_lib.load_params → info['epoch_length_s']`), and honour the PSD smoothing when recomputing PSDs (`info['psd_smoothing']`). Written non-fatally.
 
   *Why `preproc_epo`*: these epochs are **preprocessed** (re-referenced, notch, band-pass, optional resampling) and all kept: nothing is rejected in them (the decisions are tables in `rejection_manual/` / `rejection_auto/`). The folder was called `raw_epo/` ("before rejection") when tools 8/8bis still wrote `clean-epo.fif` files; the reports folder was `reports_preprocessing/`.
 
@@ -3428,9 +3615,10 @@ black line, instead of pale boxes. The hypnogram of the clean epochs is the tool
 exercise the heterogeneous-channel path, with 73's sidecar deliberately absent): 3 participants in ~33 s,
 exponent N3 2.72 > N2 2.29 > R 2.25 > W 0.80 and a sigma fold-change of ~6 over the 1/f floor in N2, i.e.
 the expected physiology. That fixture predates the decision tables (it holds `clean_epo_auto`); the current
-input layout is covered by the test suite (*How to run → Tests*), whose central check is that, on the kept
-epochs of the kept channels, every per-file and database table equals what the former clean-epo route
-produced (thirds excepted), and that *Re-aggregate only* after a decision change equals a full run.
+input layout is covered by the test suite (*How to run → Tests*): every table against the golden, and *Re-aggregate
+only* after a decision change equal to a full run. Its central check of the exclusion refactor (on the kept epochs of
+the kept channels, every per-file and database table equal to what the former clean-epo route produced, thirds excepted)
+retired with the former golden on 2026-11-19, once proven (git history).
 
 ## Recording formats
 
@@ -3493,24 +3681,39 @@ Modules still in development. The quality-overview (6), preprocessing (7) and QC
 What can silently give a wrong result comes first, then what forces a full reprocess, then the features. Each item is
 a section below. Update this list when an item is done.
 
-1. **Next: *Tool 7: band-pass phase* and *Lighter conda environments*** (the version refresh goes with the split,
-   decided on 2026-10-29), together, between two studies: every output is reprocessed. Before item 2: slow waves sit
-   near the low cut-off of the band-pass.
-2. *Slow-wave and spindle extraction*. The licence waits for it.
-3. Features: *Database organisation inferred by tool 1*, *Tool 6: keep a raw run and a prepared run side by side*,
+1. *Slow-wave and spindle extraction*. The licence waits for it.
+2. Features: *Database organisation inferred by tool 1*, *Tool 6: keep a raw run and a prepared run side by side*,
    *Tool 2: richer context channels*, *Tool 3bis: follow-ups of the Score_EDF port*, *Standalone comparison of
-   hypnograms*, *Simulated recording generator in tool 0*, *Task triggers*. *Recordings exported with derived channels*
+   hypnograms*, *Methods text for a paper*, *Simulated recording generator in tool 0*, *Task triggers*. *Recordings exported with derived channels*
    before the first study that has some (one case is silently wrong in tool 3bis).
-4. Between larger jobs: *English everywhere*, *Tools 1 to 4: one code cell per section*, *Voila pages: a Stop button and
-   numbered report folders*.
-5. After the extraction: *Clean-up before distribution*, *Distribution and licensing*, the installation tutorial.
-6. Long term: *Tool 0: interactive canvas for the epoch explorer*, *Event-epoch visualizer (Phase B)*, tool 8's
+3. Between larger jobs: *Flat epochs in the comparison with the median channel*, *English everywhere*, *Tools 1 to 4:
+   one code cell per section*, *Voila pages: a Stop button and numbered report folders*.
+4. After the extraction: *Clean-up before distribution*, *Distribution and licensing*, the installation tutorial.
+5. Long term: *Tool 0: interactive canvas for the epoch explorer*, *Event-epoch visualizer (Phase B)*, tool 8's
    per-(epoch, channel) override. (*EDF reading of tools 2, 4, 6, 7 through `edf_io_lib`* and *A Curry twin of tool 0*
    were closed by phase 6 of `tools/plan_brainvision.md`: *Recording formats*. The *Code review of 2026-10-24* was
    closed on 2026-11-19: #10 in *Cross-cutting → Event sourcing*, #20 in §5, #8 / #16 = tool 4 reads its text export
-   with `Path.read_bytes()`, #11 needed no change.)
+   with `Path.read_bytes()`, #11 needed no change. *Tool 7: band-pass phase* and *Lighter conda environments* were
+   closed on 2026-11-20 by `tools/plan_bandpass_and_envs.md`: §7 *The band-pass phase* and *Conda environment*. The
+   item *Comparison outputs in the SomnoLens layout* of *Tool 3bis: follow-ups* was closed on 2026-11-23 by
+   `tools/plan_3bis_comparison.md`: §3bis *Section 4's outputs in the SomnoLens layout*.)
 
 Still to check by hand, not covered by the tests: a real participant table through tools 5 and 9.
+
+### Flat epochs in the comparison with the median channel (TODO, asked on 2026-11-20)
+
+Found with the version refresh (phase 2 of `tools/plan_bandpass_and_envs.md`): at the flat end of a real night (the
+signal at numerical zero, the median channel's standard deviation 4e-20 µV), `channel_check_lib.compared_with_median`
+divides one rounding noise by another. `noisy_vs_median_pct` / `flat_vs_median_pct` then count epochs that hold no
+signal, and the count moves with the numerical libraries (Fp1 of the test night 731: 0 % with MKL, 0.54 % with
+OpenBLAS). Up to 12 channels it is a comparison column only, but above 12 tool 6 flags a channel from it
+(`quality_lib.comparison_flag`): a long flat stretch (electrodes removed before the recording stops) could flag channels.
+Planned: an epoch whose median channel is under a floor far below any EEG (to choose, e.g. 1e-3 µV) is left out of the
+comparison, the shares counted over the epochs that hold a signal. Both callers follow (tool 6's `compare_channels`, the
+channel checks of tool 3bis). Tool 9 has the same noise on these epochs (power near -270 dB, a 1/f fit of rounding
+noise), but they are flagged and rejected (all of them on the test nights), so nothing reaches its aggregates: writing
+NaN there is a separate choice.
+Changes tool 6's outputs on the recordings with a flat stretch (reprocess them).
 
 ### Interpolation of the dropped channels (TODO, asked on 2026-11-17)
 
@@ -3544,7 +3747,7 @@ derivations, the models' scoring on bipolar chains.
 Two changes to every page, taken out of the BrainVision plan (phases 6 bis and 6 ter) on 2026-11-19. Both touch `ui_lib` or
 the output paths of every tool, so the whole test chain runs again (and the goldens are regenerated for the second).
 - **Stop button beside *Run***: Voila handles no click while a callback runs. `jupyter-ui-poll` (conda-forge, works with
-  ipykernel 6; to add to `environment.yml`) would read a click on *Stop* at each progress step. The participant in progress
+  ipykernel 6; to add to the environment files) would read a click on *Stop* at each progress step. The participant in progress
   is abandoned and *Skip* picks it up again (the skip gate already needs both the data and the report). The page's settings
   are greyed during the run, so none changes on the way. Built once in `ui_lib` (the button, a check at each progress call,
   disable then restore the page's widgets), then added to the pages with a long run (1, 3bis, 5, 6, 7, 8bis, 9, tool 0's
@@ -3604,15 +3807,6 @@ empty, the inspection goes on); `test_tool1_reads_the_groups_from_folders_or_tab
 Still to audit: one folder per participant (`sub-01/`, `sub-02/`…) is read as one group per folder.
 this part could also checks the companion files (hypno, events etc), and gives warning if some are missing
 
-### Tool 7: band-pass phase (TODO, to decide)
-
-Tool 7's band-pass runs with `phase='zero-double'` (forward then backward: the designed filter is applied twice,
-so its magnitude response is squared and its attenuation doubled), MNE's default before MNE 0.13. Its notch uses
-MNE's current default, `phase='zero'` (one zero-phase pass of a filter designed for it). Decide whether the
-band-pass should switch to `zero` (user request, 2026-11-02, to decide later). It would change every tool-7 output
-(and so the outputs of tools 8, 8bis and 9): an intended-change golden, a reprocess note, tool 0's step 6 kept in
-line. Until then Section 2.1 states each filter's method in grey (§7).
-
 ### Tools 1 to 4: one code cell per section (TODO, maintenance)
 
 Tools 1 (1,834 lines), 2 (2,026), 3 (1,692) and 4 (884) hold their whole page in a **single code cell**: the
@@ -3661,7 +3855,7 @@ the montage without a redraw, and **annotations drawn with the mouse** (written 
 `{file_id}_manual_events.tsv` beside the recording). Candidate backends: `ipympl` (least change from the current
 matplotlib figures; click events and pan / zoom; occasionally flaky under Voila, harder to snapshot) or Plotly
 (fully interactive, shape drawing; heavy, slower first render on dense montages). Constraints: usable under Voila,
-navigation as fast as now (keep the static PNG as a fallback toggle), the backend added to `environment.yml`.
+navigation as fast as now (keep the static PNG as a fallback toggle), the backend added to the environment files.
 
 ### Slow-wave and spindle extraction (TODO)
 
@@ -3672,64 +3866,6 @@ design (inputs, detection method, outputs). It comes before the distribution: th
 Before designing it, discuss feature by feature how it uses tool 7's preprocessing (filters, re-reference, resampling,
 epoching, flagging) or does without it: a detection may have its own signal needs, so do not assume it starts from
 `_all-epo.fif` as tool 9 does (user request, 2026-11-05).
-
-### Lighter conda environments + a dedicated autoscoring environment (TODO)
-
-Goal: a user installs the **strict minimum**, so setup stays fast (the current `somnolens` env weighs ~4.7 GB).
-How it is offered to users: *Light / full install* below, and *Distribution and licensing*. Audit of 2026-10-19
-(every package of `environment.yml` checked against the imports of `tools/`, `tools_curry/`, `tests/`):
-- **`mne` → `mne-base`**: conda-forge's `mne` is a metapackage that pulls the 3D/GUI stack (PySide6/Qt6, VTK,
-  PyVista, trame, dipy, nilearn, openmeeg), used by no tool. `mne-base` is the same library without it, and YASA
-  only depends on `mne-base`. The packages the tools need that `mne` brought (`edfio`, `statsmodels`, `h5py`
-  for the autoscoring) must then be listed explicitly (`edfio` and `statsmodels` already are).
-- **Developer-only packages out of the user env**: `spyder` (IDE, pulls PyQt5 + QtWebEngine), `pytest` (tests)
-  and `notebook` (pulls JupyterLab; Voila runs without it) → a separate `environment-dev.yml` (user env + these).
-- **A dedicated autoscoring environment** (user decision, 2026-10-19): `pytorch-cpu` and `gssc` leave the user
-  env for an autoscoring env, which also holds SleepFM's packages (`h5py`, `einops`, `loguru`, `pyyaml`; its model
-  is downloaded by tool 3bis itself, `sleepfm_lib`, 2026-10-27). Tool 3bis then runs from that env, and its "GSSC
-  missing" message must say so. Today's env, `autoscore`, is python 3.10 / numpy 1.26 / torch 2.5.1 (Score_EDF's
-  versions; `Score_EDF/environment_autoscore_debugyn.yml`, + `chardet`), the user env python 3.12 / numpy 2.2 /
-  torch 2.8. Tool 3bis no longer needs torch < 2.6 (`weights_only=False` in `sleepfm_lib`,
-  `TORCH_FORCE_NO_WEIGHTS_ONLY_LOAD=1` for GSSC), and SleepFM and GSSC give the same results under python 3.12 /
-  numpy 2.2 / torch 2.8, YASA too with `antropy<0.2` (checked 2026-10-27 / 29, §3bis *Same models in the user
-  environment*): the autoscoring env can take the user env's versions.
-  Until the split, `somnolens` holds the autoscoring packages too (user decision 2026-10-27: `einops` added).
-- **Light / full install** (open question, to settle before rewriting the installation tutorial
-  `tutorials/1_install_python.docx`). **Light** = every tool but the autoscoring: the user env without
-  `pytorch-cpu`, `gssc` and SleepFM's packages, `yasa` kept (small, no torch). To decide: is YASA alone enough to
-  offer tool 3bis in the light install? **Full** = light + `pytorch-cpu` + `gssc` + SleepFM's packages (tool 3bis);
-  whether it is one env or the light env + the autoscoring env above is part of the decision. `python/Score_EDF/`
-  is not needed for it (ported into 3bis, 2026-10-27), and SleepFM's model (~29 MB) is downloaded at first use, so
-  most of the weight is `pytorch-cpu`. The messages of `autoscoring_lib.py` when a model's packages are missing
-  (`GSSC_MSG`, `YASA_MSG`, `SLEEPFM_DEPS_MSG`) must then point to the full install.
-- **Version refresh, done with the split** (user decision, 2026-10-29). The rule, for every package: **versions
-  pinned** in the environment files (as today), **refreshed deliberately**, one or two times a year or when a need
-  arises, a few weeks after a release (not the day it comes out), each refresh validated by the full test suite,
-  its intended output changes listed in `INTENDED_CHANGES` and noted here with the date. A study is processed
-  from start to end with one version: refresh between studies, never in the middle. Not "always the latest"
-  (results can change silently, as antropy 0.2 moves YASA's stages, and one update drags others along), nor frozen
-  for good (old versions vanish from the channels, as the `pytorch` one did, and a late jump of several versions
-  costs more than following them). For this first refresh, every pin moves to its current stable version; known
-  points for **YASA 0.8** (0.8.1 of 2026-10-25, read from its wheel, not installed):
-  - `SleepStaging.predict_proba()` is removed: `score_night_yasa` takes `predict().proba` (about 3 lines; the new
-    column names `WAKE` / `REM` are already renamed to `W` / `R`).
-  - It requires **pandas ≥ 2.3** (pinned 2.2 today: every tool, hence the full test suite) and `pooch`; numpy,
-    mne, lightgbm already fit.
-  - Same classifiers (byte-identical `_0.5.0` files), but the feature computation was rewritten (all channels
-    filtered at once, a new channel pick): measure the stages on night 100 as for YASA 0.7 (§3bis), and rerun the
-    YASA part of `tests/score_edf_equivalence.py`.
-  - `from yasa.plotting import spectrogram_lspopt` (`quality_lib`, every hypnospectrogram) still works, but it
-    is a re-export of the `lspopt` package: import it from `lspopt` directly (the same function, outputs
-    unchanged).
-  - Keep `antropy<0.2` (YASA 0.8.1 accepts antropy ≥ 0.1.9) and add `antropy_version` to YASA's
-    `_scoring_params.json`.
-- **Windows gotchas found on the way**: the `pytorch` conda channel is retired (HTTP 403): use conda-forge's
-  `pytorch`. conda-forge's `libtorch 2.5.1` fails to load (`DLL load failed ... torch._C`) with
-  `intel-openmp 2024.2`, which no longer exports the `_vcomp_*` functions its `fbgemm.dll` imports: pin
-  `intel-openmp=2024.1`. When an env's `Scripts` folder is on the user PATH (here `somnolens\Scripts`), a
-  bare `voila` runs that env whatever env the user meant: launchers must call the env's own Voila.
-- **Validation**: build an env from the slimmed file (plus `pytest`) and run the test suite in it (full level), plus a launch of
-  every Voila tool; then update *Conda environment* above and the installation tutorial.
 
 ### Distribution and licensing (TODO)
 
@@ -3755,7 +3891,7 @@ history). Nothing is decided yet unless stated.
   - **SleepFM (tool 3bis)**: code and weights under **CC BY-NC 4.0** (non-commercial use). SomnoLens does not
     redistribute them (downloaded from the official repository at first use, `sleepfm_lib`): say so in tool
     3bis's documentation.
-  - Still to check: the other packages of the full install (pytorch, `einops`, `loguru`, `pyyaml`), and
+  - Still to check: the other packages of the full install (torch, `einops`, `loguru`, `pyyaml`), and
     Score_EDF's if its standalone version is distributed.
 - **How to distribute** (today the tools live inside the team's `Dream-Toolkit` repository, which is neither a
   usual nor an intuitive way to get them). Options to compare:
@@ -3803,7 +3939,7 @@ first release, whatever the distribution route; re-run the tests of every tool t
   ssl_verify no`); use `conda config --set ssl_verify truststore` (the system's certificates, what works on ICM's
   network) and put network-specific advice in a clearly marked "behind an institutional proxy" note. It also cites
   an internal IT document (DSI `migration-to-miniforge.pdf`) and an author / date line. The light / full install
-  goes in at the same time (*Lighter conda environments*).
+  goes in at the same time (*Conda environment*: its three commands).
 - **A `LICENSE` file** in the folder (today only on GitHub), once the licence is settled (*Distribution and
   licensing*).
 - **Only what git tracks is distributed**: the folder also holds untracked files that must never leave the lab
@@ -3813,19 +3949,12 @@ first release, whatever the distribution route; re-run the tests of every tool t
   synthetic goldens, scripts, plans, `README.docx`), but 12 commits add or remove a personal path (mostly the
   archives) and the 55 notebooks deleted since may hold old saved outputs. Scan it (`git log -G` for paths and
   participant identifiers) before publishing; rewrite it (`git filter-repo`) or publish without history if needed.
-- Covered elsewhere: French messages (*English everywhere*), developer-only packages in `environment.yml`
-  (*Lighter conda environments*), the look of the tools (done: *Cross-cutting → Voila page conventions*).
+- Covered elsewhere: French messages (*English everywhere*); done: developer-only packages out of `environment.yml`
+  (*Conda environment*, 2026-11-20), the look of the tools (*Cross-cutting → Voila page conventions*).
 
 ### Tool 3bis: follow-ups of the Score_EDF port (TODO)
 
 Left out of the port of 2026-10-27 (`tools/plan_score_edf_fixes.md`, deleted once done: see the git history).
-- **Comparison outputs in the SomnoLens layout.** Section 4 keeps Score_EDF's output layout on purpose (user
-  decision, plan Q6): `<study>/autoscore_outputs/` with `epochs_all_stagers.csv`, `agreement_summary.csv`,
-  `channels_used.csv` and PNG figures, Score_EDF's stage names (Wake, REM) and its empty `tet` column (a measure
-  of the nap study it came from). To harmonise: data in `derivatives/autoscoring_comparison/` and an HTML report in
-  `reports_autoscoring_comparison/` (TSV, the toolkit's stage names W / R, per-night tables globbed for the
-  database ones), the recalibration parameters saved (today only in the log), and the "Skip already processed" /
-  cumulative logic of the other tools.
 - **Speed** (plan 3.1, 3.5, 3.6; measured on night 100: 89 s for the three models, reading is not the bottleneck):
   one EDF read per night shared by the models (today one read of its own channels per model); torch's thread count
   and SleepFM encoder batches > 1 (memory to watch); YASA scored in parallel across nights.
@@ -3874,8 +4003,25 @@ with its own minimal environment, like *Standalone Score_EDF* above; without a s
 in the names registry); which label formats (tool-3 labels only, or raw exports through a mapping) and how MT,
 custom and unscored epochs count; hypnograms of different lengths or start times; which hypnogram the rescoring
 starts from; whether the rescorer sees who gave which stage (blind adjudication or not); several nights (database
-tables and figures, the group statistics); whether Section 4 of tool 3bis ends up sharing these metrics when its
-outputs are harmonised.
+tables and figures, the group statistics); whether it shares tool 3bis's metrics (since 2026-11-23 Section 4 has
+accuracy, κ, MCC, F1 per stage, macro-F1 and balanced accuracy per night and pooled, from `autoscoring_lib.agreement_metrics`,
+always against one reference hypnogram).
+
+### Methods text for a paper (TODO, asked on 2026-11-23)
+
+User request, during `tools/plan_3bis_comparison.md`. A notebook (or another form, to think about) that gathers, for a
+study, the essential points to write in a paper's methods section, from what the tools already record: the params
+sidecars and `_scoring_params.json` (filters and their phase, notch, epoch length, rejection methods and thresholds,
+reference, models, their versions and channels), the decision rules (tool 8bis's channel and epoch percentages, tool 8's
+manual review), the participant exclusions and their reasons (`participant_exclusions.tsv`), the counts (participants,
+nights, epochs kept and rejected per stage), tool 5's conventions (lights source, MT and custom stages), tool 9's spectral
+settings (PSD method, bands, specparam model), tool 3bis's agreement conventions (macro-F1 over the stages the expert
+scored, single-stage nights, pooled and per-night metrics) and the package versions of the environment, with the
+references to cite.
+
+To decide: which tools and which values; a list of values or drafted sentences to adapt; one page for the whole study or
+a section in each tool's database report; a run whose settings differ between participants (say it, never average it);
+the output format (Markdown or HTML, in English).
 
 ### Event-based epoch rejection (Phase A): **implemented in tool 7**
 

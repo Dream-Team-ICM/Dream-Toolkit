@@ -6,7 +6,8 @@ human outputs and are not compared. Absolute paths of the run folder are replace
 runs in different folders compare equal.
 
 The golden snapshot (tests/golden/) is taken once on the code BEFORE a change: comparing a later run
-to it proves the change left the existing numbers alone.
+to it proves the change left the existing numbers alone. take() replaces the whole folder: the real golden is
+not versioned, so copy it aside before regenerating it.
 """
 import gzip
 import io
@@ -20,6 +21,11 @@ import pandas as pd
 
 # Columns / JSON keys that legitimately differ between two identical runs.
 VOLATILE = {'validated_at', 'decided_at', 'reviewed_at', 'created_at', 'processed_at'}
+# Tool 9's power minus the aperiodic fit, in dB: a difference of two nearly equal numbers (often ~0.01 dB), so the
+# floating-point noise of the specparam fit, which changes with the BLAS library (OpenBLAS / MKL), exceeds the relative
+# tolerance. 1e-5 dB is far below anything meaningful. Matched with 'in': the per-stage tables aggregate it as e.g.
+# power_ap_removed_db_from_log_median.
+AP_REMOVED_ATOL_DB = 1e-5
 INPUT_CONFIG = {'remap_reref_persubject.json', 'event_remap.json'}
 
 
@@ -106,7 +112,8 @@ def compare_tables(new, old, rtol=1e-6, atol=1e-9, ignore=()):
         a, b = old[c], new[c]
         if pd.api.types.is_numeric_dtype(a) and pd.api.types.is_numeric_dtype(b):
             av, bv = a.to_numpy(dtype=float), b.to_numpy(dtype=float)
-            bad = ~np.isclose(av, bv, rtol=rtol, atol=atol, equal_nan=True)
+            column_atol = max(atol, AP_REMOVED_ATOL_DB) if '_ap_removed_db' in c else atol
+            bad = ~np.isclose(av, bv, rtol=rtol, atol=column_atol, equal_nan=True)
         else:
             bad = (a.fillna('<NA>').astype(str).to_numpy() != b.fillna('<NA>').astype(str).to_numpy())
         if bad.any():

@@ -75,11 +75,14 @@ def run_tool3(data):
 
 def run_tool3bis(data):
     """Score every participant with the defaults (GSSC alone, consensus over C3/C4/F3/F4 present: C3 on the test
-    datasets, EOG L-R when declared, contralateral mastoid reference)."""
+    datasets, EOG L-R when declared, contralateral mastoid reference), then compare them with the expert hypnogram
+    (Section 4, every night)."""
     with NotebookSession(T3BIS) as nb:
         nb.pick('fc_data', data)
         nb.click('btn_scan')
         nb.click('btn_run')
+        nb.click('btn_compare_find')
+        nb.click('btn_compare')
         return nb.widget_text()
 
 

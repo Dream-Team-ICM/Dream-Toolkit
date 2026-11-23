@@ -15,7 +15,7 @@ SIDECAR = {
     'file_id': 'p', 'sfreq_hz': 256.0, 'epoch_length_s': 30, 'channels': ['C3', 'O1'], 'bad_channels': ['Fp1'],
     'custom_stages': [], 'methods_run': ['amplitude', 'gradient', 'flat', '1f_r2', '1f_error', 'event'],
     'resample': {'applied': False, 'target_freq_hz': None},
-    'filter': {'applied': True, 'l_freq_hz': 0.1, 'h_freq_hz': 50.0},
+    'filter': {'applied': True, 'l_freq_hz': 0.1, 'h_freq_hz': 50.0, 'phase': 'zero'},
     'notch': {'applied': True, 'freq_hz': 50.0},
     'rejection_thresholds': {'amplitude_ptp_uV': {'W': 250.0, 'N2': 300.0}, 'flat_ptp_uV': 1.0,
                              'gradient_uV_per_sample': 100.0, '1f_mae_max': 0.15, '1f_r2_min': 0.95,
@@ -64,8 +64,10 @@ def test_the_event_method_counts_only_through_the_types_asked_for():
 @pytest.mark.parametrize('changes, row', [
     ({'epoch_length_s': 10}, ('epoch length', '30 s', '10 s')),
     ({'resample': {'applied': True, 'target_freq_hz': 128.0}}, ('resampling', 'off', '128 Hz')),
-    ({'filter': {'applied': False, 'l_freq_hz': None, 'h_freq_hz': None}}, ('band-pass filter', '0.1-50 Hz', 'off')),
-    ({'filter': {'applied': True, 'l_freq_hz': 0.3, 'h_freq_hz': 50.0}}, ('band-pass filter', '0.1-50 Hz', '0.3-50 Hz')),
+    ({'filter': {'applied': False, 'l_freq_hz': None, 'h_freq_hz': None, 'phase': None}},
+     ('band-pass filter', '0.1-50 Hz, zero', 'off')),
+    ({'filter': {'applied': True, 'l_freq_hz': 0.3, 'h_freq_hz': 50.0, 'phase': 'zero'}},
+     ('band-pass filter', '0.1-50 Hz, zero', '0.3-50 Hz, zero')),
     ({'notch': {'applied': False, 'freq_hz': None}}, ('notch', '50 Hz', 'off')),
     ({'manual_events': True}, ('manual annotations', 'off', 'on')),
     ({'channels': ['C3']}, ('channels kept', 'C3, O1', 'C3')),
@@ -123,15 +125,52 @@ def test_the_psd_smoothing_in_words():
 
 
 def test_an_older_sidecar_compares_what_it_holds():
-    old = {key: SIDECAR[key] for key in ('file_id', 'channels', 'methods_run', 'resample', 'filter', 'rejection_thresholds')}
-    # Not held and did not exist: absent = off, and the epochs were 30 s long.
+    old = {key: SIDECAR[key] for key in ('file_id', 'channels', 'methods_run', 'resample', 'rejection_thresholds')}
+    old['filter'] = {'applied': True, 'l_freq_hz': 0.1, 'h_freq_hz': 50.0}
+    # Not held and did not exist: absent = off, the epochs were 30 s long and the band-pass was applied twice.
     assert PL.settings_differences(old, copy.deepcopy(CURRENT)) == [
+        ('band-pass filter', '0.1-50 Hz, zero-double', '0.1-50 Hz, zero'),
         ('notch', 'off', '50 Hz'), ('PSD smoothing', 'off', 'median 1 Hz + LOWESS 2 Hz')]
-    old_same = dict(old, notch=SIDECAR['notch'], psd_smoothing=SIDECAR['psd_smoothing'])
+    old_same = dict(old, filter=SIDECAR['filter'], notch=SIDECAR['notch'], psd_smoothing=SIDECAR['psd_smoothing'])
     # Not held, unknown: the events, the manual annotations, the reference and the hypnogram are not compared.
     assert PL.settings_differences(old_same, dict(copy.deepcopy(CURRENT), manual_events=True, reference=[],
                                                   hypnogram_file='other.txt',
                                                   event_rejection={'applied': False, 'event_types': []})) == []
+
+
+def test_the_band_pass_phase_is_compared():
+    # A sidecar without a phase was made before 2026-11-19: forward then backward.
+    old = dict(SIDECAR, filter={'applied': True, 'l_freq_hz': 0.1, 'h_freq_hz': 50.0})
+    assert PL.settings_differences(old, copy.deepcopy(CURRENT)) == [
+        ('band-pass filter', '0.1-50 Hz, zero-double', '0.1-50 Hz, zero')]
+    explicit = dict(SIDECAR, filter=dict(SIDECAR['filter'], phase='zero-double'))
+    assert PL.settings_differences(explicit, copy.deepcopy(CURRENT)) == [
+        ('band-pass filter', '0.1-50 Hz, zero-double', '0.1-50 Hz, zero')]
+    # No band-pass on either side: nothing to compare, whatever the phase.
+    off = {'applied': False, 'l_freq_hz': None, 'h_freq_hz': None}
+    assert PL.settings_differences(dict(SIDECAR, filter=off), dict(copy.deepcopy(CURRENT), filter=dict(off, phase=None))) == []
+
+
+def test_the_band_pass_is_applied_once_zero_phase():
+    """The intended change of 2026-11-19: tool 7's band-pass is MNE's zero-phase FIR, applied once (it was applied forward
+    then backward, 'zero-double'). Same signal as MNE's raw.filter with phase='zero', not the former one."""
+    import mne
+    import numpy as np
+    sf = 100.0
+    info = mne.create_info(['C3', 'O1'], sf, 'eeg')
+    signal = np.random.default_rng(1).normal(0, 2e-5, (2, int(120 * sf)))
+    raw = mne.io.RawArray(signal.copy(), info, verbose=False)
+    PL.preprocess_raw(raw, 'p', {'ref_channels': []}, False, None, False, None, True, 0.1, 40.0, warn=print)
+    assert PL.BANDPASS_PHASE == 'zero'
+
+    def mne_band_pass(phase):
+        expected = mne.io.RawArray(signal.copy(), info, verbose=False)
+        expected.filter(l_freq=0.1, h_freq=40.0, l_trans_bandwidth='auto', h_trans_bandwidth='auto', filter_length='auto',
+                        method='fir', phase=phase, fir_window='hamming', fir_design='firwin', verbose=False)
+        return expected.get_data()
+
+    assert np.array_equal(raw.get_data(), mne_band_pass('zero'))
+    assert not np.allclose(raw.get_data(), mne_band_pass('zero-double'), rtol=0, atol=1e-9)
 
 
 def test_the_channels_the_editor_starts_with():

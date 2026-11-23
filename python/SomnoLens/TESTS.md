@@ -60,7 +60,9 @@ Two things keep the runs short:
   shared by several tools runs the tests of every tool that uses it.
 - **The chain is not rerun when nothing changed.** The test run remembers which version of each tool produced
   the current results. If only tool 9 changed, tools 5 to 8 keep their results and only tool 9 is rerun (about
-  2 minutes instead of 4.5). A change to the test machinery itself reruns everything.
+  2 minutes instead of 4.5). A change to the test machinery itself reruns everything, and so does another Python
+  environment (another folder, another version of a package that computes the results, another library for numpy's
+  matrix computations): results made with other packages are never reused.
 
 At each change, the level to run is proposed with a recommendation, and you choose.
 
@@ -75,24 +77,32 @@ Adding a column or a file is allowed, so a new feature does not break the compar
 the existing numbers alone. Two runs of the chain on the same data and the same installation were checked to
 give byte-identical results, so any difference is real, not noise. Changing the math library underneath numpy
 (as when pytorch was installed for tool 3bis) can move the last digits of fitted values, which is why numbers
-are compared to within one part in a million.
+are compared to within one part in a million. The power left once tool 9 removes the 1/f background
+(`*_ap_removed_db`, per epoch and in the per-stage summaries such as `*_ap_removed_db_from_log_median`) is compared
+to within 0.00001 dB instead: it is the difference of two nearly equal numbers, often around 0.01 dB, so the last
+digits of the 1/f fit weigh heavily on it.
 
-When a change is *meant* to move numbers (for example the per-stage summary of tool 7 now leaves the
-excluded participants out), that output is listed as an intended change and gets its own dedicated test
-instead.
+When a change is *meant* to move numbers, that output is listed as an intended change and gets its own dedicated
+test instead, or, once the change is checked, the reference run is taken again.
 
-### 2. Tool 9 gives the same features as before the exclusion refactor
+### 2. The reference run was taken again on 2026-11-19
 
-Tool 9 used to read a cleaned copy of the epochs (only the kept ones). It now reads every epoch and joins
-the keep/reject decision of tool 8 / 8bis. The test takes the new results, keeps only the kept epochs of the
-kept channels, and compares them with the reference run made with the old method: every per-epoch table,
-every per-stage table and every database table must give **the same values**. This is the proof that the
-new way of working changed the organisation of the data, not the science.
+Until then the reference run dated from before the exclusion refactor, and three tests compared the new results with
+what the former method gave: tool 9 on the kept epochs of the kept channels against its former run on a cleaned copy
+of the epochs, the decision tables of tools 8 and 8bis against those cleaned copies, and tool 6 against its values
+before the 50-ms flat rule. They proved that the refactor changed the organisation of the data, not the science.
+When tool 7's band-pass became one zero-phase pass, the reference run was taken again with the current tools, and
+these three comparisons retired with the former run (they remain in the project's history). The rules they relied on
+are still checked: tool 8bis's decision rule on every epoch (`test_exclusion_tools.py`), the 50-ms flat rule
+(`test_quality_lib.py`), tool 9's every epoch and channel and its re-aggregation (`test_tool9.py`).
 
-(One deliberate difference is excluded from the comparison: the night thirds now span the whole night
-instead of the kept epochs only. And the power left once the 1/f background is removed (`*_ap_removed_db`,
-per epoch and in the per-stage summaries such as `*_ap_removed_db_from_log_median`) is compared to within 0.00001 dB rather than one part in a million: it is the difference of two nearly equal
-numbers, often around 0.01 dB, so the last digits of the 1/f fit weigh heavily on it.)
+On 2026-11-20 the package versions were refreshed (Python 3.14, numpy 2.5, YASA 0.8...). The whole suite ran in the
+new environment against the reference runs. On the synthetic nights everything still matched, so that reference
+was kept. On the real nights, no flag, rejection, exclusion or sleep metric changed, but two tools differed on the
+last minutes of each night, where the recording is flat (a signal at zero to the computer's precision): there every
+measure is rounding noise, which changes with the computing libraries, and these epochs are rejected anyway. The
+real reference run was taken again in the new environment (the former one kept aside), after checking that it
+differed on these flat epochs only.
 
 ### 3. A deselected channel is referenced like the others
 
@@ -248,6 +258,11 @@ case, on a light copy of the test chain's outputs. It checks, for each of the fo
 Tool 7's editor is checked too: a channel unticked by hand comes back unticked, and the reference channel stays ticked, without
 which a reprocessing would change the reference.
 
+A study processed before tool 7's band-pass became one zero-phase pass (2026-11-19) has sidecars without a phase: the run asks
+(*0.1-50 Hz, zero-double → 0.1-50 Hz, zero*), *Use the recorded settings* says the former phase is no longer offered, and the
+question comes back. `test_preprocessing_lib.py` (quick) checks the comparison and that tool 7's band-pass gives exactly MNE's
+zero-phase filter, not the former one.
+
 ### 12. BrainVision recordings
 
 A BrainVision recording is three files (`.vhdr`, `.vmrk`, `.eeg`). The tests write such recordings themselves, with invented
@@ -354,8 +369,8 @@ In standard, `test_exclusion_tools.py` builds tool 8's report and checks it ends
 Tool 6's comparison of each channel with the median channel of the same epoch (`test_quality_lib.py`): a channel 10 times larger
 than the others is said in its own columns, never as a flag, so tool 7 unticks nothing more. Its flat measure counts only what
 holds still for 50 ms: a quiet channel at a high sampling rate is not flat, a 6-s flat stretch is, at any rate. Since this changed
-the flat values on purpose, `test_pipeline.py` compares tool 6 with the golden on everything else: only the flat values and, where
-they crossed the threshold, that one reason may move, and the channels tool 7 unticks stay the same.
+the flat values on purpose, `test_pipeline.py` compared tool 6 with the former reference run on everything else (only the flat
+values and that one reason moved, the channels tool 7 unticks stayed the same), until that run was taken again on 2026-11-19.
 
 These tests do not replace a look at real data: at each phase the tools were also run on real recordings, which never enter the
 repository.
@@ -374,8 +389,8 @@ repository.
 | Tool 5 | One report per recording (the night with its scored events, the metrics, the checks), each linked from the database report; a recording whose report is missing counts as not processed: it is the only one run again |
 | Tool 6 | The quality tables flag the excluded participants; `dataset_overview.html` counts only the others and names the excluded one; the excluded participant's report shows the banner |
 | Tool 7 | Deselected channels are in the `.fif` (marked bad) and in the settings file, absent from the flagging tables; the per-stage summary is pooled over the non-excluded participants only; a manual exclusion needs a reason; a re-run with nobody to process still refreshes the tables |
-| Tool 8bis | The decision tables keep exactly the epochs and channels the former cleaned copy held; tool-7 deselected channels are recorded as dropped; an event-count threshold excludes a participant, a re-run without it lifts the exclusion; with *Skip* ticked, a participant decided with the same settings is skipped and one decided with another threshold is decided again |
-| Tool 8 | The decision tables match the former cleaned copy; the *Exclude* / *Remove my exclusion* button writes and deletes the decision |
+| Tool 8bis | Every epoch is decided, by one rule (rejected when more than 20 % of the good channels flag it), and the reference-stage counts are those of the reference stages; tool-7 deselected channels are recorded as dropped; an event-count threshold excludes a participant, a re-run without it lifts the exclusion; with *Skip* ticked, a participant decided with the same settings is skipped and one decided with another threshold is decided again |
+| Tool 8 | The decision tables cover every epoch and every channel of the epochs; the *Exclude* / *Remove my exclusion* button writes and deletes the decision |
 | Tool 9 | Every epoch × channel is in the tables with the right decision flags; dropped channels are still computed; the per-epoch spectrum file exists; night-third counts (rejected, out of scope, % rejected) are those of each stage × third cell |
 | The settings of *Skip* | Each comparison, record and fingerprint on small examples: both values reported, older records compared only on what they hold, the most frequent set at equal count (`test_quality_lib.py`, `test_preprocessing_lib.py`, `test_autoreject_settings.py`, `test_spectral_settings.py`, `test_study_files_lib.py`) |
 | Participant selector | Skip applies in both modes; a subset with already-processed participants shows the warning; the add box only offers participants not yet selected; pasted and clicked ids switch to subset mode; unknown ids are refused; a rescan drops vanished ids |
@@ -383,8 +398,10 @@ repository.
 | Several runs of tool 7 | Each run reads tool 5bis's decisions and its own; a decision on one run leaves the other's alone; on empty files: tool 7's line of the run, *New version* under Skip, the suffix proposed, typed, refused or already taken, who is already processed followed without a new Scan; tools 8, 8bis and 9 pre-choose the most recent run, tool 9 only its decisions. On the synthetic database (full level): a `_v2` of tool 7 then 8bis, 8 and 9 on it, each writing its own folders, the first run untouched and unaware of its exclusion |
 | Hypnogram choice | When the study folder is picked, tools 3, 3bis, 5, 6 and 7 pre-choose the right hypnogram even with the toolkit's own hypnograms beside the recordings (tool 3bis's automatic ones, tool 0's rescored one): tool 3 the raw export, the others the remapped one; participants 1 and 10 are not mixed up; a name a tool recorded in `config_param/file_names.json` is followed; a study keeps its output names (shorter names for new studies only); only automatic hypnograms present = nothing pre-chosen; the names file keeps the other tools' entries and is never overwritten when unreadable |
 | Curry recordings | Curry 9 recordings written by the tests (a `.cdt` and its `.cdt.dpo`, invented values): the header, the impedances in kOhm, the start to the millisecond and the signal read back as written (quick level); tools 1, 4, 5, 6, 7 and 0 on a small Curry nap study (standard level) |
+| Environment files | The light, full and developer environment files agree (each holds the one below it, with the same versions), every version is pinned, and every package a tool imports is declared: in the light file, except the packages of automatic scoring (GSSC, SleepFM), which only the full file holds (`test_environment_files.py`, quick level) |
 | Shared EDF reading | Tools 2, 4, 6 and 7 and the quality library import the shared reading functions instead of keeping copies (the Curry twins that rewrote those copies are gone): a copy that comes back fails this check, and the two kept on purpose stay the same code as the shared library's (quick level) |
 | Scored-event files not read | A text export, CSV or XML found but unreadable, without any event, or a text export without a recording start, is named in one line with the reason and the file read instead (tools 0, 5, 7, and tool 4's own reader, which now passes an export without events to the CSV like the others); nothing is said when every file is read; a broken manual-annotation file leaves the scored events; tool 5's header reader finds the same channel fields as tool 1's (`test_event_sources.py`, quick level) |
+| Agreement with the expert (tool 3bis) | One function gives every metric from the confusion matrix, for a night and for every night pooled: a nap worked by hand (macro-F1 0.875 over the two stages the expert scored, not 0.583 over the stages of both sides), a night where the expert scored a single stage flagged (its kappa undefined or 0, its MCC 0 whatever the model), the same values as sklearn when every stage is present, the pooled values equal to the summed matrix (`test_autoscoring_metrics.py`, quick level). Step 1's database report with such a night and a night compared before these metrics, both ways of the Section 1 option; Section 4 on two synthetic nights: its files in the toolkit's layout, the same metrics as step 1, the last epoch GSSC leaves out on a night of a whole number of 30-s epochs said and counted, a second comparison replacing the first (`test_autoscoring_compare.py`, standard level). Against Score_EDF: `score_edf_equivalence.py`, run by hand |
 | Tool 0 | On every participant, loading gives exactly tool 7's epochs, sleep stages, EEG channels and scored events; a hypnogram the detection misses (renamed, in another folder) loads through "Other file…" with the same stages; the EOG / EMG traces are tool 7's, sample for sample; the header step flags the ±50 µV Fp1 like tool 1 and shows one channel table per detected type; the scoring step counts every scored event under its tool-4 label; its automatic scoring (read from tool 3bis's files, or redone in tool 0) gives tool 3bis's stages, probabilities and kappa; its macrostructure step gives tool 5's value for every metric and the same lights-off / lights-on source, on every participant; its signal-quality step gives tool 6's value for every metric of every channel, over the whole night and per sleep stage, and the same flagged channels, on every participant; its preprocessing step gives tool 7's flag for every epoch and channel and the same per-epoch information, on every participant, and then shows that signal in the explorer; its decision step gives tool 8bis's epoch table, channel table and decision record, on every participant, and reads tool 8's and 8bis's tables back unchanged; its spectral step gives every per-participant table of tool 9, on every participant; rescoring and annotations write only their documented files (the annotation in tool 8's format, read back by tool 7's event reading; the rescored hypnogram's name in `config_param/file_names.json`) and touch nothing else in the study |
 
 ## What the tests do not check

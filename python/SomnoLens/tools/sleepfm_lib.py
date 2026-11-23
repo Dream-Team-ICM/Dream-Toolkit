@@ -76,9 +76,9 @@ try:
     import yaml  # noqa: F401
     SLEEPFM_DEPS_OK = True
 except Exception as _e:
-    SLEEPFM_DEPS_MSG = (f'SleepFM needs the packages of the autoscoring environment ({_e}). Run this tool in the '
-                        '<code>autoscore</code> environment, or add them to the current one: '
-                        '<code>conda install -c conda-forge h5py einops loguru pyyaml</code>.')
+    SLEEPFM_DEPS_MSG = (f'SleepFM needs packages of the <b>full</b> installation of SomnoLens ({_e}). From the '
+                        'SomnoLens folder, update the environment, then restart this page: '
+                        '<code>conda env update -n somnolens -f environment-full.yml</code>.')
 
 
 # ---------------------------------------------------------------------------------------------------------

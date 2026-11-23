@@ -39,6 +39,11 @@ MULTIPLE_CODE = len(METHOD_ORDER) + 1                            # 7 = multiple
 METHOD_LABEL  = {'amplitude': 'Amplitude', 'gradient': 'Gradient', 'flat': 'Flat',
                  '1f_r2': '1/f R²', '1f_error': '1/f error', 'event': 'Event'}
 
+# The band-pass is applied once, zero phase (MNE's default, like the notch). Before 2026-11-19 it was applied forward then
+# backward ('zero-double'): a params sidecar without a phase was made that way.
+BANDPASS_PHASE = 'zero'
+FORMER_BANDPASS_PHASE = 'zero-double'
+
 
 def compute_event_epoch_mask(events_df, event_remap, selected_types, n_epochs,
                              epoch_sec=30.0):
@@ -692,7 +697,7 @@ def preprocess_raw(raw, file_id, sub_config, do_resample, target_freq, do_notch,
             raw.filter(
                 l_freq=l_freq_val, h_freq=h_freq_val,
                 l_trans_bandwidth='auto', h_trans_bandwidth='auto',
-                filter_length='auto', method='fir', phase='zero-double',
+                filter_length='auto', method='fir', phase=BANDPASS_PHASE,
                 fir_window='hamming', fir_design='firwin', verbose=False
             )
         except Exception as e:
@@ -936,8 +941,8 @@ def settings_differences(sidecar, current):
     """What separates a participant's params sidecar from this run's settings (`current`: the sidecar's keys, methods_run
     without the event method), as (setting, recorded, this run) rows. [] when nothing does.
     A key an older sidecar does not hold is not compared, except the notch and the PSD smoothing, which did not exist
-    (absent = off), the epoch length (absent = 30 s) and tool 2's correction of the context channels (`context_gain`,
-    absent = none). A threshold counts only if its method ran on both sides. The event method varies with each file's
+    (absent = off), the epoch length (absent = 30 s), the band-pass phase (absent = zero-double) and tool 2's correction
+    of the context channels (`context_gain`, absent = none). A threshold counts only if its method ran on both sides. The event method varies with each file's
     annotations: the events are compared through the types asked for. Among the channels, only those the sidecar names:
     a reference channel has left the epochs before it is written."""
     rows = []
@@ -950,7 +955,9 @@ def settings_differences(sidecar, current):
         return f"{block['target_freq_hz']:g} Hz" if block.get('applied') else 'off'
 
     def band_pass(block):
-        return f"{block['l_freq_hz']:g}-{block['h_freq_hz']:g} Hz" if block.get('applied') else 'off'
+        if not block.get('applied'):
+            return 'off'
+        return f"{block['l_freq_hz']:g}-{block['h_freq_hz']:g} Hz, {block.get('phase', FORMER_BANDPASS_PHASE)}"
 
     def notch(block):
         return f"{block['freq_hz']:g} Hz" if block.get('applied') else 'off'

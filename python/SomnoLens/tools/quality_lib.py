@@ -444,7 +444,7 @@ def compute_hypnospectrogram_sxx(sig_uV, sf, fmin=0.5, fmax=40):
     Split out of plot_hypnospectrogram so the same Sxx can be computed once and used twice:
     for the per-channel figure and for the across-channel median in the Overview section.
     Returns (f, t_hours, Sxx_dB)."""
-    from yasa.plotting import spectrogram_lspopt
+    from lspopt import spectrogram_lspopt     # the function yasa.plotting re-exports
 
     # Multitaper spectrogram (mirrors yasa.plot_spectrogram internals).
     nperseg = int(30 * sf)
@@ -487,8 +487,7 @@ def spectrogram_colour_scale(Sxx, trimperc=2.5):
     vmin = max(vmin, vmax - 45)   # cap colour span (dB): real EEG structure fits within ~35 dB, so a few degraded low-power epochs can't stretch the scale and wash the plot to one colour
     norm = Normalize(vmin=vmin, vmax=vmax)
     Sxx[:, ~valid] = np.nan   # dead epochs rendered as the colormap 'bad' colour
-    spec_cmap = plt.get_cmap(SPECTROGRAM_CMAP).copy()
-    spec_cmap.set_bad(DEAD_EPOCH_COLOR)
+    spec_cmap = plt.get_cmap(SPECTROGRAM_CMAP).with_extremes(bad=DEAD_EPOCH_COLOR)   # a copy
     return Sxx, norm, spec_cmap
 
 
@@ -649,7 +648,7 @@ def plot_participant_pooled_boxplots(df_sub, df_stage_sub=None, custom_stages=No
             groups_in = [df_stage_sub[df_stage_sub["stage"] == s][m].dropna().values
                          for s in present_stages]
             bp_in = ax_in.boxplot(
-                groups_in, labels=present_stages, patch_artist=True, showfliers=False,
+                groups_in, tick_labels=present_stages, patch_artist=True, showfliers=False,
                 medianprops=dict(color="#333", linewidth=1.5),
                 whiskerprops=dict(linewidth=1.0), capprops=dict(linewidth=1.0),
             )
@@ -1129,10 +1128,10 @@ def display_limits(ch_metrics, ch_flags, cap_uV=None):
 
 
 def compute_channel_spectrograms(raw, sf, file_id, hypno_vec, warn=print, on_channel=None):
-    """Each channel's dB hypnospectrogram (display band-pass 0.1-40 Hz, 30 s multitaper windows, float32),
-    computed once for the per-channel figures and the across-channel median. Nothing without a valid
-    hypnogram vector. `on_channel(ci, ch, done)` is called before (done False) and after (done True) each
-    channel. Returns (ch_sxx, sxx_f, sxx_t)."""
+    """Each channel's dB hypnospectrogram (display band-pass 0.1-40 Hz, zero phase like tool 7's band-pass, 30 s
+    multitaper windows, float32), computed once for the per-channel figures and the across-channel median.
+    Nothing without a valid hypnogram vector. `on_channel(ci, ch, done)` is called before (done False) and
+    after (done True) each channel. Returns (ch_sxx, sxx_f, sxx_t)."""
     # --- Spectrograms: computed once here, used twice ---
     # Each channel's dB spectrogram is needed both for its own report figure and for the
     # across-channel median in the Overview. The median needs every channel at once, so the
@@ -1151,7 +1150,7 @@ def compute_channel_spectrograms(raw, sf, file_id, hypno_vec, warn=print, on_cha
                 _sig = raw.get_data(picks=[ci])[0] * 1e6
                 _sig_filt = mne.filter.filter_data(
                     _sig[np.newaxis, :], sfreq=sf, l_freq=0.1, h_freq=40,
-                    method='fir', phase='zero-double', fir_window='hamming', verbose=False
+                    method='fir', phase='zero', fir_window='hamming', verbose=False
                 )[0]
                 del _sig
                 sxx_f, sxx_t, _sxx = compute_hypnospectrogram_sxx(

@@ -23,7 +23,10 @@ the comparison remain usable on a scoring read from disk. Same for YASA (YASA_OK
 import os
 import re
 import json
+import logging
+import warnings
 import datetime
+from importlib.metadata import version as _pkg_version
 from pathlib import Path
 
 import numpy as np
@@ -32,7 +35,7 @@ import matplotlib
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 import mne
-from sklearn.metrics import accuracy_score, cohen_kappa_score, f1_score, confusion_matrix
+from sklearn.metrics import accuracy_score, cohen_kappa_score, f1_score, confusion_matrix, matthews_corrcoef
 from edf_io_lib import (   # one copy, in edf_io_lib (same folder)
     CUSTOM_STAGE_PALETTE, load_custom_stages, drop_suffix_duplicates, adapt_remap_dict_to_suffixes, load_json_lenient,
     context_divisors, context_gain, draw_hypnogram,
@@ -53,7 +56,6 @@ try:
     from gssc.utils import (prepare_inst as gssc_prepare_inst, permute_sigs as gssc_permute_sigs,
                             epo_arr_zscore as gssc_zscore, check_flip_chan as gssc_check_flip_chan,
                             loudest_vote as gssc_loudest_vote)
-    from importlib.metadata import version as _pkg_version
     GSSC_VERSION = _pkg_version('gssc')
     TORCH_VERSION = torch.__version__
     GSSC_OK = True
@@ -61,19 +63,22 @@ except Exception as e:
     GSSC_VERSION, TORCH_VERSION = None, None
     GSSC_MSG = (
         '<div style="border:2px solid #c0392b;background:#fdecea;padding:8px 12px;border-radius:4px;">'
-        f'<b>GSSC is not available</b> ({e}). Install it in the <code>somnolens</code> environment, '
-        'then restart this page:<br><code>conda install -n somnolens -c conda-forge pytorch-cpu</code><br>'
-        '<code>python -m pip install gssc==0.0.9</code></div>')
+        f'<b>GSSC is not available</b> ({e}): it comes with the <b>full</b> installation of SomnoLens. From the '
+        'SomnoLens folder, update the environment, then restart this page:<br>'
+        '<code>conda env update -n somnolens -f environment-full.yml</code></div>')
 
 YASA_OK = False
 YASA_MSG = ''
 try:
     import yasa
     YASA_VERSION = yasa.__version__
+    # YASA's stages depend on antropy's version (its classifiers were trained with antropy < 0.2): recorded with them
+    ANTROPY_VERSION = _pkg_version('antropy')
     YASA_OK = True
 except Exception as e:
-    YASA_VERSION = None
-    YASA_MSG = f'YASA is not available ({e}): <code>conda install -c conda-forge yasa</code>'
+    YASA_VERSION, ANTROPY_VERSION = None, None
+    YASA_MSG = (f'YASA is not available ({e}): it belongs to the SomnoLens environment. From the SomnoLens folder: '
+                '<code>conda env update -n somnolens -f environment.yml</code>')
 
 
 EPOCH_SEC = 30
@@ -394,6 +399,44 @@ def load_expert(path):
         return np.array([ln.strip() for ln in f if ln.strip()])
 
 
+def agreement_metrics(cm):
+    """Agreement with the expert from a 5 x 5 confusion matrix (rows expert, columns model, STAGES order): the
+    same function for one night and for nights pooled (their summed matrix).
+    Macro-F1 and balanced accuracy average over the stages the expert scored: a stage the expert never scored
+    would otherwise weigh as a 0 or a 1 whatever the model does (a nap without N3, or without sleep).
+    A night where the expert scored one stage only (a nap where the participant stays awake) has a kappa of 0
+    (undefined when the model gives that stage everywhere) and an MCC of 0 by construction, whatever the model:
+    it is flagged (single_stage_expert). Accuracy, balanced accuracy and macro-F1 then all measure the share of
+    epochs given the expert's stage."""
+    cm = np.asarray(cm, dtype=int)
+    expert_counts = cm.sum(axis=1)
+    present = expert_counts > 0                          # the stages the expert scored
+    res = {'n_compared': int(cm.sum()), 'n_stages_expert': int(present.sum()),
+           'single_stage_expert': bool(present.sum() == 1),
+           'expert_stages': [s for s, p in zip(STAGES, present) if p]}
+    if cm.sum() == 0:
+        res.update({'accuracy': np.nan, 'kappa': np.nan, **{f'f1_{s}': np.nan for s in STAGES},
+                    'macro_f1': np.nan, 'balanced_accuracy': np.nan, 'mcc': np.nan})
+        return res
+    # The (expert, model) pairs rebuilt from the counts: sklearn computes from the same confusion matrix as on
+    # the epochs themselves, so the values are those of the epochs (their order does not matter).
+    rows, cols = np.nonzero(cm)
+    labels = np.array(STAGES)
+    e = np.repeat(labels[rows], cm[rows, cols])
+    g = np.repeat(labels[cols], cm[rows, cols])
+    with warnings.catch_warnings():
+        warnings.simplefilter('ignore')      # an undefined kappa (single-stage night): the value is kept, flagged
+        res['accuracy'] = accuracy_score(e, g)
+        res['kappa'] = cohen_kappa_score(e, g, labels=STAGES)
+        f1 = f1_score(e, g, labels=STAGES, average=None, zero_division=np.nan)
+        res['mcc'] = matthews_corrcoef(e, g)
+    res.update({f'f1_{s}': (f1[i] if s in e or s in g else np.nan) for i, s in enumerate(STAGES)})
+    res['macro_f1'] = float(np.mean(f1[present]))
+    recall = np.diag(cm)[present] / expert_counts[present]
+    res['balanced_accuracy'] = float(np.mean(recall))
+    return res
+
+
 def compare_scoring(expert, gssc, col='gssc'):
     """Agreement on the epochs both scored, restricted to expert labels W/N1/N2/N3/R
     (MT, custom stages and '?' are left out and counted). `gssc` = the automatic stages of any algorithm,
@@ -402,16 +445,9 @@ def compare_scoring(expert, gssc, col='gssc'):
     e, g = expert[:n], gssc[:n]
     valid = np.isin(e, STAGES)
     e, g = e[valid], g[valid]
-    res = {'n_compared': int(valid.sum()), 'n_excluded_expert': int((~valid).sum())}
-    if len(e) == 0:
-        res.update({'accuracy': np.nan, 'kappa': np.nan, **{f'f1_{s}': np.nan for s in STAGES}})
-        cm = np.zeros((5, 5), dtype=int)
-    else:
-        res['accuracy'] = accuracy_score(e, g)
-        res['kappa'] = cohen_kappa_score(e, g, labels=STAGES)
-        f1 = f1_score(e, g, labels=STAGES, average=None, zero_division=np.nan)
-        res.update({f'f1_{s}': (f1[i] if s in e or s in g else np.nan) for i, s in enumerate(STAGES)})
-        cm = confusion_matrix(e, g, labels=STAGES)
+    cm = confusion_matrix(e, g, labels=STAGES) if len(e) else np.zeros((5, 5), dtype=int)
+    res = agreement_metrics(cm)
+    res['n_excluded_expert'] = int((~valid).sum())
     cm_long = pd.DataFrame([{'expert': STAGES[i], col: STAGES[j], 'n': int(cm[i, j])}
                             for i in range(5) for j in range(5)])
     return res, cm, cm_long
@@ -716,14 +752,26 @@ def metrics_html(res):
         return f'{v * 100:.1f} %' if pct else f'{v:.3f}'
     rows = [('Epochs compared', res['n_compared']),
             ('Epochs left out (expert label not W/N1/N2/N3/R)', res['n_excluded_expert']),
-            ('Accuracy', f(res['accuracy'], pct=True)), ("Cohen's kappa", f(res['kappa']))]
+            ('Accuracy', f(res['accuracy'], pct=True)), ("Cohen's kappa", f(res['kappa'])),
+            ('MCC', f(res.get('mcc'))), ('Macro-F1', f(res.get('macro_f1'))),
+            ('Balanced accuracy', f(res.get('balanced_accuracy'), pct=True))]
     rows += [(f'F1 {s}', f(res[f'f1_{s}'])) for s in STAGES]
     body = ''.join(f'<tr><td style="padding:2px 14px 2px 0">{k}</td><td><b>{v}</b></td></tr>'
                    for k, v in rows)
-    return (f'<table style="font-size:90%">{body}</table>'
+    single = ''
+    if res.get('single_stage_expert'):
+        stage = ', '.join(res.get('expert_stages', []))
+        single = ('<p style="font-size:85%;color:#e65100">⚠ The expert scored a single stage here '
+                  f'({stage}): the kappa and the MCC are 0 (or undefined) whatever the model, by construction. The '
+                  'accuracy, the balanced accuracy and the macro-F1 all measure here the share of epochs given the '
+                  "expert's stage.</p>")
+    return (f'<table style="font-size:90%">{body}</table>{single}'
             '<p style="font-size:85%;color:#555">Kappa: agreement corrected for chance (above 0.6 = '
             'substantial, above 0.8 = almost perfect; two human scorers typically reach 0.7-0.8). '
-            'F1 per stage: balance of the epochs of that stage found and correctly labelled.</p>')
+            'MCC: correlation between the expert and the model over every stage (0 = chance, 1 = perfect). '
+            'F1 per stage: balance of the epochs of that stage found and correctly labelled. Macro-F1: mean of '
+            'the F1 over the stages the expert scored. Balanced accuracy: mean, over the same stages, of the '
+            "share of the expert's epochs the model gives the same stage.</p>")
 
 
 def params_html(params):
@@ -818,6 +866,14 @@ def score_night_gssc(infer, edf_path, cfg_entry, wanted, one_mode, eog_mode, ref
                                                        eog_mode, reference)
     notes += eog_notes
     stages, onsets, probs, winner, n_comb = run_gssc(infer, raw, eog_data, eog_names, progress=progress)
+    # gssc 0.0.9 (its prepare_inst, also behind its own mne_infer) takes the time of the last sample as the duration:
+    # a recording lasting a whole number of 30-s epochs loses its last, complete, epoch (gssc issue #9, open since
+    # 2025-08-25). Said, not corrected, so that the stages stay gssc's own.
+    whole = int(raw.n_times // (EPOCH_SEC * raw.info['sfreq']))
+    if len(stages) < whole:
+        notes.append(f'GSSC scored {len(stages)} of the {whole} epochs: the recording lasts a whole number of 30-s '
+                     'epochs, and gssc 0.0.9 then leaves out the last one (it takes the time of the last sample as '
+                     'the duration). That epoch has no GSSC stage and stays out of the comparison.')
     checks = channel_checks(edf_path, cfg_entry, refs, eog_used(cfg_entry, eog_mode) if eog_names else {})
     return {'stages': stages, 'onsets': onsets, 'probs': probs, 'winner': winner, 'n_comb': n_comb,
             'present': present, 'eog_names': eog_names, 'reference': ref_text, 'eog_reference': eog_ref,
@@ -950,15 +1006,16 @@ def score_night_yasa(edf_path, cfg_entry, eeg, eog_side, reference=REFERENCE_CON
     raw = mne.io.RawArray(np.stack([v for _, v in chans.values()]),
                           mne.create_info(list(chans), sfreq, ch_types=[t for t, _ in chans.values()]),
                           verbose='error')
-    level = yasa.logger.level
-    yasa.logger.setLevel('ERROR')
+    yasa_logger = logging.getLogger('yasa')      # YASA 0.8 no longer exposes yasa.logger
+    level = yasa_logger.level
+    yasa_logger.setLevel('ERROR')
     try:
         staging = yasa.SleepStaging(raw, eeg_name=eeg_label, eog_name='EOG' if 'EOG' in chans else None,
                                     emg_name='EMG' if 'EMG' in chans else None)
-        staging.predict()
-        proba = staging.predict_proba()
+        # predict() returns a yasa.Hypnogram holding the probabilities (predict_proba() was removed in YASA 0.8)
+        proba = staging.predict().proba
     finally:
-        yasa.logger.setLevel(level)
+        yasa_logger.setLevel(level)
     proba = proba.rename(columns={'W': 'W', 'WAKE': 'W', 'REM': 'R'})
     probs = proba[STAGES].to_numpy(float)
     stages = np.array([STAGES[i] for i in probs.argmax(axis=1)])

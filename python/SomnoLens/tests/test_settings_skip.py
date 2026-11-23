@@ -889,6 +889,26 @@ def test_tool7_what_cannot_be_put_back_is_named(t7_data, ids):
 
 
 @pytest.mark.tool7
+def test_tool7_a_band_pass_applied_twice_cannot_be_put_back(t7_data, ids):
+    """A study processed before 2026-11-19: its sidecars have no band-pass phase (forward then backward). The page offers only
+    the zero-phase band-pass, so the answer names it and the question comes back."""
+    for fid in ids:
+        sidecar = json.loads(sidecar_path(t7_data, fid).read_text(encoding='utf-8'))
+        edit_sidecar(t7_data, fid, filter={key: value for key, value in sidecar['filter'].items() if key != 'phase'})
+    with NotebookSession(pipeline.T7) as nb:
+        open_tool7(nb, t7_data)
+        nb.click('btn_run')
+        log = nb.widget_text()
+        assert f'{len(ids)} of the {len(ids)} processed participant(s) {QUESTION}' in log, log[-2000:]
+        assert 'band-pass filter : 0.1-50 Hz, zero-double → 0.1-50 Hz, zero' in log
+        nb.click(USE_RECORDED)
+        log = nb.widget_text()
+        assert 'the band-pass phase (zero-double): no longer offered, reprocess these participants' in log, log[-2000:]
+        nb.click('btn_run')
+        assert 'band-pass filter : 0.1-50 Hz, zero-double → 0.1-50 Hz, zero' in nb.widget_text()
+
+
+@pytest.mark.tool7
 def test_tool7_the_hypnogram_suffix_is_put_back(t7_data, ids):
     recorded = json.loads(sidecar_path(t7_data, ids[0]).read_text(encoding='utf-8'))['hypnogram_file'][len(ids[0]):]
     with NotebookSession(pipeline.T7) as nb:

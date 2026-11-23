@@ -1,10 +1,13 @@
 {
  "n_epochs": 480,
  "ch_names": [
+  "Fp1",
   "C3",
   "O1"
  ],
- "bads": [],
+ "bads": [
+  "Fp1"
+ ],
  "sfreq": 256.0,
  "tmin": 0.0,
  "tmax": 29.99609375

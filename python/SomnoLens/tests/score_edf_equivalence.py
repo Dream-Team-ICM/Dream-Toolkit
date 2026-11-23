@@ -21,6 +21,13 @@ Two datasets:
 
 Channel semantics shared by the two tools in this check: Score_EDF's vEOG = the LEFT EOG (its aliases: LOC,
 E1, EOG Left), hEOG = the RIGHT EOG. Its GSSC and YASA use hEOG alone: tool 3bis is set to "Right only".
+
+Since tools/plan_3bis_comparison.md (2026-11-23) tool 3bis writes its comparison in the toolkit's layout
+(derivatives/autoscoring_comparison/, reports_autoscoring_comparison/: W / R, the models' keys, one table per night):
+the check maps it back to Score_EDF's names and compares VALUES. The metrics: an epoch a model did not predict (the
+last epoch gssc 0.0.9 drops on a night of a whole number of 30-s epochs, as the simulated nights are) is left out by
+tool 3bis and counted as a disagreement by Score_EDF, so Score_EDF's epochs are also scored the way tool 3bis does
+(autoscoring_lib.agreement_metrics): those must match tool 3bis's tables.
 """
 import json
 import os
@@ -324,11 +331,12 @@ def baseline_real():
 # Tool 3bis (new)
 # =====================================================================================================
 T3BIS = 'tools/3bis_autoscoring_voila.ipynb'
+COMPARISON_FOLDERS = ('derivatives/autoscoring_comparison', 'reports_autoscoring_comparison')   # Section 4's
 
 
 def _clean_outputs(study):
     """Remove what an earlier 3bis run wrote, so this run starts from the inputs only."""
-    for name in ('derivatives', 'autoscore_outputs', 'autoscore_outputs_strict'):
+    for name in ('derivatives', 'autoscore_outputs', 'autoscore_outputs_strict', 'comparison_strict'):
         shutil.rmtree(study / name, ignore_errors=True)
     for d in study.glob('reports_autoscoring_*'):
         shutil.rmtree(d, ignore_errors=True)
@@ -343,7 +351,7 @@ def run_3bis(dataset, gssc_eeg):
     """Tool 3bis driven like a user, with the settings that reproduce Score_EDF's inputs: the three models,
     contralateral mastoid reference, GSSC on `gssc_eeg` + the right EOG alone (Score_EDF's hEOG), YASA on C4 +
     right EOG + chin EMG. Section 4 is run twice: first with Score_EDF's recalibrations (N3 fixed: must match it
-    exactly, saved as autoscore_outputs_strict/), then with the default (N3 fitted when present)."""
+    exactly, its two folders saved under comparison_strict/), then with the default (N3 fitted when present)."""
     import nbdriver
     nbdriver.CELL_TIMEOUT_S = 4 * 3600
     os.environ['SLEEPFM_ROOT'] = str(SLEEPFM_ROOT)
@@ -369,9 +377,10 @@ def run_3bis(dataset, gssc_eeg):
         ticked = nb.value("[k for k, cb in cmp_checks.items() if cb.value]")
         print('find:', nb.value('cmp_info.value'), ticked, flush=True)
         nb.click('btn_compare')
-        if not (study / 'autoscore_outputs').is_dir():
+        if not (study / 'reports_autoscoring_comparison' / 'global_comparison_pooled.tsv').is_file():
             raise RuntimeError('Section 4 wrote nothing:\n' + nb.widget_text()[-3000:])
-        shutil.copytree(study / 'autoscore_outputs', study / 'autoscore_outputs_strict')
+        for name in COMPARISON_FOLDERS:
+            shutil.copytree(study / name, study / 'comparison_strict' / name)
         nb.run("RECAL_FREE_N3 = 'auto'")
         nb.click('btn_compare')
         text = nb.widget_text()
@@ -400,13 +409,45 @@ def _epochs(path):
     return d.sort_values(KEY).reset_index(drop=True)
 
 
+def _toolkit_epochs_as_score_edf(new_dir):
+    """Tool 3bis's per-night epoch tables (the toolkit's layout) under Score_EDF's names: subject, stager, epoch
+    (counted from the window start), Wake ... REM, manual_stage, predicted_stage ('Unknown' where no stage)."""
+    import autoscoring_compare_lib as ACL
+    back = {v: k for k, v in ACL.TOOLKIT_STAGE.items()}
+    frames = [pd.read_csv(p, sep='\t', dtype={'file_id': str, 'stage_expert': str, 'stage_model': str})
+              for p in sorted((new_dir / COMPARISON_FOLDERS[0]).rglob('*_comparison_epochs.tsv'))]
+    d = pd.concat(frames, ignore_index=True)
+    out = pd.DataFrame({'subject': d['file_id'], 'stager': d['model'].map(ACL.MODEL_NAME),
+                        'epoch': d['epoch_idx'] - d.groupby('file_id')['epoch_idx'].transform('min'),
+                        'manual_stage': d['stage_expert'].map(back).fillna('Unknown'),
+                        'predicted_stage': d['stage_model'].map(back).fillna('Unknown')})
+    for src, dst in ACL.TOOLKIT_STAGE.items():
+        out[src] = d[f'p_{dst}']
+    return out.sort_values(KEY).reset_index(drop=True)
+
+
+def _scored_like_3bis(ref, stager, subject=None):
+    """Score_EDF's epochs of one model (one night, or every night) scored the way tool 3bis does: the epochs the
+    expert scored and the model predicted, autoscoring_lib.agreement_metrics. Returns (metrics, epochs left out)."""
+    import autoscoring_compare_lib as ACL
+    from sklearn.metrics import confusion_matrix
+    r = ref[(ref['stager'] == stager) & (ref['manual_stage'] != 'Unknown')]
+    if subject is not None:
+        r = r[r['subject'] == subject]
+    predicted = r['predicted_stage'] != 'Unknown'
+    to_tk = ACL.TOOLKIT_STAGE
+    cm = confusion_matrix(r.loc[predicted, 'manual_stage'].map(to_tk), r.loc[predicted, 'predicted_stage'].map(to_tk),
+                          labels=ACL.STAGES)
+    return ACL.agreement_metrics(cm), int((~predicted).sum())
+
+
 def compare_tables(ref_dir, new_dir, label, lines, expect_close=()):
-    """Score_EDF's epochs_all_stagers.csv / agreement_summary.csv against tool 3bis's, model by model."""
-    ref, new = _epochs(ref_dir / 'epochs_all_stagers.csv'), _epochs(new_dir / 'epochs_all_stagers.csv')
+    """Score_EDF's epochs_all_stagers.csv / agreement_summary.csv against tool 3bis's comparison (the toolkit's layout
+    under `new_dir`, mapped back to Score_EDF's names), model by model."""
+    sys.path.insert(0, str(REPO_ROOT / 'tools'))
+    ref = _epochs(ref_dir / 'epochs_all_stagers.csv')
+    new = _toolkit_epochs_as_score_edf(new_dir)
     lines.append(f'\n## {label}')
-    same_cols = list(ref.columns) == list(new.columns)
-    lines.append(f'columns identical: {same_cols}' + ('' if same_cols else f'\n  Score_EDF {list(ref.columns)}'
-                                                                           f'\n  3bis      {list(new.columns)}'))
     for stager in sorted(set(ref['stager']) | set(new['stager'])):
         r, n = ref[ref['stager'] == stager], new[new['stager'] == stager]
         if len(r) != len(n) or not (r[KEY].values == n[KEY].values).all():
@@ -422,14 +463,36 @@ def compare_tables(ref_dir, new_dir, label, lines, expect_close=()):
             verdict = 'different (intended, see below)'
         lines.append(f'- {stager}: {len(r)} epochs, predicted stage differs on {stage_diff}, expert stage differs '
                      f'on {manual_diff}, max |probability difference| = {dp:.2e} -> {verdict}')
+    # The metrics: Score_EDF's own (agreement_summary.csv), tool 3bis's (pooled and per night, 4 decimals in its
+    # TSV), and Score_EDF's epochs scored the way tool 3bis does, which must give tool 3bis's values.
+    import autoscoring_compare_lib as ACL
     ra = pd.read_csv(ref_dir / 'agreement_summary.csv', index_col=0)
-    na = pd.read_csv(new_dir / 'agreement_summary.csv', index_col=0)
-    common = [c for c in ra.columns if c in na.columns]
-    diff = (ra[common] - na.reindex(ra.index)[common]).abs().max().max()
-    lines.append(f'agreement_summary.csv: same rows {list(ra.index) == list(na.index)}, same columns '
-                 f'{list(ra.columns) == list(na.columns)}, max |difference| = {diff:.2e}')
-    lines.append('```\n' + pd.concat({'Score_EDF': ra[['accuracy', 'kappa_pooled']],
-                                     '3bis': na[['accuracy', 'kappa_pooled']]}, axis=1).round(4).to_string() + '\n```')
+    reports = new_dir / COMPARISON_FOLDERS[1]
+    pooled = pd.read_csv(reports / 'global_comparison_pooled.tsv', sep='\t').set_index('model')
+    nights = pd.read_csv(reports / 'global_comparison_summary.tsv', sep='\t', dtype={'file_id': str})
+    keys = ['accuracy', 'kappa', 'mcc', 'macro_f1', 'balanced_accuracy', 'f1_W', 'f1_N1', 'f1_N2', 'f1_N3', 'f1_R']
+    rows = []
+    for stager in ra.index:
+        model = ACL.MODEL_KEY[stager]
+        if model not in pooled.index:
+            lines.append(f'- {stager}: MISSING from tool 3bis\'s pooled table')
+            continue
+        res, left_out = _scored_like_3bis(ref, stager)
+        diff = np.nanmax([abs(res[k] - pooled.loc[model, k]) for k in keys])
+        for sid in sorted(ref.loc[ref['stager'] == stager, 'subject'].unique()):
+            night = nights[(nights['model'] == model) & (nights['file_id'] == sid)]
+            if len(night):
+                res_n, _ = _scored_like_3bis(ref, stager, sid)
+                diff = max(diff, np.nanmax([abs(res_n[k] - night[k].iloc[0]) for k in keys]))
+        rows.append({'model': stager, 'Score_EDF accuracy': ra.loc[stager, 'accuracy'],
+                     'Score_EDF kappa': ra.loc[stager, 'kappa_pooled'], '3bis accuracy': pooled.loc[model, 'accuracy'],
+                     '3bis kappa': pooled.loc[model, 'kappa'], 'not predicted': left_out,
+                     'max |diff| scored like 3bis': f'{diff:.1e}' + (' (stages differ: intended)'
+                                                                     if stager in expect_close else '')})
+    lines.append('Metrics (an epoch not predicted: a disagreement for Score_EDF, left out by tool 3bis; "scored like '
+                 '3bis" = Score_EDF\'s epochs through autoscoring_lib.agreement_metrics against tool 3bis\'s pooled and '
+                 'per-night tables, which keep 4 decimals):')
+    lines.append('```\n' + pd.DataFrame(rows).round(4).to_string(index=False) + '\n```')
 
 
 def compare_tail(lines):
@@ -449,12 +512,12 @@ def compare_tail(lines):
 
 def compare():
     lines = ['# Score_EDF vs tool 3bis', f'({time.strftime("%Y-%m-%d %H:%M")}, autoscore environment)']
-    compare_tables(ROOT / 'sim' / 'score_edf' / 'autoscore_outputs', ROOT / 'sim' / 'study' / 'autoscore_outputs_strict',
+    compare_tables(ROOT / 'sim' / 'score_edf' / 'autoscore_outputs', ROOT / 'sim' / 'study' / 'comparison_strict',
                    'Simulated nights, Score_EDF settings (N3 fixed in the recalibrations): must be identical', lines)
-    compare_tables(ROOT / 'sim' / 'score_edf' / 'autoscore_outputs', ROOT / 'sim' / 'study' / 'autoscore_outputs',
+    compare_tables(ROOT / 'sim' / 'score_edf' / 'autoscore_outputs', ROOT / 'sim' / 'study',
                    'Simulated nights, tool 3bis defaults (N3 fitted in the recalibrations, plan 2.7)', lines,
                    expect_close=('SleepFM recal A', 'SleepFM recal B'))
-    compare_tables(ROOT / 'real' / 'score_edf' / 'autoscore_outputs', ROOT / 'real' / 'study' / 'autoscore_outputs',
+    compare_tables(ROOT / 'real' / 'score_edf' / 'autoscore_outputs', ROOT / 'real' / 'study',
                    'Night 100 (no F4; 30-min SleepFM tail context, plan 3.2)', lines, expect_close=('SleepFM',))
     compare_tail(lines)
     text = '\n'.join(lines)

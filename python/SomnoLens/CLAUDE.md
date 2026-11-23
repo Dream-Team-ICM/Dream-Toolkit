@@ -441,6 +441,8 @@ The "what to do / what not to break" reminders, grouped by theme. Each points to
   ```powershell
   & "$env:LOCALAPPDATA\miniforge3\envs\somnolens\python.exe" tools/my_script.py
   ```
+  Here `somnolens` is made from `environment-dev.yml` (the tests need it). numpy runs on OpenBLAS and torch comes
+  from PyPI: MKL 2026 crashes numpy on Windows (SPEC *Conda environment → Windows gotchas*).
 - **Editing large notebooks**: `Read`/`Edit`/`NotebookEdit` are blocked or size-capped on big `.ipynb`
   files: use the **rename-to-`.txt`** method (and the JSON-surgery fallback) in SPEC.md →
   *Repository structure → Editing the larger notebooks*.
@@ -455,8 +457,11 @@ The "what to do / what not to break" reminders, grouped by theme. Each points to
   confirmation. **Stage the plan with `git add` as soon as it is written** (the user commits it, then its later
   versions), so it stays in the git history. Delete the plan file when the task is done and confirmed (staged
   as its own deletion commit): it can always be recovered from the history.
-- **Keep docs in sync (details go to SPEC.md, not CLAUDE.md)**: add any directly-imported package to
-  `environment.yml` (conda-forge if available, else pip). Put the *details* of any design decision (offsets,
+- **Keep docs in sync (details go to SPEC.md, not CLAUDE.md)**: add any directly-imported package to the
+  **three environment files** with the same pin (`environment.yml` light ⊂ `environment-full.yml` ⊂
+  `environment-dev.yml`; an autoscoring package to full + dev only), conda-forge if available, else pip:
+  `tests/test_environment_files.py` checks it. Versions are pinned and refreshed only between two studies (SPEC
+  *Conda environment*). Put the *details* of any design decision (offsets,
   thresholds, widget names, defaults, output files) in **SPEC.md** (the *Cross-cutting procedures* section
   or the relevant tool section) and **propose** those SPEC edits for confirmation. Only update **CLAUDE.md**
   when a *cross-cutting rule* or a *sync constraint* changes, and then only as a short reminder + pointer to

@@ -51,14 +51,19 @@ The tools run in a [conda](https://conda-forge.org/) environment named `somnolen
 Windows, with screenshots, is `tutorials/1_install_python.docx`. In short:
 
 1. Install [Miniforge](https://conda-forge.org/download/).
-2. From this folder, create the environment:
+2. From this folder, create the environment, light or full:
    ```bash
-   conda env create -f environment.yml
+   conda env create -n somnolens -f environment.yml         # light (about 1.3 GB)
+   conda env create -n somnolens -f environment-full.yml    # full (about 2 GB)
    ```
 
-Today this single environment holds every tool, automatic scoring included (about 4.7 GB).
-**Planned**: a **light** installation (every tool except automatic scoring: no PyTorch, GSSC or SleepFM
-packages) and a **full** one (light + the tool-3bis models).
+- **Light**: every tool. Automatic scoring (tool 3bis) runs with YASA alone.
+- **Full**: light + the two other scoring models of tool 3bis, GSSC and SleepFM (they need PyTorch). A light
+  environment becomes full with `conda env update -n somnolens -f environment-full.yml`.
+- `environment-dev.yml` (full + the test suite) is for developers.
+
+The package versions are pinned and refreshed deliberately, between two studies: a study is processed from start to
+end with the same versions.
 
 SleepFM's model files (about 29 MB) are not part of the environment: tool 3bis downloads them from the official
 repository the first time, and checks them.
@@ -105,7 +110,6 @@ or by hand (`3bis_export_edf_manually_Profusion.docx`, not recommended).
 ## Planned
 
 - **More feature tools** after tool 9, on the same skeleton: sleep microstructure such as spindles and slow waves.
-- **Light / full installation** (see above), with deliberately refreshed package versions.
 - **Easier distribution**: a dedicated repository, an installable package with a menu of the tools, a one-click
   Windows installation.
 - **Tool 1** inferring the organisation of the database (groups, nights, missing companion files).
@@ -120,11 +124,11 @@ or by hand (`3bis_export_edf_manually_Profusion.docx`, not recommended).
 - `TESTS.md`: what the test suite checks, in plain words.
 - `CLAUDE.md`: the development rules.
 
-For developers, the tests (`tests/`, pytest) drive the apps headlessly:
-`python -m pytest -m quick` (about 2 minutes), see `SPEC.md`, *How to run → Tests*.
+For developers, the tests (`tests/`, pytest, in an environment made from `environment-dev.yml`) drive the apps
+headlessly: `python -m pytest -m quick` (about 2 minutes), see `SPEC.md`, *How to run → Tests*.
 
 ## Licence
 
 To be confirmed. The automatic scoring models have their own terms: **GSSC** is under AGPL-3.0 (a separate
-package, installed from PyPI by the environment), **SleepFM**'s code and weights under CC BY-NC 4.0
+package, installed from PyPI by the full environment), **SleepFM**'s code and weights under CC BY-NC 4.0
 (non-commercial use; downloaded from its official repository, not redistributed here).

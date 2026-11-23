@@ -231,6 +231,7 @@ def write_config(study, ids):
 def test_tool3bis_on_brainvision_recordings(tmp_path):
     """GSSC and YASA on two recordings: C3-M2, C4-M1 on TP10 / TP9, IO referenced like the EEG, the noisy C3 of the first
     recording said, nothing to say on the second (its parameters file has no check key)."""
+    pytest.importorskip('gssc')                       # the full installation only (environment-full.yml)
     recording(tmp_path, 'bv01', duration_s=1800, seed=1, scale={'C3': 10})
     recording(tmp_path, 'bv02', duration_s=1800, seed=2)
     for pid in ('bv01', 'bv02'):
@@ -269,6 +270,7 @@ def test_tool3bis_on_brainvision_recordings(tmp_path):
 def test_tool3bis_scores_a_same_signal_the_same_in_edf_and_in_brainvision(tmp_path):
     """One synthetic night as EDF and as BrainVision (no [Comment]: nothing to recreate, the EOG used as recorded): the same
     GSSC hypnodensity, to the float32 precision of the BrainVision file."""
+    pytest.importorskip('gssc')                       # the full installation only (environment-full.yml)
     pid = minidb.PARTICIPANTS['synthetic'][0]
     edf_study = minidb.build(tmp_path / 'edf', 'synthetic')
     for other in minidb.PARTICIPANTS['synthetic'][1:]:
