@@ -3935,11 +3935,10 @@ first release, whatever the distribution route; re-run the tests of every tool t
   names, study names and night numbers in SPEC's validation notes).
 - **Links outside the folder**, broken by a split: `README.md` → `../../README.md` (Dream-Toolkit), SPEC's
   `python/Score_EDF/…` references.
-- **`tutorials/1_install_python.docx`**: its SSL workaround turns certificate checks off (`conda config --set
-  ssl_verify no`); use `conda config --set ssl_verify truststore` (the system's certificates, what works on ICM's
-  network) and put network-specific advice in a clearly marked "behind an institutional proxy" note. It also cites
-  an internal IT document (DSI `migration-to-miniforge.pdf`) and an author / date line. The light / full install
-  goes in at the same time (*Conda environment*: its three commands).
+- **`tutorials/1_install_python.docx`**: it cites an internal IT document (DSI `migration-to-miniforge.pdf`) and an
+  author / date line. (Done on 2026-11-23: the SSL workaround uses `ssl_verify truststore` in a note for institutional
+  networks, the light / full install and the fallback to the light one are in, the stale Jupyter / Spyder passages
+  are gone.)
 - **A `LICENSE` file** in the folder (today only on GitHub), once the licence is settled (*Distribution and
   licensing*).
 - **Only what git tracks is distributed**: the folder also holds untracked files that must never leave the lab
