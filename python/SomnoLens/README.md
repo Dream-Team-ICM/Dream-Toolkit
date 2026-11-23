@@ -97,6 +97,11 @@ my_study/                      <- pick this folder in every tool
 └── reports_<step>/            <- one HTML report folder per tool
 ```
 
+Each tool remembers the study folders you picked: under the folder picker, **Recent studies** gives them back in one
+click (the list belongs to your Windows account and stays on this PC). For a study far from the toolkit, copy its path
+from the Windows Explorer address bar and paste it in **Or paste a path**: it also reaches a network share
+(`\\server\share\...`) that is not mapped to a drive letter.
+
 Keep the study path short: Windows limits paths to 260 characters.
 
 To run the analyses with other parameters and keep what exists, tick **New version** in tool 7: it writes

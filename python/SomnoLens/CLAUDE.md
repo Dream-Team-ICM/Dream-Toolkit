@@ -212,7 +212,9 @@ The "what to do / what not to break" reminders, grouped by theme. Each points to
   / `help_html` / `text_block` (a long widget text needs one: a widget HTML spaces wrapped lines by 28 px),
   progress bars, suffix menus (`suffix_menu`: the field stays what the tool reads), the **Inputs found** list
   (`input_row`: the study folder is the only picker to use, the tool finds the rest, **the picker stays what the run
-  reads**), the **Advanced** box (`advanced_box`). **No button that only reveals widgets**: a section builds itself after the step it
+  reads**), the **Advanced** box (`advanced_box`), the **Recent studies** row under every study folder picker but 1bis's
+  (`recent_studies_row` + `SF.remember_study` first in the picker's callback; the list is the user's, tests set it `off`).
+  **No button that only reveals widgets**: a section builds itself after the step it
   needs (`waiting_html` until then). A new page or widget follows it; `tests/test_ui_lib.py` guards the pages.
   → SPEC *Cross-cutting → Voila page conventions*.
 

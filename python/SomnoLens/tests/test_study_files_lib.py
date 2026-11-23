@@ -341,3 +341,41 @@ def test_a_record_is_out_of_date_only_when_both_sides_have_a_fingerprint():
     assert not SF.preproc_changed('abc', 'abc')
     assert not SF.preproc_changed('', 'def')
     assert not SF.preproc_changed('abc', '')
+
+
+# ---------------------------------------------------------------------------------------------------------
+# Recent studies: the file of the user, never the user's own in a test (SOMNOLENS_RECENT_STUDIES)
+# ---------------------------------------------------------------------------------------------------------
+def test_a_picked_study_goes_on_top_once_and_the_list_keeps_eight(tmp_path, monkeypatch):
+    listed = tmp_path / 'user' / 'recent_studies.json'
+    monkeypatch.setenv(SF.RECENT_STUDIES_ENV, str(listed))
+    assert SF.recent_studies_file() == listed and SF.recent_studies() == ([], None)    # no file yet
+    folders = [tmp_path / f'study{i}' for i in range(10)]
+    for i, folder in enumerate(folders):
+        assert SF.remember_study(folder, str(i)) is None
+    studies, warn = SF.recent_studies()
+    assert warn is None and len(studies) == SF.RECENT_STUDIES_MAX
+    assert [Path(s['path']) for s in studies] == folders[::-1][:SF.RECENT_STUDIES_MAX]   # the most recent first
+    assert studies[0]['tool'] == '9' and len(studies[0]['last_used']) == len('2026-11-23 10:00')
+    same = str(folders[5]).upper().replace(os.sep, '/') + '/'          # the same folder, written otherwise (Windows)
+    SF.remember_study(same if os.name == 'nt' else folders[5], '7')
+    studies, _ = SF.recent_studies()
+    assert len(studies) == SF.RECENT_STUDIES_MAX and studies[0]['tool'] == '7'
+    assert [os.path.normcase(s['path']) for s in studies].count(os.path.normcase(str(folders[5]))) == 1
+    assert SF.remember_study(None, '7') is None and SF.recent_studies()[0] == studies   # no folder: nothing changes
+
+
+def test_an_unreadable_list_is_never_overwritten_and_off_remembers_nothing(tmp_path, monkeypatch):
+    listed = tmp_path / 'recent_studies.json'
+    listed.write_text('{not json', encoding='utf-8')
+    monkeypatch.setenv(SF.RECENT_STUDIES_ENV, str(listed))
+    studies, warn = SF.recent_studies()
+    assert studies == [] and 'unreadable' in warn
+    assert 'not updated' in SF.remember_study(tmp_path, '7')
+    assert listed.read_text(encoding='utf-8') == '{not json'
+    monkeypatch.setenv(SF.RECENT_STUDIES_ENV, 'off')
+    assert SF.recent_studies_file() is None and SF.recent_studies() == ([], None)
+    assert SF.remember_study(tmp_path, '7') is None and not (tmp_path / 'off').exists()
+    monkeypatch.delenv(SF.RECENT_STUDIES_ENV)
+    monkeypatch.setenv('LOCALAPPDATA', str(tmp_path / 'appdata'))        # the default place, never the user's in a test
+    assert SF.recent_studies_file() == tmp_path / 'appdata' / 'DreamToolkit' / 'recent_studies.json'

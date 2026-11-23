@@ -1,8 +1,11 @@
 # Plan: remember the study folders (a *Recent studies* menu and a pasted path)
 
-Status: **draft (2026-11-20)**, waiting for confirmation. Not started: phase 2 of `tools/plan_bandpass_and_envs.md` is
-running its tests on the notebooks and the `somnolens` environment is being rebuilt, so this plan touches nothing before
-that work is over (never edit files a running test suite executes).
+Status: **confirmed (2026-11-23), phases 1 to 3 written**, the tests of the libraries, the page guard and tool 9's page
+pass; the wider test level to choose. Two changes while writing it:
+- the row sits **under** the study folder's picker, not above: the picker's title *Study folder* heads the choice, the
+  menu and the paste field come as its shortcuts, then *Inputs found*;
+- the tests switch the list off with `SOMNOLENS_RECENT_STUDIES=off`, not an empty value: Windows drops an empty
+  variable from the environment of a child process started without an explicit environment (checked).
 
 ## 1. The need
 
