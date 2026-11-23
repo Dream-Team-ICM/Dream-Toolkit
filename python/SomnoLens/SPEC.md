@@ -3586,7 +3586,7 @@ a section below. Update this list when an item is done.
 1. *Slow-wave and spindle extraction*. The licence waits for it.
 2. Features: *Database organisation inferred by tool 1*, *Tool 6: keep a raw run and a prepared run side by side*,
    *Tool 2: richer context channels*, *Tool 3bis: follow-ups of the Score_EDF port*, *Standalone comparison of
-   hypnograms*, *Simulated recording generator in tool 0*, *Task triggers*. *Recordings exported with derived channels*
+   hypnograms*, *Methods text for a paper*, *Simulated recording generator in tool 0*, *Task triggers*. *Recordings exported with derived channels*
    before the first study that has some (one case is silently wrong in tool 3bis).
 3. Between larger jobs: *Flat epochs in the comparison with the median channel*, *English everywhere*, *Tools 1 to 4:
    one code cell per section*, *Voila pages: a Stop button and numbered report folders*.
@@ -3912,6 +3912,22 @@ custom and unscored epochs count; hypnograms of different lengths or start times
 starts from; whether the rescorer sees who gave which stage (blind adjudication or not); several nights (database
 tables and figures, the group statistics); whether Section 4 of tool 3bis ends up sharing these metrics when its
 outputs are harmonised.
+
+### Methods text for a paper (TODO, asked on 2026-11-23)
+
+User request, during `tools/plan_3bis_comparison.md`. A notebook (or another form, to think about) that gathers, for a
+study, the essential points to write in a paper's methods section, from what the tools already record: the params
+sidecars and `_scoring_params.json` (filters and their phase, notch, epoch length, rejection methods and thresholds,
+reference, models, their versions and channels), the decision rules (tool 8bis's channel and epoch percentages, tool 8's
+manual review), the participant exclusions and their reasons (`participant_exclusions.tsv`), the counts (participants,
+nights, epochs kept and rejected per stage), tool 5's conventions (lights source, MT and custom stages), tool 9's spectral
+settings (PSD method, bands, specparam model), tool 3bis's agreement conventions (macro-F1 over the stages the expert
+scored, single-stage nights, pooled and per-night metrics) and the package versions of the environment, with the
+references to cite.
+
+To decide: which tools and which values; a list of values or drafted sentences to adapt; one page for the whole study or
+a section in each tool's database report; a run whose settings differ between participants (say it, never average it);
+the output format (Markdown or HTML, in English).
 
 ### Event-based epoch rejection (Phase A): **implemented in tool 7**
 

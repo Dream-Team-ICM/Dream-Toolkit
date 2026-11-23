@@ -1,7 +1,11 @@
 # Plan: tool 3bis, more agreement metrics and Section 4 in the SomnoLens layout
 
-Status: **draft (2026-11-23)**, to annotate and confirm. Closes the SPEC item *Tool 3bis: follow-ups of the Score_EDF
-port → Comparison outputs in the SomnoLens layout*.
+Status: **confirmed (2026-11-23)**, D1 to D5 accepted as proposed. Phase 1 written: `refactor_check` on the synthetic
+data gives step 1's former columns identical (new columns and `global_autoscoring_pooled.tsv` added, HTML reports
+changed); `-m "quick or ((tool3bis or tool0) and not full)"`: 362 passed. Phase 2 next. Closes the SPEC item *Tool
+3bis: follow-ups of the Score_EDF port → Comparison outputs in the SomnoLens layout*. Asked at the same time and put in
+SPEC as a TODO (*Methods text for a paper*): a notebook or another tool that extracts the essential points to write
+in a paper's methods section.
 
 ## 1. Decisions (conversation of 2026-11-23)
 
@@ -36,7 +40,7 @@ port → Comparison outputs in the SomnoLens layout*.
 - **Section 4 keeps reproducing Score_EDF's computation** with its settings (CLAUDE.md): only the layout changes, and
   `tests/score_edf_equivalence.py` compares values instead of files.
 
-## 2. To decide (annotate)
+## 2. Decided on 2026-11-23 (all accepted as proposed)
 
 - **D1. Epochs a model did not predict, in Section 4** (no probability over the epoch: the incomplete tail a 30-s model
   drops, a gap). Score_EDF counted them as disagreements in the accuracy and as a sixth class `Unknown` in the kappa.
