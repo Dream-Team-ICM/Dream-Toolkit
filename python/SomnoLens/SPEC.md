@@ -133,6 +133,22 @@ Three files, one environment name, `somnolens` (since 2026-11-20, `tools/plan_ba
   code-visible notebooks). The former single environment weighed 4.6 GB (`mne` metapackage with its 3D / Qt stack,
   Spyder, conda's torch with MKL).
 
+**Why two user installations** (discussed on 2026-11-23, the split kept for now): not the size, since 0.7 GB more
+changes nothing on today's computers. The reasons:
+- **The light one is the fallback when torch does not install.** torch is the fragile dependency on Windows: every
+  environment problem so far came from it (the retired `pytorch` channel, libtorch's DLLs that stopped loading, the
+  rename that broke it, MKL 2026 with llvm-openmp, *Windows gotchas* below). In a single environment, a torch
+  failure would stop every user, even those who never score automatically. With the split, only the full
+  installation is affected: a user whose full install fails installs the light one and has every tool, tool 3bis
+  with YASA.
+- **GSSC (AGPL-3.0) stays an optional install** until the licence is decided (*Distribution and licensing*). Not a
+  full protection: `autoscoring_lib.gssc_combination_logits` reproduces its loop whatever the installation.
+
+The cost is a choice for the user (and GSSC / SleepFM greyed out for whoever took the light one without knowing);
+keeping the three files in step costs nothing (`test_environment_files.py`). Considered and not done for now: the
+full installation as the default of the README and the tutorial (the light one documented as the fallback), or a
+single user file (full) + the dev one.
+
 From the SomnoLens folder (on ICM's network, `CONDA_SSL_VERIFY=truststore` for the command):
 ```powershell
 conda env create -n somnolens -f environment.yml        # light
